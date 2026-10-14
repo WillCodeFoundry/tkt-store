@@ -1,0 +1,41 @@
+# AGENTS.md
+
+Rules for agents (and humans) working on this repository.
+
+Read `docs/design.md` first. It is the authority on concepts, boundaries and
+invariants. If code and design disagree, one of them is wrong: fix it, or amend
+the design in the same change. Never deviate silently.
+
+## Boundaries (enforced by `tests/unit/test_architecture.py`)
+
+Dependencies point **inward only**: `domain` ← `application` ← `infrastructure`,
+`cli` ← `application`, and `__init__` (the composition root) wires them together.
+
+- `domain/*` is **pure**: no IO, no git, no clock reads, no randomness. It imports
+  only from within `domain`.
+- `application/*` imports `domain` and `application` only. It defines the ports
+  (`Store`, `Clock`, `IdSource`); it must not import `infrastructure`.
+- `infrastructure/*` implements the ports. Only modules under `infrastructure/git/`
+  run `git`; only `infrastructure/clock.py` reads time; only `infrastructure/ids.py`
+  creates random values.
+- `cli` talks to `application` and the composition root, never to `infrastructure`.
+- The transaction loop depends on the `Store` port, never on a concrete store.
+- Choosing concrete implementations happens in exactly one place: `tkt_store.open_store`
+  (in `__init__`).
+
+## Testing
+
+- Use dependency injection with fakes (`MemStore`, `FakeClock`, a fixed id source).
+  Do not `monkeypatch` or `mock.patch` internals.
+- Any change to store behaviour must be expressed in `tests/contract/` so both
+  stores keep identical semantics.
+- Race and crash behaviour is tested against real git (`tests/integration/`).
+
+## Format changes
+
+Any change to the on-branch format bumps `PROTOCOL_VERSION` in
+`infrastructure/git/wire.py` and updates `docs/format.md` in the same change.
+
+## Before committing
+
+`pre-commit run --all-files` and `pytest` must pass. Never use `--no-verify`.

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tkt-store"
+version = "0.0.0"
+description = "A git-backed ticket store for coordinating AI agents: atomic claims, leases, audit log."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []  # stdlib only; requires the `git` binary at runtime
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.6", "mypy>=1.10", "pre-commit>=3"]
+
+[project.scripts]
+tkt = "tkt_store.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tkt_store"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "git: needs a real git binary (integration, contract against GitStore)",
+  "slow: property tests and race tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+packages = ["tkt_store"]

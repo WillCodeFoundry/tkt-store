@@ -1,0 +1,119 @@
+"""The value types: tickets, claims, and the identities that name them.
+
+PURE module. No IO, no git, no clock reads, no randomness. The only thing it
+imports from the package is `errors`; everything else is the standard library.
+Status is NOT here — it is derived in `domain.status`.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any, NewType
+
+TicketId = NewType("TicketId", str)
+AgentId = NewType("AgentId", str)
+ClaimId = NewType("ClaimId", str)
+ProjectId = NewType("ProjectId", str)
+
+Revision = NewType("Revision", str)
+"""An opaque handle to one committed state of the store.
+
+Backed by a git commit id today, but callers treat it as an opaque token: the
+only thing anyone does with a Revision is read it from a snapshot and hand it
+back as the `base` of a commit (compare-and-swap). Never parsed, never ordered.
+"""
+
+Timestamp = int
+"""Unix seconds. Always produced by an injected clock, never read in this layer."""
+
+Duration = int
+"""A length of time in whole seconds (e.g. a lease TTL). Non-negative."""
+
+
+class Kind(StrEnum):
+    STORY = "story"
+    TASK = "task"
+    BUG = "bug"
+
+
+class Stage(StrEnum):
+    """Where a ticket sits in its lifecycle. A single stored field (ADR 0004).
+
+    The non-terminal values are the workflow vocabulary — the phases a ticket is
+    handed through. They carry no forced order: a holder may move a ticket to any
+    of them (forward, or back to `DEVELOPMENT` for rework). The two terminal
+    values are a one-way latch: a terminal ticket is finished and leaves the
+    workable pool for good.
+    """
+
+    # workflow (non-terminal)
+    DEVELOPMENT = "development"  # the initial stage of a new ticket
+    REVIEW = "review"
+    QA = "qa"
+    # terminal
+    DONE = "done"  # completed by its holder
+    CANCELLED = "cancelled"  # abandoned (an administrative act)
+
+
+TERMINAL: frozenset[Stage] = frozenset({Stage.DONE, Stage.CANCELLED})
+"""The finished stages. `stage in TERMINAL` is the finality latch."""
+
+
+@dataclass(frozen=True)
+class Claim:
+    """An exclusive, time-limited hold on a ticket (ADR 0003)."""
+
+    agent: AgentId
+    claim_id: ClaimId
+    lease_until: Timestamp
+
+    def is_live(self, now: Timestamp) -> bool:
+        """True while the lease has not expired."""
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class Ticket:
+    """One unit of work. Mirrors tickets/<id>.json (docs/format.md)."""
+
+    id: TicketId
+    title: str
+    created: Timestamp
+    updated: Timestamp
+    body: str = ""
+    kind: Kind = Kind.TASK
+    project: ProjectId | None = None
+    priority: int | None = None
+    blocked_by: tuple[TicketId, ...] = ()
+    tags: tuple[str, ...] = ()
+    claim: Claim | None = None
+    stage: Stage = Stage.DEVELOPMENT
+    extra: Mapping[str, Any] = field(default_factory=dict)
+    """Unknown keys from the file, preserved verbatim on write-back."""
+
+    @property
+    def is_terminal(self) -> bool:
+        """True once the ticket is done or cancelled (the finality latch)."""
+        return self.stage in TERMINAL
+
+    @property
+    def is_done(self) -> bool:
+        """True only when completed. A cancelled ticket is terminal but not done,
+        so it does NOT satisfy a dependency (invariant 10)."""
+        return self.stage is Stage.DONE
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """An immutable view of the store at one revision.
+
+    `base` is None only for an unborn store (before `init`).
+    """
+
+    base: Revision | None
+    tickets: Mapping[TicketId, Ticket]
+
+    def get(self, ticket_id: TicketId) -> Ticket | None:
+        return self.tickets.get(ticket_id)

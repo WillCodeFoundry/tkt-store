@@ -59,8 +59,11 @@ The package is organised in layers, with dependencies pointing inward only
 
 ## Development
 
+This project uses [uv](https://docs.astral.sh/uv/) for environments,
+dependencies and running tools. Do not use `pip`.
+
 ```sh
-pip install -e '.[dev]'
-pre-commit install
-pytest
+uv sync                       # create .venv with the dev dependency group
+uv run pre-commit install
+uv run pytest
 ```

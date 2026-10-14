@@ -36,6 +36,11 @@ Dependencies point **inward only**: `domain` ← `application` ← `infrastructu
 Any change to the on-branch format bumps `PROTOCOL_VERSION` in
 `infrastructure/git/wire.py` and updates `docs/format.md` in the same change.
 
+## Tooling
+
+Use `uv` for everything: `uv sync` to set up, `uv add` / `uv add --dev` to change
+dependencies, `uv run <tool>` to run tools. Never use `pip` or `pip install`.
+
 ## Before committing
 
-`pre-commit run --all-files` and `pytest` must pass. Never use `--no-verify`.
+`uv run pre-commit run --all-files` and `uv run pytest` must pass. Never use `--no-verify`.

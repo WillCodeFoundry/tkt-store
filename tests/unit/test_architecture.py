@@ -78,27 +78,51 @@ def _import_layer(internal_parts: tuple[str, ...]) -> str:
     return ROOT  # factory, or a top-level re-export
 
 
-def _imports(path: Path) -> tuple[list[tuple[str, ...]], set[str]]:
-    """Return (internal dotted paths after the package, top-level external module names)."""
-    tree = ast.parse(path.read_text(), filename=str(path))
+def _imports(source: str, rel_parts: tuple[str, ...]) -> tuple[list[tuple[str, ...]], set[str]]:
+    """Return (internal dotted paths after the package, top-level external module names).
+
+    Resolves relative imports against the module's package, and treats each name in
+    `from tkt_store import X` as a target of its own (a submodule or a root re-export).
+    """
+    tree = ast.parse(source)
     internal: list[tuple[str, ...]] = []
     external: set[str] = set()
+    package = rel_parts[:-1]  # the package a module's relative imports start from
     for node in ast.walk(tree):
-        names: list[str] = []
         if isinstance(node, ast.Import):
-            names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            names = [node.module]
-        for name in names:
-            if name == "__future__":
-                continue
-            parts = name.split(".")
-            if parts[0] == PACKAGE:
-                if len(parts) > 1:
-                    internal.append(tuple(parts[1:]))
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if parts[0] == PACKAGE:
+                    internal.append(tuple(parts[1:]) or ("__init__",))
+                else:
+                    external.add(parts[0])
+        elif isinstance(node, ast.ImportFrom):
+            module = tuple(node.module.split(".")) if node.module else ()
+            if node.level == 0:
+                if module[0] == "__future__":
+                    continue
+                if module[0] != PACKAGE:
+                    external.add(module[0])
+                    continue
+                base = module[1:]
             else:
-                external.add(parts[0])
+                up = node.level - 1
+                assert up <= len(package), f"relative import escapes the package: {rel_parts}"
+                base = package[: len(package) - up] + module
+            if node.module and base:
+                internal.append(base)
+            else:  # `from <package> import X`: each X is a submodule or a re-export
+                internal.extend((*base, alias.name) for alias in node.names)
     return internal, external
+
+
+def _violations(layer: str, internal: list[tuple[str, ...]]) -> list[str]:
+    allowed = ALLOWED_INWARD[layer]
+    return [
+        f"imports {'.'.join(parts)} ({target}); allowed: {sorted(allowed)}"
+        for parts in internal
+        if (target := _import_layer(parts)) not in allowed
+    ]
 
 
 def _modules() -> dict[str, tuple[str, tuple[str, ...], list[tuple[str, ...]], set[str]]]:
@@ -107,7 +131,7 @@ def _modules() -> dict[str, tuple[str, tuple[str, ...], list[tuple[str, ...]], s
     for p in SRC.rglob("*.py"):
         rel_parts = p.relative_to(SRC).parts
         name = "/".join(rel_parts)
-        internal, external = _imports(p)
+        internal, external = _imports(p.read_text(), rel_parts)
         out[name] = (_layer_of(rel_parts), rel_parts, internal, external)
     return out
 
@@ -122,12 +146,31 @@ def test_package_found() -> None:
 @pytest.mark.parametrize("name", sorted(MODULES))
 def test_inward_only_dependencies(name: str) -> None:
     layer, _, internal, _ = MODULES[name]
-    allowed = ALLOWED_INWARD[layer]
-    for parts in internal:
-        target = _import_layer(parts)
-        assert target in allowed, (
-            f"{name} ({layer}) imports {'.'.join(parts)} ({target}); allowed: {sorted(allowed)}"
-        )
+    assert not _violations(layer, internal), f"{name} ({layer}): {_violations(layer, internal)}"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from ..infrastructure import memory",
+        "from ..infrastructure.memory import MemStore",
+        "from .. import open_store",
+        "from tkt_store import GitStore",
+        "from tkt_store import infrastructure",
+        "import tkt_store",
+    ],
+)
+def test_classifier_catches_indirect_outward_imports(source: str) -> None:
+    """Regression: relative and package-root imports used to escape the checks."""
+    rel_parts = (DOMAIN, "synthetic.py")
+    internal, _ = _imports(source, rel_parts)
+    assert _violations(_layer_of(rel_parts), internal), f"not caught: {source}"
+
+
+def test_classifier_allows_relative_imports_within_a_layer() -> None:
+    internal, _ = _imports("from .ticket import Ticket\nfrom . import status", (DOMAIN, "x.py"))
+    assert internal == [(DOMAIN, "ticket"), (DOMAIN, "status")]
+    assert not _violations(DOMAIN, internal)
 
 
 @pytest.mark.parametrize("name", sorted(MODULES))

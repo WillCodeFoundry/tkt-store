@@ -31,6 +31,11 @@ Timestamp = int
 Duration = int
 """A length of time in whole seconds (e.g. a lease TTL). Non-negative."""
 
+SKEW_GRACE: Duration = 60
+"""Seconds past `lease_until` before a lapsed claim may be ACTED on (taken over or
+reaped). Absorbs clock skew between writers so a fast-clocked writer cannot take a
+claim its holder still considers live. A fixed v1 constant, not per-store."""
+
 
 class Kind(StrEnum):
     STORY = "story"
@@ -63,14 +68,25 @@ TERMINAL: frozenset[Stage] = frozenset({Stage.DONE, Stage.CANCELLED})
 
 @dataclass(frozen=True)
 class Claim:
-    """An exclusive, time-limited hold on a ticket (ADR 0003)."""
+    """An exclusive, time-limited hold on a ticket (ADR 0003).
+
+    The lease is advisory; the `claim_id` is authoritative (fencing). A lapsed
+    claim may still be renewed, released or completed by its holder until someone
+    takes it over or reaps it.
+    """
 
     agent: AgentId
     claim_id: ClaimId
     lease_until: Timestamp
 
     def is_live(self, now: Timestamp) -> bool:
-        """True while the lease has not expired."""
+        """True while the lease has not expired (now < lease_until)."""
+        raise NotImplementedError
+
+    def is_takeable(self, now: Timestamp) -> bool:
+        """True once the claim may be acted on as expired — taken over or reaped:
+        now >= lease_until + SKEW_GRACE. Display (Status.EXPIRED) starts earlier, at
+        lease_until."""
         raise NotImplementedError
 
 
@@ -90,6 +106,9 @@ class Ticket:
     tags: tuple[str, ...] = ()
     claim: Claim | None = None
     stage: Stage = Stage.DEVELOPMENT
+    closed_by: ClaimId | None = None
+    """The claim that completed the ticket; set only when stage is DONE. Keeps `done`
+    fenced after completion (a repeat is a NoOp only for this claim id)."""
     extra: Mapping[str, Any] = field(default_factory=dict)
     """Unknown keys from the file, preserved verbatim on write-back."""
 

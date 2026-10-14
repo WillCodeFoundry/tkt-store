@@ -9,7 +9,7 @@ the design in the same change. Never deviate silently.
 ## Boundaries (enforced by `tests/unit/test_architecture.py`)
 
 Dependencies point **inward only**: `domain` ← `application` ← `infrastructure`,
-`cli` ← `application`, and `__init__` (the composition root) wires them together.
+`domain` ← `application` ← `cli`, and `__init__` (the composition root) wires them together.
 
 - `domain/*` is **pure**: no IO, no git, no clock reads, no randomness. It imports
   only from within `domain`.
@@ -18,7 +18,8 @@ Dependencies point **inward only**: `domain` ← `application` ← `infrastructu
 - `infrastructure/*` implements the ports. Only modules under `infrastructure/git/`
   run `git`; only `infrastructure/clock.py` reads time; only `infrastructure/ids.py`
   creates random values.
-- `cli` talks to `application` and the composition root, never to `infrastructure`.
+- `cli` imports `application` (and `domain` types) + the `open_store` composition root
+  (`__init__`); never `infrastructure`.
 - The transaction loop depends on the `Store` port, never on a concrete store.
 - Choosing concrete implementations happens in exactly one place: `tkt_store.open_store`
   (in `__init__`).
@@ -35,6 +36,8 @@ Dependencies point **inward only**: `domain` ← `application` ← `infrastructu
 
 Any change to the on-branch format bumps `PROTOCOL_VERSION` in
 `infrastructure/git/wire.py` and updates `docs/format.md` in the same change.
+Exception: pre-1.0 format additions that no deployed store relies on may keep
+`PROTOCOL_VERSION` when documented in `docs/format.md`.
 
 ## Tooling
 

@@ -4,8 +4,8 @@
 
 ## Context
 
-Agents and a coordinator need a shared, durable, auditable record of tickets and
-claims, with atomic updates, and without running a database server.
+Agents need a shared, durable, auditable record of tickets and claims, with atomic
+updates, and without running a database server.
 
 ## Decision
 

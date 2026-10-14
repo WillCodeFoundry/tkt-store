@@ -1,7 +1,7 @@
 """An in-memory Store with the same compare-and-swap semantics as the git store.
 
-Uses: fast unit/property tests, deterministic race injection, the coordinator's
-own tests, and dry runs. Kept honest by tests/contract/test_store.py, which runs
+Uses: fast unit/property tests, deterministic race injection, callers' own
+tests, and dry runs. Kept honest by tests/contract/test_store.py, which runs
 the same contract against this and the git store.
 """
 

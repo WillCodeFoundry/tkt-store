@@ -17,8 +17,10 @@ def fetch(git: GitRunner, remote: str, ref: str) -> Revision | None:
 
 
 def fast_forward_local(git: GitRunner, ref: str, remote_head: Revision) -> None:
-    """Move the local ref to `remote_head` if it is a descendant of the local head.
-    If local is AHEAD (crash after local update, before push), leave it for publish()."""
+    """Move the local ref to `remote_head` if it is a descendant of the local head
+    (local is behind after a crash between push and local update, or after another
+    writer's commits). The local ref only moves after a successful push, so local is
+    never ahead through tkt; a local ref that is ahead or diverged is a StoreError."""
     raise NotImplementedError
 
 

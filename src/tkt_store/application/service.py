@@ -1,4 +1,4 @@
-"""TicketStore: the facade the coordinator and the CLI use.
+"""TicketStore: the facade agents (directly or via the CLI) use.
 
 Mints ids BEFORE transacting (invariant 7), runs ops through the transaction
 loop, and returns its outcomes. Owns no rules of its own beyond that wiring. It

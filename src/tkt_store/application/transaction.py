@@ -53,7 +53,8 @@ def transact(
 ) -> Outcome:
     """Snapshot -> decide -> commit against the snapshot's base; on Conflict, start over.
 
-    - `now` is read once per attempt, so a decision and its timestamps agree.
+    - `now` is read once per attempt, so a decision and its timestamps agree
+      (ticket times and `OpRecord.at`, which the store persists as tkt-time).
     - Refusal and NoOp return immediately; nothing is written.
     - After `max_attempts` conflicts, raise RetriesExhausted. Re-running is safe.
     - StoreError propagates unchanged.

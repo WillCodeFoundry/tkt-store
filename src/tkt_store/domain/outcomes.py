@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from tkt_store.domain.operations import OpName
-from tkt_store.domain.ticket import AgentId, ClaimId, Ticket, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Stage, Ticket, TicketId, Timestamp
 
 
 class RefusalCode(StrEnum):
@@ -50,14 +50,22 @@ Change = WriteTicket
 
 @dataclass(frozen=True)
 class OpRecord:
-    """The audit entry for one applied op, written as commit trailers (docs/format.md)."""
+    """The audit entry for one applied op, written as commit trailers (docs/format.md).
+
+    `at` is the injected `now` the decision was made at (set by the rules), so the
+    audit time is deterministic and needs no clock in the store. Clocks may skew
+    across writers: `at` is informational and never grants exclusivity.
+    `stage` is the new stage on a release that hands off (`tkt-stage`).
+    """
 
     op: OpName
+    at: Timestamp
     ticket_ids: tuple[TicketId, ...] = ()
     agent: AgentId | None = None
     claim_id: ClaimId | None = None
     reason: str = ""
     summary: str = ""
+    stage: Stage | None = None
 
 
 @dataclass(frozen=True)

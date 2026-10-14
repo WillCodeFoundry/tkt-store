@@ -21,6 +21,7 @@ TRAILER_AGENT = "tkt-agent"
 TRAILER_CLAIM = "tkt-claim"
 TRAILER_STAGE = "tkt-stage"
 TRAILER_REASON = "tkt-reason"
+TRAILER_TIME = "tkt-time"
 
 
 def ticket_path(ticket_id: TicketId) -> str:
@@ -40,11 +41,18 @@ def decode_ticket(data: bytes) -> Ticket:
 
 
 def encode_message(record: OpRecord) -> str:
-    """Subject line, blank line, trailers in a fixed order, including tkt-protocol."""
+    """Subject line, blank line, trailers in a fixed order, including tkt-protocol.
+
+    The subject is always emitted on one line (defensively, although the rules
+    already refuse control characters in titles). tkt-time (`record.at`) is always
+    written; tkt-stage only when `record.stage` is set.
+    """
     raise NotImplementedError
 
 
 def decode_message(message: str) -> OpRecord | None:
-    """Parse trailers. Returns None for commits without tkt trailers (foreign commits).
-    Raises StoreError for an unknown future protocol version."""
+    """Parse trailers into an OpRecord, including `at` (tkt-time) and `stage` (tkt-stage).
+    Returns None for commits without tkt trailers (foreign commits).
+    Raises StoreError for an unknown future protocol version, or for a tkt commit
+    missing a mandatory trailer (tkt-op, tkt-time)."""
     raise NotImplementedError

@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator, Sequence
 
 from tkt_store.application.store import HistoryEntry
 from tkt_store.domain.outcomes import Change, OpRecord
-from tkt_store.domain.ticket import Revision, Snapshot, TicketId
+from tkt_store.domain.ticket import Revision, Snapshot, TicketId, Timestamp
 
 
 class MemStore:
@@ -41,6 +41,7 @@ class MemStore:
         ticket_id: TicketId | None = None,
         limit: int | None = None,
     ) -> Iterator[HistoryEntry]:
+        """Same contract as the git store; times come from each `record.at`."""
         raise NotImplementedError
 
     # --- Test controls --------------------------------------------------
@@ -51,9 +52,13 @@ class MemStore:
         self._before_next_commit = hook
 
     def force_advance(
-        self, changes: Sequence[Change] = (), record: OpRecord | None = None
+        self,
+        at: Timestamp,
+        changes: Sequence[Change] = (),
+        record: OpRecord | None = None,
     ) -> Revision:
-        """Append a commit as if another writer landed first (moves the head)."""
+        """Append a commit as if another writer landed first (moves the head).
+        `at` stamps the default record; ignored when `record` is given."""
         raise NotImplementedError
 
     def copy(self) -> MemStore:

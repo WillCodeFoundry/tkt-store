@@ -30,5 +30,5 @@ def test_unchanged_carries_the_tickets_it_concerns() -> None:
     """E.g. a re-run claim: Unchanged.tickets shows the ticket and its claim id."""
 
 
-def test_commit_uses_the_snapshot_base_not_a_fresh_read() -> None:
+def test_commit_uses_the_snapshot_revision_not_a_fresh_read() -> None:
     """Regression guard for the 'wrong old value' bug class (balls bl-cdec G1)."""

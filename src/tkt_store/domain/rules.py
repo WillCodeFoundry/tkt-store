@@ -2,13 +2,13 @@
 
 PURE module. `decide(snapshot, op, now)` is the single entry point. It never
 writes, never reads the clock, never touches git — everything it needs is in
-its arguments. This is where invariants 1, 4, 5, 9 and 10 (docs/design.md §5)
+its arguments. This is where invariants 1, 4, 5, 9, 10, 11 and 12 (docs/design.md §5)
 live. The result is a `Decision` from `domain.outcomes`.
 
 Every `Apply.record` carries `at=now`, the injected time (`OpRecord.at`), and the
-acting `agent` when the op names one. A ticket's content `version` starts at 1 (add)
-and only `update` increments it. The full op x state -> outcome table is in
-docs/design.md §5; the docstrings below summarise it.
+acting `agent` when the op names one. Every ticket an Apply writes gets updated = now;
+its content `version` starts at 1 (add) and only `update` increments it. The full
+op x state -> outcome table is in docs/design.md §5; the docstrings below summarise it.
 """
 
 from __future__ import annotations
@@ -80,7 +80,8 @@ def validate_op(op: Op) -> Refusal | None:
 
 
 def decide_init(snapshot: Snapshot, op: InitOp, now: Timestamp) -> Decision:
-    """Apply an empty tree if snapshot.revision is None; NoOp otherwise."""
+    """Apply an empty tree if snapshot.revision is None; NoOp otherwise. (The git store
+    adds tkt-store.json to the root commit itself; it is not a ticket Change.)"""
     raise NotImplementedError
 
 
@@ -111,9 +112,11 @@ def decide_update(snapshot: Snapshot, op: UpdateOp, now: Timestamp) -> Decision:
 def decide_claim(snapshot: Snapshot, op: ClaimOp, now: Timestamp) -> Decision:
     """In this order:
     NOT_FOUND; TERMINAL;
-    the current claim has op.claim_id: same agent -> NoOp (live or lapsed — it was not
-      taken over; the caller should renew), another agent -> ALREADY_CLAIMED;
-    NOT_HOLDER if op.claim_id equals this ticket's last_claim_id or done_by (an ended
+    this ticket's current claim has op.claim_id: same agent -> NoOp (live or lapsed — it
+      was not taken over; the caller should renew), another agent -> ALREADY_CLAIMED;
+    ALREADY_CLAIMED if op.claim_id is the current claim on another ticket (one claim id
+      names one claim on one ticket);
+    NOT_HOLDER if op.claim_id equals any ticket's last_claim_id or done_by (an ended
       claim's id is fenced and cannot claim again);
     then `status.why_not_claimable` (BLOCKED, ALREADY_CLAIMED; TERMINAL already handled).
     Apply: claim = (agent, claim_id, lease_until = now + ttl, claimed_at = now). Taking
@@ -129,7 +132,8 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
       ALREADY_CLAIMED;
     NOT_HOLDER if op.claim_id equals any ticket's last_claim_id or done_by;
     choose min(sort_key_for_next) among tickets for which `status.claimable` is true and
-      that match the filters (project, kind, stage), then apply as decide_claim;
+      that match the filters (project, kind, stage; a project filter matches that exact
+      value only, never a null project), then apply as decide_claim;
     NOTHING_CLAIMABLE if there is none."""
     raise NotImplementedError
 

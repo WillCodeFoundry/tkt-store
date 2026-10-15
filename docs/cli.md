@@ -22,7 +22,7 @@ Global options:
 | `tkt list` | List tickets (derived status) | `--status`, `--stage`, `--project`, `--agent`, `--kind` |
 | `tkt show ID` | One ticket, with derived status, claim age and its content `version` | |
 | `tkt claim ID` | Claim a ticket; prints the claim id | `--as AGENT` (required), `--ttl DURATION`, `--claim-id CLAIM_ID` |
-| `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT`, `--ttl`, `--claim-id CLAIM_ID`, `--project`, `--kind`, `--stage` |
+| `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT` (required), `--ttl`, `--claim-id CLAIM_ID`, `--project`, `--kind`, `--stage` |
 | `tkt renew ID` | Extend a lease | `--claim-id CLAIM_ID`, `--ttl` |
 | `tkt release ID` | Give a claim back; optionally hand off to another stage | `--claim-id CLAIM_ID`, `--reason`, `--to-stage` |
 | `tkt done ID` | Complete it (terminal `done`) | `--claim-id CLAIM_ID` |
@@ -37,10 +37,12 @@ Notes:
   creating a second ticket or claim. Ticket ids must match `^tkt-[0-9a-f]+$`; claim
   ids are exactly 32 lowercase hex characters. Without them, ids are generated, and a
   failure prints the generated ids so the command can be re-run with them. A claim id
-  is single-use: re-use it only to retry the same claim, never after that claim ended
-  (it is then refused, `NOT_HOLDER`).
+  is single-use and names one claim on one ticket: re-use it only to retry the same
+  claim. After its claim ends it is refused (`NOT_HOLDER`) while the ticket still
+  records it.
 - **Re-runs of holder ops.** Re-running a `release` that landed is a no-op even if
-  someone has claimed the ticket since; `done` likewise. The exact rules are the
+  someone has claimed the ticket since (with `--to-stage`, only while the ticket is still
+  at that stage; otherwise `NOT_HOLDER`). Re-running a landed `done` is a no-op. The exact rules are the
   holder-op table in `docs/design.md` §5.
 - **Actor.** `--as` on `add`, `update` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
@@ -73,14 +75,15 @@ Notes:
 
 ## JSON output
 
-With `--json`, each command prints one JSON value. Every mutation prints an object, and
-`tickets` always lists the affected tickets as they are after the op (empty for `init`):
+With `--json`, each command prints one JSON value. Every mutation prints an object. For
+`committed` and `unchanged`, `tickets` lists the affected tickets as they are after the op
+(empty for `init`); refusals carry a code and message, failures carry the op:
 
 ```json
 {"outcome": "committed", "revision": "a1b2c3…", "tickets": [{…}]}
 {"outcome": "unchanged", "reason": "already done by this claim", "tickets": [{…}]}
 {"outcome": "refused", "code": "ALREADY_CLAIMED", "message": "held by coder-3 until …"}
-{"outcome": "error", "exit": 4, "message": "push failed: …", "op": {"op": "claim", "ticket_id": "tkt-7f3a", "claim_id": "…"}}
+{"outcome": "error", "exit": 4, "message": "push failed: …", "op": {"op": "claim", "ticket_id": "tkt-7f3a91c2", "claim_id": "…"}}
 ```
 
 - An `unchanged` claim or claim-next still shows the claim it holds, so the claim id is

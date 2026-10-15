@@ -2,7 +2,7 @@
 
 No git here — bytes and strings in, domain objects out (and back). Used by the
 git store and by history. Any change to this format bumps PROTOCOL_VERSION and
-updates docs/format.md in the same change.
+updates docs/format.md in the same change (pre-1.0 exception: see AGENTS.md).
 """
 
 from __future__ import annotations
@@ -75,5 +75,5 @@ def decode_message(message: str) -> OpRecord | None:
     """Parse trailers into an OpRecord, including `at` (tkt-time) and `stage` (tkt-stage).
     Returns None for commits without tkt trailers (foreign commits).
     Raises StoreError for an unknown future protocol version, or for a tkt commit
-    missing a mandatory trailer (tkt-op, tkt-time)."""
+    missing a required trailer: tkt-protocol, tkt-op, tkt-time, and tkt-id (except init)."""
     raise NotImplementedError

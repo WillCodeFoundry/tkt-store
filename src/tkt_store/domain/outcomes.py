@@ -21,12 +21,16 @@ class RefusalCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     DUPLICATE_ID = "DUPLICATE_ID"  # add with an existing id but different content
     ALREADY_CLAIMED = "ALREADY_CLAIMED"  # someone else's claim, not yet takeable (live or in grace)
-    NOT_HOLDER = "NOT_HOLDER"  # claim_id does not match the current claim (fencing)
+    NOT_HOLDER = (
+        "NOT_HOLDER"  # fencing: not the current claim, an ended claim id, or done by another
+    )
     NOT_CLAIMED = "NOT_CLAIMED"
     BLOCKED = "BLOCKED"  # a blocker is not yet done
     TERMINAL = "TERMINAL"  # the ticket is already in a terminal stage (done/cancelled)
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
-    INVALID = "INVALID"  # malformed op (empty title, bad ttl, bad blocker, terminal to_stage)
+    # malformed op: bad id, control characters, ttl out of bounds, expected_version < 1,
+    # empty title, unknown/self blocker, dependency cycle, terminal add stage or to_stage
+    INVALID = "INVALID"
     STALE = "STALE"  # update based on an older ticket version; re-read and retry
 
 

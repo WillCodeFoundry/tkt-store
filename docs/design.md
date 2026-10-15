@@ -22,7 +22,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
-| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/release/done must present it; once its claim ends the ticket remembers it (`done_by`, or `last_claim_id`) and it can never claim again. |
+| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/release/done must present it; once its claim ends the ticket remembers it (`done_by`, or `last_claim_id`), and it is fenced: while it is any ticket's `done_by` or `last_claim_id` it cannot claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
 | **Stage** | *Stored* lifecycle position: the workflow phases `development`/`review`/`qa` (no forced order) plus the terminal `done`/`cancelled`. A terminal ticket is never claimable again. |
 | **Status** | *Derived*, never stored — the availability axis: `open`, `blocked`, `claimed`, `expired`, plus `done`/`cancelled` surfaced from a terminal stage. |
 | **Op** | A requested change, carrying the identities it needs (ticket id, and where relevant agent and claim id). |
@@ -93,7 +93,7 @@ Every mutation goes through `application.transaction.transact(store, op, clock)`
 3. if dec is Refusal → return Refused       # nothing written
    if dec is NoOp    → return Unchanged     # idempotent repeat
 4. try store.commit(snap.revision, dec.changes, dec.record)
-       → return Committed(new_revision)
+       → return Committed(revision, record, tickets)
    except Conflict → goto 1 (bounded attempts), rules re-run on fresh state
 ```
 
@@ -112,20 +112,22 @@ never a fresh read (lesson from balls' bl-cdec G1).
    `NOT_HOLDER`, or `NOT_CLAIMED` when there is no claim (exact rules in the table below).
    Fencing survives the end of a claim: a completed ticket records the completing claim
    (`done_by`), and the last claim that ended otherwise is recorded too (`last_claim_id`);
-   neither id can claim again. A holder whose lease lapsed may still renew, release or
+   while an id is recorded there on any ticket it cannot claim again (`NOT_HOLDER`). A holder whose lease lapsed may still renew, release or
    complete until someone takes the claim over or reaps it.
 5. **Idempotence.** Repeating an op whose effect is already present yields `NoOp`, not an error
    (e.g. `done` on a ticket already done by the same claim, a re-run of a landed `release`,
    a re-run of `claim`/`claim-next` with the same claim id and agent, `add` with an id that
-   exists with identical content). Outcomes and failures carry the affected tickets and ids,
-   so a caller can always re-run with the same ids.
+   exists with identical content). Committed and Unchanged outcomes carry the affected
+   tickets, and failures carry the op with its ids, so a caller can always re-run with the
+   same ids.
 6. **Derived status.** No status field is stored; status comes from the stored `stage`
    plus the claim. History comes from the commit trailers. (`stage` itself is stored.)
-7. **Carried identity (A4).** Ops carry the identities they need (ticket id, and where
+7. **Carried identity.** Ops carry the identities they need (ticket id, and where
    relevant agent and claim id). Ticket and claim ids are minted *before* the transaction,
    or supplied by the caller, so retries and re-runs reuse them and converge. **Claim ids
-   are single-use:** re-use one only to retry the same claim attempt. An id is fenced once
-   its claim ends; reuse after two or more later claim cycles is not detected.
+   are single-use:** re-use one only to retry the same claim attempt. A claim id names one
+   claim on one ticket, and it is fenced once its claim ends; reuse after a later claim
+   cycle on that ticket has replaced its `last_claim_id` is not detected.
 8. **Injected time.** Lease checks and audit times (`tkt-time`) use the injected clock.
    Expiry is acted on only by `reap` (or by a claim that takes over a lapsed claim), and
    only from `lease_until + SKEW_GRACE` — never implicitly on read. Audit times are
@@ -135,8 +137,9 @@ never a fresh read (lesson from balls' bl-cdec G1).
    renewed, released, re-staged or reopened, nor created in a terminal stage. `done` is
    reached only by its holder; `cancel` is administrative. The non-terminal stages carry
    no forced order (rework can move back).
-10. **Dependencies gate claims.** A ticket is `blocked` while any `blocked_by` entry is not yet
-    `done`, and cannot be claimed — even if it carries a lapsed claim. A *cancelled* blocker
+10. **Dependencies gate claims.** While any `blocked_by` entry is not yet `done`, a ticket
+    cannot be claimed — even if it carries a lapsed claim — and reads `blocked` unless it
+    is live-claimed. A *cancelled* blocker
     does not satisfy a dependency. Blockers do not gate completion: `update` may add a
     blocker to a claimed ticket without disturbing the claim, and the holder may still
     finish it.
@@ -187,11 +190,11 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 
 | op | refusals (in order) | NoOp | Apply |
 |---|---|---|---|
-| init | — | store exists | empty tree + `tkt-store.json` |
+| init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
 | add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker, terminal stage), `DUPLICATE_ID` | same id and identical AddOp fields (`created`/`updated` not compared) | new ticket |
 | update | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `version + 1` |
-| claim | `NOT_FOUND`, `TERMINAL`; same claim id, other agent → `ALREADY_CLAIMED`; ended claim id → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | current claim has the same id and agent (live or lapsed) | new claim; a takeover fences the old id |
-| claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` | some ticket's current claim has the same id and agent (names it) | as claim, on the most urgent claimable match |
+| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (live or lapsed) | new claim; a takeover fences the old id |
+| claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (names it) | as claim, on the most urgent claimable match |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | `cancelled`, claim cleared |
 | reap | — | no claim past the grace | every claim past the grace cleared, one record |
 
@@ -218,7 +221,8 @@ best-effort. The remote is authoritative; local refs are a cache. A local-only s
 no push: there `update-ref ref new base` is the compare-and-swap, and a moved ref is a
 `Conflict`.
 
-Only `tickets/tkt-<hex>.json` files are read; any other path is preserved and ignored.
+Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
+preserved and ignored.
 The store's format version lives in `tkt-store.json` at the tree root and is checked on
 every snapshot.
 
@@ -267,7 +271,7 @@ fallback.
   normalised remote URL (renames)? Out of scope for the store itself.
 - Q3: Should `claim_next` (pick highest-priority claimable) be an op (atomic choice) — current design — or a read + claim?
 - Q4: Lease units: integer seconds since epoch (current) vs ISO timestamps in files.
-- Deferred: jittered backoff between conflict retries (via `Clock.sleep` and a
+- Deferred: jittered backoff between conflict retries (via a future `Clock.sleep` and a
   randomness port in `infrastructure/ids.py`, never `IdSource`); today retries are
   bounded at 10 and fetch/push round trips spread writers.
 - Deferred: an administrative release that frees a dead holder's ticket without

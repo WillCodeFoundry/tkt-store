@@ -117,6 +117,7 @@ class Ticket:
     title: str
     created: Timestamp
     updated: Timestamp
+    """Set to `now` by every op that writes this ticket."""
     version: int = 1
     """Content version for optimistic concurrency: 1 when added, incremented only by
     `update` (the fields it can change). Claims, renewals, handoffs and other ops do not

@@ -11,7 +11,8 @@ pytestmark = pytest.mark.skip(reason="skeleton: rules not implemented")
 
 class TestClaim:
     def test_claims_open_ticket(self) -> None:
-        """OPEN + ClaimOp → Apply; claim = (agent, claim_id, now + ttl); op='claim'."""
+        """OPEN + ClaimOp → Apply; claim = (agent, claim_id, lease_until = now + ttl,
+        claimed_at = now); updated = now; op='claim'."""
 
     def test_refuses_live_claim_by_other(self) -> None:
         """Live claim with a different claim_id → Refusal(ALREADY_CLAIMED)."""
@@ -38,9 +39,13 @@ class TestClaim:
     def test_refuses_terminal(self) -> None:
         """done/cancelled → Refusal(TERMINAL)."""
 
+    @pytest.mark.parametrize("where", ["this_ticket", "another_ticket"])
     @pytest.mark.parametrize("field", ["last_claim_id", "done_by"])
-    def test_ended_claim_id_cannot_claim_again(self, field: str) -> None:
-        """op.claim_id equals the ticket's last_claim_id or done_by → Refusal(NOT_HOLDER)."""
+    def test_ended_claim_id_cannot_claim_again(self, field: str, where: str) -> None:
+        """op.claim_id equals any ticket's last_claim_id or done_by → Refusal(NOT_HOLDER)."""
+
+    def test_claim_id_live_on_another_ticket_is_already_claimed(self) -> None:
+        """One claim id names one claim on one ticket → Refusal(ALREADY_CLAIMED)."""
 
 
 class TestSkewGrace:
@@ -137,6 +142,10 @@ class TestStage:
 
     def test_cancel_sets_cancelled_without_a_claim(self) -> None: ...
 
+    def test_cancel_done_ticket_is_terminal(self) -> None: ...
+
+    def test_cancel_twice_is_noop(self) -> None: ...
+
     def test_cancelled_blocker_does_not_satisfy_dependency(self) -> None:
         """A dependent of a cancelled ticket stays BLOCKED; only a done blocker clears it."""
 
@@ -160,7 +169,11 @@ class TestValidation:
         """ttl <= 0 or ttl > MAX_TTL → Refusal(INVALID), for every op with a ttl."""
 
     def test_update_validates_like_add(self) -> None:
-        """Empty title, unknown or self blocker → Refusal(INVALID)."""
+        """Empty title, unknown or self blocker, dependency cycle → Refusal(INVALID)."""
+
+    def test_validation_wins_over_every_other_outcome(self) -> None:
+        """A malformed op on a missing or terminal ticket → Refusal(INVALID), not
+        NOT_FOUND/TERMINAL."""
 
     @pytest.mark.parametrize("expected_version", [0, -1])
     def test_bad_expected_version_is_invalid(self, expected_version: int) -> None:
@@ -183,6 +196,11 @@ class TestClaimNext:
     def test_ended_claim_id_is_refused(self) -> None:
         """op.claim_id equals any ticket's last_claim_id or done_by → Refusal(NOT_HOLDER)."""
 
+    def test_same_claim_id_other_agent_is_already_claimed(self) -> None: ...
+
+    def test_project_filter_matches_exact_value_only(self) -> None:
+        """--project X never matches a ticket whose project is null."""
+
     def test_nothing_claimable(self) -> None:
         """→ Refusal(NOTHING_CLAIMABLE)."""
 
@@ -197,6 +215,12 @@ class TestReap:
 
 
 class TestUpdate:
+    @pytest.mark.parametrize("state", ["missing", "terminal"])
+    def test_refused_on_missing_or_terminal(self, state: str) -> None:
+        """NOT_FOUND / TERMINAL."""
+
+    def test_adding_blocker_to_claimed_ticket_keeps_the_claim(self) -> None: ...
+
     def test_unset_fields_are_unchanged(self) -> None: ...
 
     def test_priority_none_clears_it(self) -> None:
@@ -223,6 +247,15 @@ class TestUpdate:
     def test_only_update_changes_the_version(self, op: str) -> None:
         """Every op except add (sets 1) and update (+1) leaves version unchanged, so a
         holder's renewals never make an editor's update STALE."""
+
+
+class TestInitAndAdd:
+    def test_add_on_unborn_store_is_not_initialised(self) -> None: ...
+
+    def test_init_on_existing_store_is_noop(self) -> None: ...
+
+    def test_every_write_sets_updated(self) -> None:
+        """Each Apply sets updated = now on every ticket it writes."""
 
 
 class TestRecord:

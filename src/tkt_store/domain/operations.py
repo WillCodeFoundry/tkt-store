@@ -42,7 +42,8 @@ class OpName(StrEnum):
 
 @dataclass(frozen=True)
 class InitOp:
-    """Create the store ref with an empty tickets/ tree. A no-op if it exists."""
+    """Create the store ref with an empty tickets/ tree (the git store also writes
+    tkt-store.json). A no-op if it exists."""
 
 
 @dataclass(frozen=True)

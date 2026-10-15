@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tkt_store.infrastructure.clock import FakeClock
+from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.ids import SequentialIds
 from tkt_store.infrastructure.memory import MemStore
 
@@ -25,6 +26,13 @@ def ids() -> SequentialIds:
 @pytest.fixture
 def memstore() -> MemStore:
     return MemStore()
+
+
+@pytest.fixture
+def gitstore(tmp_path: Path) -> GitStore:
+    """A local-only GitStore in a fresh repository, for the shared contract suite
+    (skeleton: the repository is not created yet)."""
+    return GitStore.at(tmp_path / "store", remote=None)
 
 
 @pytest.fixture

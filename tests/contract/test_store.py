@@ -11,7 +11,7 @@ STORES = ["memstore", "gitstore"]
 
 
 @pytest.mark.parametrize("kind", STORES)
-def test_unborn_snapshot_has_no_base(kind: str) -> None: ...
+def test_unborn_snapshot_has_no_revision(kind: str) -> None: ...
 
 
 @pytest.mark.parametrize("kind", STORES)

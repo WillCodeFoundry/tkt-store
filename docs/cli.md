@@ -83,5 +83,6 @@ With `--json`, each command prints one JSON value. Every mutation prints an obje
   never lost on a re-run.
 - Failures (exit 3 and 4) print the op with the ids it was last tried with; without
   `--json` they go to stderr with a "re-run with `--id`/`--claim-id`" hint.
-- `show` prints the ticket object with its derived `status` and `claim_age`.
+- `show` prints the ticket object with its derived `status` and `claim_age` (seconds since
+  `claim.claimed_at`).
 - `list` prints an array of tickets; `log` prints an array of history entries.

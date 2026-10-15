@@ -34,7 +34,7 @@ tickets/
   "priority": 2,
   "blocked_by": ["tkt-91c2"],
   "tags": ["auth"],
-  "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000},
+  "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000, "claimed_at": 1790995000},
   "stage": "development",
   "done_by": null,
   "last_claim_id": null,
@@ -53,7 +53,7 @@ tickets/
 | `priority` | int \| null | lower = more urgent; null sorts last |
 | `blocked_by` | list[string] | ticket ids (same pattern as `id`) that must be `done` before claiming |
 | `tags` | list[string] | free-form |
-| `claim` | object \| null | present ⇒ held (possibly expired); `claim_id` is exactly 32 lowercase hex characters (`^[0-9a-f]{32}$`) |
+| `claim` | object \| null | present ⇒ held (possibly expired): `agent`, `claim_id` (exactly 32 lowercase hex characters), `lease_until`, `claimed_at` (unix seconds; renew keeps it) |
 | `stage` | `"development" \| "review" \| "qa" \| "done" \| "cancelled"` | lifecycle position; `done`/`cancelled` are terminal (final once set) |
 | `done_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
 | `last_claim_id` | string \| null | the most recent claim id that ended other than by `done` (released, reaped, taken over, cancelled); fenced, it cannot claim again |
@@ -62,7 +62,7 @@ tickets/
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).
 
-**Not stored:** status, claim age, history. All derived.
+**Not stored:** status and history (derived). Claim age is derived from `claim.claimed_at`.
 
 ## Commit messages
 

@@ -7,6 +7,7 @@ Status is NOT here — it is derived in `domain.status`.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -16,6 +17,13 @@ TicketId = NewType("TicketId", str)
 AgentId = NewType("AgentId", str)
 ClaimId = NewType("ClaimId", str)
 ProjectId = NewType("ProjectId", str)
+
+TICKET_PREFIX = "tkt-"
+TICKET_ID_RE = re.compile(rf"^{TICKET_PREFIX}[0-9a-f]+$")
+"""A ticket id, also its file name `tickets/<id>.json`: no '/', '.', or traversal."""
+
+CLAIM_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+"""A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer."""
 
 Revision = NewType("Revision", str)
 """An opaque handle to one committed state of the store.
@@ -82,6 +90,13 @@ class Claim:
     agent: AgentId
     claim_id: ClaimId
     lease_until: Timestamp
+    claimed_at: Timestamp
+    """When this claim was taken (the claimant's injected clock); renew keeps it."""
+
+    def age(self, now: Timestamp) -> Duration:
+        """Seconds since `claimed_at` (claim age, shown by `tkt show`). Informational:
+        clocks may skew across writers."""
+        raise NotImplementedError
 
     def is_live(self, now: Timestamp) -> bool:
         """True while the lease has not expired (now < lease_until)."""

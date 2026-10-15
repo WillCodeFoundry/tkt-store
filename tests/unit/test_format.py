@@ -12,7 +12,8 @@ def test_unknown_keys_preserved_at_top_level() -> None:
     """Unknown keys land in Ticket.extra and are written back at top level (no 'extra' key)."""
 
 
-def test_done_by_round_trips() -> None: ...
+@pytest.mark.parametrize("field", ["done_by", "last_claim_id", "claim.claimed_at"])
+def test_new_fields_round_trip(field: str) -> None: ...
 
 
 def test_message_round_trip() -> None:

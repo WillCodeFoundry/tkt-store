@@ -33,8 +33,8 @@ def ticket_path(ticket_id: TicketId) -> str:
 
 
 def is_ticket_path(path: str) -> bool:
-    """True only for 'tickets/tkt-<hex>.json'. Every other path on the branch is
-    preserved and never interpreted."""
+    """True only for 'tickets/<id>.json' where <id> matches ticket.TICKET_ID_RE. Every
+    other path on the branch is preserved and never interpreted."""
     raise NotImplementedError
 
 

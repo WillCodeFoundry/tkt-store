@@ -17,10 +17,10 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 
 | Term | Meaning |
 |---|---|
-| **Store** | One git ref (default `refs/heads/tkt`) holding `tickets/<id>.json`, normally backed by a remote (`origin`). |
+| **Store** | One git ref (default `refs/heads/tkt`) holding `tickets/<id>.json`, normally backed by a remote (`origin`). The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
 | **Ticket** | A unit of work: title, body, kind (story/task/bug), project, priority, dependencies, tags. |
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
-| **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
+| **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
 | **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/release/done must present it; once its claim ends the ticket remembers it (`done_by`, or `last_claim_id`) and it can never claim again. |
 | **Stage** | *Stored* lifecycle position: the workflow phases `development`/`review`/`qa` (no forced order) plus the terminal `done`/`cancelled`. A terminal ticket is never claimable again. |

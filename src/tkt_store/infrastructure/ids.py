@@ -6,9 +6,7 @@ the caller BEFORE a transaction (invariant 7), so retries reuse them.
 
 from __future__ import annotations
 
-from tkt_store.domain.ticket import ClaimId, TicketId
-
-TICKET_PREFIX = "tkt-"
+from tkt_store.domain.ticket import TICKET_PREFIX, ClaimId, TicketId  # noqa: F401  (ticket ids)
 
 
 class RandomIds:

@@ -30,12 +30,6 @@ from tkt_store.domain.operations import (
 from tkt_store.domain.outcomes import Decision, Refusal
 from tkt_store.domain.ticket import Snapshot, Timestamp
 
-TICKET_ID_RE = re.compile(r"^tkt-[0-9a-f]+$")
-"""A ticket id, also its file name `tickets/<id>.json`: no '/', '.', or traversal."""
-
-CLAIM_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-"""A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer."""
-
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 """Refused in `agent`, `reason` and `title`: they are written into the commit
 message, so a newline could forge trailers or break the one-line subject."""
@@ -74,8 +68,8 @@ def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
 def validate_op(op: Op) -> Refusal | None:
     """Refusal(INVALID) if any field of `op` is malformed on its own, else None.
 
-    - ticket ids (`ticket_id`, each `blocked_by` entry) must match TICKET_ID_RE;
-    - `claim_id` must match CLAIM_ID_RE;
+    - ticket ids (`ticket_id`, each `blocked_by` entry) must match ticket.TICKET_ID_RE;
+    - `claim_id` must match ticket.CLAIM_ID_RE;
     - `agent`, `reason` and `title` must not contain CONTROL_CHARS_RE;
     - `ttl` (claim, claim-next, renew) must satisfy 0 < ttl <= MAX_TTL.
     Shape checks only; anything that depends on the snapshot is each rule's concern.
@@ -115,11 +109,10 @@ def decide_claim(snapshot: Snapshot, op: ClaimOp, now: Timestamp) -> Decision:
       taken over; the caller should renew), another agent -> ALREADY_CLAIMED;
     NOT_HOLDER if op.claim_id equals this ticket's last_claim_id or done_by (an ended
       claim's id is fenced and cannot claim again);
-    BLOCKED; ALREADY_CLAIMED (another claim, not yet takeable: live, or lapsed but
-      within SKEW_GRACE).
-    Apply: claim = (agent, claim_id, now + ttl). Taking over a takeable claim sets
-    last_claim_id to the old claim id, fencing it. Stage is untouched.
-    For a new claim id, accepts exactly when `status.claimable` is true."""
+    then `status.why_not_claimable` (BLOCKED, ALREADY_CLAIMED; TERMINAL already handled).
+    Apply: claim = (agent, claim_id, lease_until = now + ttl, claimed_at = now). Taking
+    over a takeable claim sets last_claim_id to the old claim id, fencing it. Stage is
+    untouched. For a new claim id, accepts exactly when `status.claimable` is true."""
     raise NotImplementedError
 
 
@@ -140,7 +133,7 @@ def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
     TERMINAL; current claim has op.claim_id -> Apply (even if lapsed, as long as nobody
     took it over); op.claim_id == last_claim_id -> NOT_HOLDER; no claim -> NOT_CLAIMED;
     claimed by another -> NOT_HOLDER.
-    Apply: lease_until = now + ttl."""
+    Apply: lease_until = now + ttl (claimed_at unchanged)."""
     raise NotImplementedError
 
 

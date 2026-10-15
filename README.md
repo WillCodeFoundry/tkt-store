@@ -4,9 +4,10 @@ A small ticket store for coordinating AI agents. Tickets live as JSON files on a
 dedicated git branch; every change is one commit published by compare-and-swap,
 so "who holds which ticket" has exactly one answer.
 
-> **Status: milestone 1 in progress.** The domain, the git store and the `tkt` CLI
-> work end to end (the quickstart below runs as a test). Not yet measured against a
-> real GitHub remote; see `docs/decisions/0001-git-branch-as-store.md`.
+> **Status: milestone 1.** The domain, the git store and the `tkt` CLI work end to end
+> (the quickstart below runs as a test), measured against a protected GitHub branch:
+> about 10 agents on tasks of tens of minutes fit GitHub's push guidance; see
+> `docs/decisions/0001-git-branch-as-store.md`.
 
 ## What it guarantees
 
@@ -44,7 +45,7 @@ tkt add --id "$TICKET" --title "Expire reset tokens" --kind task --phase impleme
 
 CLAIM=$(tkt mint claim-id)                                 # keep it: it identifies this claim
 tkt claim "$TICKET" --as coder-7 --ttl 1800 --claim-id "$CLAIM" $S
-tkt renew "$TICKET" --claim-id "$CLAIM" --ttl 1800 $S      # every ~10 min while working
+tkt renew "$TICKET" --claim-id "$CLAIM" --ttl 1800 $S      # every ~20 min while working
 tkt move "$TICKET" --claim-id "$CLAIM" --to-phase review $S
 tkt release "$TICKET" --claim-id "$CLAIM" $S               # handoff: move, then release
 
@@ -69,6 +70,7 @@ safe. See `docs/cli.md`.
 | `docs/decisions/` | Architecture decision records |
 | `src/tkt_store/` | The package (layered; see below) |
 | `tests/` | Unit, contract, integration and property tests |
+| `scripts/` | `bench_github.py`: the ADR 0001 benchmark (writes to a dedicated test repository) |
 
 The package is organised in layers, with dependencies pointing inward only
 (enforced by `tests/unit/test_architecture.py`):

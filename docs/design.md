@@ -315,10 +315,11 @@ acted on only after `SKEW_GRACE`; a TTL should comfortably exceed
 `renew interval + SKEW_GRACE + expected skew`, and may not exceed `MAX_TTL` (2 h).
 Fencing is authoritative.
 
-**Scale.** Designed for about 10 agents working in parallel. With 30-minute leases
-renewed every ~10 minutes, renewals (the bulk of writes) are about 0.02 per second, well
-inside what whole-ref compare-and-swap on a hosted remote is assumed to sustain (ADR
-0001; to be measured in the first milestone).
+**Scale.** Designed for about 10 agents working in parallel on tasks of tens of minutes.
+Every write is a push, and GitHub recommends at most 6 pushes per minute per repository:
+that is the store's budget. With 30-minute leases renewed every ~20 minutes and about 5
+pushes per ticket, 10 agents on 20-minute tasks push about 3 times a minute; many short
+tasks do not fit. Measured throughput, contention and the options beyond: ADR 0001.
 
 **Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
 `ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
@@ -356,9 +357,8 @@ Open questions:
   normalised remote URL (renames)? Out of scope for the store itself.
 - Q3: Should `claim_next` (pick highest-priority claimable) be an op (atomic choice) — current design — or a read + claim?
 - Q4: Lease units: integer seconds since epoch (current) vs ISO timestamps in files.
-- Deferred: jittered backoff between conflict retries (via a future `Clock.sleep` and a
-  randomness port in `infrastructure/ids.py`, never `IdSource`); today retries are
-  bounded at 10 and fetch/push round trips spread writers.
 - Deferred: an administrative release that frees a dead holder's ticket without
   cancelling it, before `MAX_TTL` plus the grace.
 - Deferred: `claim-next` choosing randomly among the top candidates to spread contention.
+  On one ref any two concurrent writes conflict, whichever ticket they touch, so this
+  only pays off with one ref per ticket (ADR 0001).

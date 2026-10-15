@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from tkt_store.application.backoff import Backoff
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import RefusedError
 from tkt_store.application.ids import IdSource
@@ -73,10 +74,15 @@ class TicketStore:
     for the production wiring.
     """
 
-    def __init__(self, store: Store, clock: Clock, ids: IdSource) -> None:
+    def __init__(
+        self, store: Store, clock: Clock, ids: IdSource, *, backoff: Backoff | None = None
+    ) -> None:
+        """`backoff`: how to wait between lost races; None retries at once (tests).
+        `open_store` passes the production JitteredBackoff."""
         self._store = store
         self._clock = clock
         self._ids = ids
+        self._backoff = backoff
 
     # --- mutations ------------------------------------------------------
 
@@ -224,7 +230,7 @@ class TicketStore:
         return self._transact(ReapOp())
 
     def _transact(self, op: Op) -> Outcome:
-        return transact(self._store, op, self._clock)
+        return transact(self._store, op, self._clock, backoff=self._backoff)
 
     # --- reads ----------------------------------------------------------
 

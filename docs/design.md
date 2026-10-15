@@ -113,7 +113,8 @@ imports and names imported from the package root):
 2. **Pure domain.** No `domain` module touches IO, git, time or randomness.
 3. **One door to git.** Only modules under `infrastructure/git/` invoke `git`/subprocess.
 4. **Time and randomness are injected.** Only `infrastructure/clock.py` reads the
-   system clock; only `infrastructure/ids.py` creates random values.
+   system clock (and sleeps); only `infrastructure/ids.py` creates random values
+   (ids, and backoff jitter).
 
 The transaction loop depends on the `Store` port, never on a concrete store, so
 it is agnostic to git vs in-memory by construction.
@@ -129,8 +130,15 @@ Every mutation goes through `application.transaction.transact(store, op, clock)`
    if dec is NoOp    → return Unchanged     # idempotent repeat
 4. try store.commit(snap.revision, dec.changes, dec.record)
        → return Committed(revision, record, tickets)
-   except Conflict → goto 1 (bounded attempts), rules re-run on fresh state
+   except Conflict → backoff.wait(attempt), goto 1 (bounded attempts), rules re-run
+                     on fresh state
 ```
+
+**Backoff.** Between lost races the loop waits through the `Backoff` port: the
+production `JitteredBackoff` (`infrastructure/backoff.py`, wired by `open_store`) waits a
+uniform random time from a window that doubles from 1 s up to 16 s ("full jitter"), so
+contending writers spread out instead of colliding again. Without a backoff the loop
+retries at once (tests). Measured effect: ADR 0001.
 
 The **expected old value** in step 4 is the base the decision was computed from,
 never a fresh read (lesson from balls' bl-cdec G1).
@@ -247,7 +255,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 
 | Failure | Outcome | Recovery |
 |---|---|---|
-| Lost race (ref moved) | `Conflict` inside the transaction loop → retry with fresh snapshot | Automatic, bounded (10 attempts) |
+| Lost race (ref moved) | `Conflict` inside the transaction loop → jittered backoff, retry with fresh snapshot | Automatic, bounded (10 attempts) |
 | Retries exhausted | `RetriesExhausted(op)` | Caller re-runs `op` with the same ids (idempotent) |
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |

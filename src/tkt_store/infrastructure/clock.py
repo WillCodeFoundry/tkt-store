@@ -15,6 +15,11 @@ class SystemClock:
         return int(time.time())
 
 
+def sleep(seconds: float) -> None:
+    """Block for `seconds` (the transaction loop's backoff, via JitteredBackoff)."""
+    time.sleep(seconds)
+
+
 class FakeClock:
     """A deterministic clock for tests and simulations."""
 

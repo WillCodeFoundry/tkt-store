@@ -133,3 +133,30 @@ def test_commit_uses_the_snapshot_revision_not_a_fresh_read(store: MemStore) -> 
     transact(recording, ClaimOp(T1, A, C1, TTL), FakeClock(NOW))
     assert recording.bases[0] == first_snapshot  # the decision's base, not the new head
     assert len(recording.bases) == 2  # it lost that race, re-decided, committed on the new head
+
+
+class RecordingBackoff:
+    def __init__(self) -> None:
+        self.waits: list[int] = []
+
+    def wait(self, attempt: int) -> None:
+        self.waits.append(attempt)
+
+
+def test_backoff_waits_between_attempts_never_after_the_last(store: MemStore) -> None:
+    backoff = RecordingBackoff()
+    with pytest.raises(RetriesExhausted):
+        transact(FailingStore(store, Conflict(None, None)), ClaimOp(T1, A, C1, TTL),
+                 FakeClock(NOW), max_attempts=4, backoff=backoff)  # fmt: skip
+    assert backoff.waits == [1, 2, 3]
+
+
+def test_backoff_waits_only_after_a_lost_race(store: MemStore) -> None:
+    backoff = RecordingBackoff()
+    store.before_next_commit(lambda: other_writer(store, tkt(T2)))
+    outcome = transact(store, ClaimOp(T1, A, C1, TTL), FakeClock(NOW), backoff=backoff)
+    assert isinstance(outcome, Committed) and backoff.waits == [1]  # one lost race
+    assert isinstance(
+        transact(store, ClaimOp(T2, A, C2, TTL), FakeClock(NOW), backoff=backoff), Committed
+    )
+    assert backoff.waits == [1]

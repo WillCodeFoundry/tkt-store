@@ -1,4 +1,5 @@
-"""Concrete id sources. The ONLY module allowed to create random values.
+"""Concrete id sources, and backoff jitter. The ONLY module allowed to create random
+values.
 
 Both satisfy the `application.ids.IdSource` port structurally. Ids are minted by
 the caller BEFORE a transaction (invariant 7), so retries reuse them.
@@ -22,6 +23,11 @@ class RandomIds:
     def claim_id(self) -> ClaimId:
         """128 bits, hex."""
         return ClaimId(secrets.token_hex(16))
+
+
+def jitter() -> float:
+    """A uniform random fraction in [0, 1), for backoff (not an id, but random)."""
+    return secrets.randbits(53) / (1 << 53)
 
 
 class SequentialIds:

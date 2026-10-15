@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from tkt_store.application.backoff import Backoff
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import Conflict, RetriesExhausted, StoreError
 from tkt_store.application.store import Store
@@ -55,6 +56,7 @@ def transact(
     clock: Clock,
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    backoff: Backoff | None = None,
 ) -> Outcome:
     """Snapshot -> decide -> commit against the snapshot's revision; on Conflict, start over.
 
@@ -63,11 +65,13 @@ def transact(
     - Refusal and NoOp return immediately; nothing is written. A NoOp's
       `ticket_ids` are resolved against the snapshot into `Unchanged.tickets`.
     - Committed.tickets are the tickets written by the Apply.
+    - After a Conflict, `backoff.wait(attempt)` before the next attempt (none after the
+      last; no backoff means retry at once).
     - After `max_attempts` conflicts, raise RetriesExhausted(op).
     - A StoreError from the store is re-raised as StoreError(message, op=op) from the
       original, so the caller has the ids to re-run with.
     """
-    for _ in range(max_attempts):
+    for attempt in range(1, max_attempts + 1):
         try:
             snapshot = store.snapshot()
         except StoreError as error:
@@ -81,6 +85,8 @@ def transact(
         try:
             revision = store.commit(snapshot.revision, decision.changes, decision.record)
         except Conflict:
+            if backoff is not None and attempt < max_attempts:
+                backoff.wait(attempt)
             continue
         except StoreError as error:
             raise StoreError(str(error), op=op) from error

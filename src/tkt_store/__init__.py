@@ -24,7 +24,12 @@ from tkt_store.application.errors import (
     StoreError,
 )
 from tkt_store.application.ids import IdSource
-from tkt_store.application.service import DEFAULT_TTL, TicketStore, raise_for_refusal
+from tkt_store.application.service import (
+    DEFAULT_TTL,
+    TicketStore,
+    TicketView,
+    raise_for_refusal,
+)
 from tkt_store.application.store import HistoryEntry, Store
 from tkt_store.application.transaction import Committed, Outcome, Refused, Unchanged
 from tkt_store.domain.errors import TktError
@@ -59,6 +64,12 @@ def open_store(
     return TicketStore(store, clock or SystemClock(), ids or RandomIds())
 
 
+def new_id_source() -> IdSource:
+    """The production id source (random ids), for callers that mint ids themselves,
+    e.g. `tkt mint`. Part of the composition root, like `open_store`."""
+    return RandomIds()
+
+
 __all__ = [
     "DEFAULT_TTL",
     "Claim",
@@ -86,8 +97,10 @@ __all__ = [
     "SystemClock",
     "Ticket",
     "TicketStore",
+    "TicketView",
     "TktError",
     "Unchanged",
+    "new_id_source",
     "open_store",
     "raise_for_refusal",
 ]

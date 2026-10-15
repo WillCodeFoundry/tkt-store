@@ -9,6 +9,7 @@ chosen at the composition root (`tkt_store.open_store`), never here.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import RefusedError
@@ -19,7 +20,6 @@ from tkt_store.domain.operations import UNSET, UnsetType
 from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import (
     AgentId,
-    Claim,
     ClaimId,
     Duration,
     Kind,
@@ -31,6 +31,14 @@ from tkt_store.domain.ticket import (
 )
 
 DEFAULT_TTL: Duration = 30 * 60
+
+
+@dataclass(frozen=True)
+class TicketView:
+    """A ticket with its derived status, both taken from the same snapshot."""
+
+    ticket: Ticket
+    status: Status
 
 
 class TicketStore:
@@ -162,7 +170,9 @@ class TicketStore:
     def get(self, ticket_id: TicketId) -> Ticket | None:
         raise NotImplementedError
 
-    def status(self, ticket_id: TicketId) -> Status | None:
+    def view(self, ticket_id: TicketId) -> TicketView | None:
+        """The ticket and its derived status, from ONE snapshot (so they always agree);
+        None if it does not exist."""
         raise NotImplementedError
 
     def list(
@@ -173,10 +183,8 @@ class TicketStore:
         project: ProjectId | None = None,
         agent: AgentId | None = None,
         kind: Kind | None = None,
-    ) -> Sequence[Ticket]:
-        raise NotImplementedError
-
-    def claim_of(self, ticket_id: TicketId) -> Claim | None:
+    ) -> Sequence[TicketView]:
+        """Matching tickets with their derived status, all from one snapshot."""
         raise NotImplementedError
 
     def log(

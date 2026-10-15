@@ -2,23 +2,25 @@
 
 The CLI is built for agents. It is deliberately thin and explicit:
 
-- every command maps to one `TicketStore` method, and its flags to that method's
-  arguments (`show` combines the `get` and `status` reads);
+- every store command maps to one `TicketStore` method, and its flags to that method's
+  arguments;
 - every input is an explicit flag: no environment-variable defaults, no inferred ticket
   or claim ids, no local state;
-- every result is one JSON value on stdout.
+- every store command prints one JSON value on stdout (see *Output*).
 
 It is verbose and repetitive by design: an agent re-runs a command by repeating it
 unchanged, and there is nothing implicit to get wrong.
 
-## Global options (required)
+## Store options (required on every store command)
 
 | Option | Meaning |
 |---|---|
-| `--repo PATH` | The store repository: this agent's clone of the store repository. |
-| `--remote NAME` or `--no-remote` | Exactly one. `--remote` names the shared remote (normally `origin`); if it is not configured, every command fails with a store error. `--no-remote` selects a local-only store (single machine, tests); `init --no-remote` creates only the local ref. |
+| `--repo PATH` | The store repository: this agent's clone of the store repository (one process per clone). |
+| `--remote NAME` or `--no-remote` | Exactly one. `--remote` names the shared remote (normally `origin`); if it is not configured, every command fails with a store error. `--no-remote` selects a local-only store (single machine, tests). A store records its mode when it is created; using the other mode is refused. |
 
-Global options come before the command: `tkt --repo /work/tasks --remote origin claim …`.
+They may appear anywhere after the command name:
+`tkt claim tkt-7f3a91c2 --as coder-7 … --repo /work/tasks --remote origin`. Every command
+except `mint` takes them.
 
 ## Commands
 
@@ -29,6 +31,7 @@ model*). Flags in **Required** must be given; flags in **Optional** may be.
 
 | Command | Purpose | Required | Optional |
 |---|---|---|---|
+| `tkt mint claim-id\|ticket-id` | Print a fresh random id; no store access, no store options | | |
 | `tkt init` | Create the store ref with an empty `tickets/` tree and `tkt-store.json` | | |
 
 ### Content
@@ -105,9 +108,15 @@ flags (`…`) may be given several times.
 - **Actor.** `--as` on `add`, `edit` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
 
-## Output (always JSON)
+## Output
 
-Every command prints one JSON value. Mutations print an object:
+| What | Output |
+|---|---|
+| Any command that reads or writes the store | one JSON value on stdout |
+| `mint` | the bare id on stdout (`CLAIM_ID=$(tkt mint claim-id)`) |
+| Usage errors (missing or conflicting flags) | argparse's plain text on stderr, exit 2 |
+
+Mutations print an object:
 
 ```json
 {"outcome": "committed", "revision": "a1b2c3…", "tickets": [{…}]}
@@ -121,14 +130,18 @@ Every command prints one JSON value. Mutations print an object:
   or more for `reap`. An `unchanged` claim or claim-next still shows the claim it holds.
 - Refusals carry a `code` and `message`; failures carry the `op` with the ids it was
   last tried with, so the same command can simply be re-run.
-- Reads: `list` and `log` print a JSON array; `show` prints
-  `{"ticket": {…}, "status": "…"}`, or a refused `NOT_FOUND` object for an unknown id.
+- Reads, each taken from a single snapshot: `show` prints `{"ticket": {…}, "status": "…"}`
+  (or a refused `NOT_FOUND` object for an unknown id); `list` prints a JSON array of
+  those objects; `log` prints a JSON array of history entries
+  `{"revision", "at", "op", "ticket_ids", "agent", "claim_id", "phase", "reason"}`.
+- Output is never partial: a result is printed only once it is complete, and a failure
+  prints only the error object. Check the exit code first.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | Committed, unchanged, or a successful read |
+| 0 | Committed, unchanged, a successful read, or `mint` |
 | 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit, not found) |
 | 2 | Usage error (missing or conflicting flags) |
 | 3 | Retries exhausted after repeated conflicts; nothing written — re-run the same command |

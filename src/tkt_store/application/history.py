@@ -16,4 +16,4 @@ from tkt_store.domain.ticket import TicketId
 
 def timeline(store: Store, ticket_id: TicketId) -> Sequence[HistoryEntry]:
     """Every op that named this ticket, oldest first."""
-    raise NotImplementedError
+    return list(store.history(ticket_id))[::-1]

@@ -15,9 +15,26 @@ from tkt_store.application.clock import Clock
 from tkt_store.application.errors import RefusedError
 from tkt_store.application.ids import IdSource
 from tkt_store.application.store import HistoryEntry, Store
-from tkt_store.application.transaction import Outcome, Refused
-from tkt_store.domain.operations import UNSET, UnsetType
-from tkt_store.domain.status import Status
+from tkt_store.application.transaction import Outcome, Refused, transact
+from tkt_store.domain.operations import (
+    UNSET,
+    AddOp,
+    CancelOp,
+    ClaimNextOp,
+    ClaimOp,
+    DoneOp,
+    EditOp,
+    InitOp,
+    MoveOp,
+    Op,
+    ReapOp,
+    ReleaseOp,
+    RenewOp,
+    Unset,
+    UnsetType,
+)
+from tkt_store.domain.outcomes import RefusalCode
+from tkt_store.domain.status import Status, derive_status
 from tkt_store.domain.ticket import (
     AgentId,
     ClaimId,
@@ -31,6 +48,9 @@ from tkt_store.domain.ticket import (
 )
 
 DEFAULT_TTL: Duration = 30 * 60
+
+MAX_MINT_ATTEMPTS = 10
+"""How often `add` re-mints a ticket id that collided with an existing one."""
 
 
 @dataclass(frozen=True)
@@ -61,7 +81,7 @@ class TicketStore:
     # --- mutations ------------------------------------------------------
 
     def init(self) -> Outcome:
-        raise NotImplementedError
+        return self._transact(InitOp())
 
     def add(
         self,
@@ -85,7 +105,30 @@ class TicketStore:
         outcome is returned without retrying, so a re-run converges. Failures carry the
         op with the last id tried.
         """
-        raise NotImplementedError
+
+        def op(ticket_id: TicketId) -> AddOp:
+            return AddOp(
+                ticket_id,
+                title,
+                body=body,
+                kind=kind,
+                project=project,
+                priority=priority,
+                blocked_by=tuple(blocked_by),
+                tags=tuple(tags),
+                phase=phase,
+                agent=agent,
+            )
+
+        if ticket_id is not None:
+            return self._transact(op(ticket_id))
+        for _ in range(MAX_MINT_ATTEMPTS):
+            outcome = self._transact(op(self._ids.ticket_id()))
+            if not (
+                isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.DUPLICATE_ID
+            ):
+                return outcome
+        return outcome
 
     def edit(
         self,
@@ -103,7 +146,18 @@ class TicketStore:
         `expected_version` is the content_version the edit is based on (from `get`); if
         the ticket changed since, the outcome is Refused(STALE): re-read and retry.
         `agent`, when given, is recorded as the actor."""
-        raise NotImplementedError
+        return self._transact(
+            EditOp(
+                ticket_id,
+                expected_version,
+                title=title,
+                body=body,
+                priority=priority,
+                blocked_by=blocked_by if isinstance(blocked_by, Unset) else tuple(blocked_by),
+                tags=tags if isinstance(tags, Unset) else tuple(tags),
+                agent=agent,
+            )
+        )
 
     def claim(
         self,
@@ -121,7 +175,7 @@ class TicketStore:
         it is renewed (Committed). A claim id is single-use: never reuse one whose claim
         has ended.
         """
-        raise NotImplementedError
+        return self._transact(ClaimOp(ticket_id, agent, claim_id or self._ids.claim_id(), ttl))
 
     def claim_next(
         self,
@@ -136,33 +190,39 @@ class TicketStore:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
         and agent converges on the ticket it already holds — Unchanged naming it while the
         claim is live, Committed (renewed) if it lapsed — never a second ticket."""
-        raise NotImplementedError
+        claim_id = claim_id or self._ids.claim_id()
+        return self._transact(
+            ClaimNextOp(agent, claim_id, ttl, project=project, kind=kind, phase=phase)
+        )
 
     def renew(self, ticket_id: TicketId, claim_id: ClaimId, ttl: Duration = DEFAULT_TTL) -> Outcome:
-        raise NotImplementedError
+        return self._transact(RenewOp(ticket_id, claim_id, ttl))
 
     def move(self, ticket_id: TicketId, claim_id: ClaimId, to_phase: Phase) -> Outcome:
         """Move the ticket to `to_phase`, keeping the claim (holder only). A handoff is
         move, then release."""
-        raise NotImplementedError
+        return self._transact(MoveOp(ticket_id, claim_id, to_phase))
 
     def release(self, ticket_id: TicketId, claim_id: ClaimId, reason: str = "") -> Outcome:
         """Release the claim (holder only); the phase is untouched."""
-        raise NotImplementedError
+        return self._transact(ReleaseOp(ticket_id, claim_id, reason))
 
     def done(self, ticket_id: TicketId, claim_id: ClaimId) -> Outcome:
         """Complete the ticket (terminal DONE). Holder-only."""
-        raise NotImplementedError
+        return self._transact(DoneOp(ticket_id, claim_id))
 
     def cancel(
         self, ticket_id: TicketId, reason: str = "", *, agent: AgentId | None = None
     ) -> Outcome:
         """Abandon the ticket (terminal CANCELLED). Administrative; needs no claim.
         `agent`, when given, is recorded as the actor."""
-        raise NotImplementedError
+        return self._transact(CancelOp(ticket_id, reason, agent))
 
     def reap(self) -> Outcome:
-        raise NotImplementedError
+        return self._transact(ReapOp())
+
+    def _transact(self, op: Op) -> Outcome:
+        return transact(self._store, op, self._clock)
 
     # --- reads ----------------------------------------------------------
 
@@ -170,12 +230,16 @@ class TicketStore:
         return self._store.snapshot()
 
     def get(self, ticket_id: TicketId) -> Ticket | None:
-        raise NotImplementedError
+        return self._store.snapshot().get(ticket_id)
 
     def view(self, ticket_id: TicketId) -> TicketView | None:
         """The ticket and its derived status, from ONE snapshot (so they always agree);
         None if it does not exist."""
-        raise NotImplementedError
+        snapshot = self._store.snapshot()
+        ticket = snapshot.get(ticket_id)
+        if ticket is None:
+            return None
+        return TicketView(ticket, derive_status(snapshot, ticket, self._clock.now()))
 
     def list(
         self,
@@ -187,12 +251,25 @@ class TicketStore:
         kind: Kind | None = None,
     ) -> Sequence[TicketView]:
         """Matching tickets with their derived status, all from one snapshot."""
-        raise NotImplementedError
+        snapshot = self._store.snapshot()
+        now = self._clock.now()
+        views = []
+        for ticket in sorted(snapshot.tickets.values(), key=lambda t: t.id):
+            view = TicketView(ticket, derive_status(snapshot, ticket, now))
+            if (
+                (status is None or view.status is status)
+                and (phase is None or ticket.phase is phase)
+                and (project is None or ticket.project == project)
+                and (agent is None or (ticket.claim is not None and ticket.claim.agent == agent))
+                and (kind is None or ticket.kind is kind)
+            ):
+                views.append(view)
+        return views
 
     def log(
         self, ticket_id: TicketId | None = None, limit: int | None = None
     ) -> Sequence[HistoryEntry]:
-        raise NotImplementedError
+        return list(self._store.history(ticket_id, limit))
 
 
 def raise_for_refusal(outcome: Outcome) -> Outcome:

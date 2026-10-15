@@ -10,9 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from tkt_store.application.clock import Clock
+from tkt_store.application.errors import Conflict, RetriesExhausted, StoreError
 from tkt_store.application.store import Store
 from tkt_store.domain.operations import Op
-from tkt_store.domain.outcomes import OpRecord, Refusal
+from tkt_store.domain.outcomes import NoOp, OpRecord, Refusal
+from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import Revision, Ticket
 
 DEFAULT_MAX_ATTEMPTS = 10
@@ -65,4 +67,23 @@ def transact(
     - A StoreError from the store is re-raised as StoreError(message, op=op) from the
       original, so the caller has the ids to re-run with.
     """
-    raise NotImplementedError
+    for _ in range(max_attempts):
+        try:
+            snapshot = store.snapshot()
+        except StoreError as error:
+            raise StoreError(str(error), op=op) from error
+        decision = decide(snapshot, op, clock.now())
+        if isinstance(decision, Refusal):
+            return Refused(decision)
+        if isinstance(decision, NoOp):
+            tickets = tuple(t for i in decision.ticket_ids if (t := snapshot.get(i)) is not None)
+            return Unchanged(decision.reason, tickets)
+        try:
+            revision = store.commit(snapshot.revision, decision.changes, decision.record)
+        except Conflict:
+            continue
+        except StoreError as error:
+            raise StoreError(str(error), op=op) from error
+        written = tuple(change.ticket for change in decision.changes)
+        return Committed(revision, decision.record, written)
+    raise RetriesExhausted(op)

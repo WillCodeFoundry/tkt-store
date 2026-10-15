@@ -25,7 +25,7 @@ class FakeClock:
         return self._now
 
     def advance(self, seconds: int) -> None:
-        raise NotImplementedError
+        self._now += seconds
 
     def set(self, value: Timestamp) -> None:
-        raise NotImplementedError
+        self._now = value

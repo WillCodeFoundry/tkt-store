@@ -39,7 +39,8 @@ tickets/
   "done_by": null,
   "last_claim_id": null,
   "created": 1790990000,
-  "updated": 1790995000
+  "updated": 1790995000,
+  "version": 3
 }
 ```
 
@@ -58,6 +59,7 @@ tickets/
 | `done_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
 | `last_claim_id` | string \| null | the most recent claim id that ended other than by `done` (released, reaped, taken over, cancelled); fenced, it cannot claim again |
 | `created`, `updated` | int | unix seconds (from the injected clock) |
+| `version` | int | content version for optimistic concurrency: 1 when added, incremented only by `update`; an update must name it (`STALE` otherwise) |
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).

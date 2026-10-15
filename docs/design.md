@@ -18,7 +18,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 | Term | Meaning |
 |---|---|
 | **Store** | One git ref (default `refs/heads/tkt`) holding `tickets/<id>.json`, normally backed by a remote (`origin`). The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
-| **Ticket** | A unit of work: title, body, kind (story/task/bug), project, priority, dependencies, tags. |
+| **Ticket** | A unit of work: title, body, kind (story/task/bug), project, priority, dependencies, tags; plus a content `version` for optimistic concurrency on edits. |
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
@@ -140,9 +140,15 @@ never a fresh read (lesson from balls' bl-cdec G1).
     does not satisfy a dependency. Blockers do not gate completion: `update` may add a
     blocker to a claimed ticket without disturbing the claim, and the holder may still
     finish it.
-11. **Validated input.** Ticket ids match `^tkt-[0-9a-f]+$` (they are file names), claim ids
+11. **No silent overwrite of edits.** `update` names the content `version` it was based
+    on; if the ticket was updated since, it is refused `STALE`, never last-writer-wins.
+    The version counts content edits only (`add` sets 1, each `update` adds 1), so claims
+    and renewals never make an edit stale. Edits to different fields compose: an update
+    only writes the fields it names, and every retry re-decides on fresh state.
+12. **Validated input.** Ticket ids match `^tkt-[0-9a-f]+$` (they are file names), claim ids
     are exactly 32 lowercase hex characters, `agent`/`reason`/`title` contain no control
-    characters (they are written into the commit message), and TTLs are within bounds.
+    characters (they are written into the commit message), TTLs are within bounds, and
+    an update's `expected_version` is at least 1.
     Otherwise `INVALID`.
 
 ### Holder ops (`renew`, `release`, `done`)
@@ -183,7 +189,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 |---|---|---|---|
 | init | — | store exists | empty tree + `tkt-store.json` |
 | add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker, terminal stage), `DUPLICATE_ID` | same id and identical AddOp fields (`created`/`updated` not compared) | new ticket |
-| update | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle) | nothing differs | changed fields (last-writer-wins) |
+| update | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `version + 1` |
 | claim | `NOT_FOUND`, `TERMINAL`; same claim id, other agent → `ALREADY_CLAIMED`; ended claim id → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | current claim has the same id and agent (live or lapsed) | new claim; a takeover fences the old id |
 | claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` | some ticket's current claim has the same id and agent (names it) | as claim, on the most urgent claimable match |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | `cancelled`, claim cleared |

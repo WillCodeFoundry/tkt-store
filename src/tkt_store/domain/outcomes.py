@@ -27,6 +27,7 @@ class RefusalCode(StrEnum):
     TERMINAL = "TERMINAL"  # the ticket is already in a terminal stage (done/cancelled)
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
     INVALID = "INVALID"  # malformed op (empty title, bad ttl, bad blocker, terminal to_stage)
+    STALE = "STALE"  # update based on an older ticket version; re-read and retry
 
 
 @dataclass(frozen=True)

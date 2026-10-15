@@ -162,6 +162,10 @@ class TestValidation:
     def test_update_validates_like_add(self) -> None:
         """Empty title, unknown or self blocker → Refusal(INVALID)."""
 
+    @pytest.mark.parametrize("expected_version", [0, -1])
+    def test_bad_expected_version_is_invalid(self, expected_version: int) -> None:
+        """UpdateOp.expected_version < 1 → Refusal(INVALID)."""
+
 
 class TestClaimNext:
     def test_picks_highest_priority_then_oldest(self) -> None: ...
@@ -197,6 +201,28 @@ class TestUpdate:
 
     def test_priority_none_clears_it(self) -> None:
         """UpdateOp(priority=None) → Apply with priority=None (UNSET would leave it)."""
+
+    def test_apply_increments_version(self) -> None:
+        """expected_version == ticket.version → Apply with version + 1."""
+
+    def test_stale_version_is_refused(self) -> None:
+        """Ticket updated since it was read (version != expected_version) and the op
+        changes something → Refusal(STALE); nothing is overwritten."""
+
+    def test_rerun_of_landed_update_is_noop(self) -> None:
+        """Fields already hold the op's values → NoOp, even though version moved on
+        (the NoOp check comes before the version check)."""
+
+    def test_two_editors_same_field_second_is_stale(self) -> None:
+        """A and B both read version 3 and set the title; A lands (version 4), B →
+        Refusal(STALE) — never last-writer-wins."""
+
+    @pytest.mark.parametrize(
+        "op", ["claim", "claim-next", "renew", "release", "done", "cancel", "reap"]
+    )
+    def test_only_update_changes_the_version(self, op: str) -> None:
+        """Every op except add (sets 1) and update (+1) leaves version unchanged, so a
+        holder's renewals never make an editor's update STALE."""
 
 
 class TestRecord:

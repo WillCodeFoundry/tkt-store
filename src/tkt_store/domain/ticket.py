@@ -117,6 +117,11 @@ class Ticket:
     title: str
     created: Timestamp
     updated: Timestamp
+    version: int = 1
+    """Content version for optimistic concurrency: 1 when added, incremented only by
+    `update` (the fields it can change). Claims, renewals, handoffs and other ops do not
+    touch it, so an active holder's renewals never make an editor's update STALE.
+    `update` must name the version it was based on."""
     body: str = ""
     kind: Kind = Kind.TASK
     project: ProjectId | None = None

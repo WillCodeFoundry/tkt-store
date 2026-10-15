@@ -6,7 +6,8 @@ its arguments. This is where invariants 1, 4, 5, 9 and 10 (docs/design.md §5)
 live. The result is a `Decision` from `domain.outcomes`.
 
 Every `Apply.record` carries `at=now`, the injected time (`OpRecord.at`), and the
-acting `agent` when the op names one. The full op x state -> outcome table is in
+acting `agent` when the op names one. A ticket's content `version` starts at 1 (add)
+and only `update` increments it. The full op x state -> outcome table is in
 docs/design.md §5; the docstrings below summarise it.
 """
 
@@ -71,7 +72,8 @@ def validate_op(op: Op) -> Refusal | None:
     - ticket ids (`ticket_id`, each `blocked_by` entry) must match ticket.TICKET_ID_RE;
     - `claim_id` must match ticket.CLAIM_ID_RE;
     - `agent`, `reason` and `title` must not contain CONTROL_CHARS_RE;
-    - `ttl` (claim, claim-next, renew) must satisfy 0 < ttl <= MAX_TTL.
+    - `ttl` (claim, claim-next, renew) must satisfy 0 < ttl <= MAX_TTL;
+    - `expected_version` (update) must be >= 1.
     Shape checks only; anything that depends on the snapshot is each rule's concern.
     """
     raise NotImplementedError
@@ -89,16 +91,20 @@ def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
     NoOp: the id exists and the stored ticket's AddOp fields (title, body, kind,
     project, priority, blocked_by, tags, stage) equal the op's; created/updated are not
     compared. Once the ticket has been updated, a late re-run gets DUPLICATE_ID.
-    Apply: a new ticket at op.stage with created = updated = now."""
+    Apply: a new ticket at op.stage with created = updated = now, version = 1."""
     raise NotImplementedError
 
 
 def decide_update(snapshot: Snapshot, op: UpdateOp, now: Timestamp) -> Decision:
-    """Refuse: NOT_FOUND, TERMINAL, INVALID (empty title, unknown or self blocker,
-    dependency cycle). NoOp: nothing differs.
-    Apply: changed descriptive fields, updated = now. Never touches claim/stage; may
-    add blockers to a claimed ticket without disturbing the claim.
-    Last-writer-wins: a late re-run can revert someone else's newer edit."""
+    """In this order:
+    NOT_FOUND; TERMINAL; INVALID (empty title, unknown or self blocker, dependency cycle);
+    NoOp if every field the op sets already has that value (checked BEFORE the version, so
+      a re-run of an update that already landed converges);
+    STALE if ticket.version != op.expected_version (someone changed it since it was read).
+    Apply: changed descriptive fields, updated = now, version + 1. Never touches
+    claim/stage; may add blockers to a claimed ticket without disturbing the claim.
+    No silent overwrite: concurrent edits of the same ticket are refused STALE, never
+    last-writer-wins."""
     raise NotImplementedError
 
 

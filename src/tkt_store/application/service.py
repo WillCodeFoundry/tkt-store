@@ -82,6 +82,7 @@ class TicketStore:
     def update(
         self,
         ticket_id: TicketId,
+        expected_version: int,
         *,
         title: str | UnsetType = UNSET,
         body: str | UnsetType = UNSET,
@@ -91,6 +92,8 @@ class TicketStore:
         agent: AgentId | None = None,
     ) -> Outcome:
         """Transacts UpdateOp. Omitted fields are unchanged; `priority=None` clears it.
+        `expected_version` is the ticket version the edit is based on (from `get`); if
+        the ticket changed since, the outcome is Refused(STALE): re-read and retry.
         `agent`, when given, is recorded as the actor."""
         raise NotImplementedError
 

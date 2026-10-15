@@ -62,9 +62,14 @@ class AddOp:
 @dataclass(frozen=True)
 class UpdateOp:
     """Edit descriptive fields. UNSET means 'leave unchanged'; `priority=None` clears it.
-    Never touches claim/stage; kind and project are not updatable."""
+    Never touches claim/stage; kind and project are not updatable.
+
+    `expected_version` is required: the ticket version the edit was based on. A ticket
+    changed since then is refused STALE instead of silently overwritten.
+    """
 
     ticket_id: TicketId
+    expected_version: int
     title: str | UnsetType = UNSET
     body: str | UnsetType = UNSET
     priority: int | UnsetType | None = UNSET

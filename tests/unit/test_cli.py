@@ -1,0 +1,135 @@
+"""The CLI parser against docs/cli.md. REAL tests (the parser is implemented).
+
+The command tables in docs/cli.md are the contract: every documented command exists,
+with exactly the documented flags, and Required/Optional match argparse. Handlers are
+checked against a recording fake TicketStore (injected, not patched).
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tkt_store.cli import build_parser
+from tkt_store.domain.operations import UNSET
+
+CLI_MD = Path(__file__).resolve().parents[2] / "docs" / "cli.md"
+GLOBAL = ["--repo", "/work/tasks", "--remote", "origin"]
+CLAIM_ID = "3f9c0d2e8b1a47c6a5e4f30b2d9c8e71"
+
+ROW = re.compile(
+    r"^\| `tkt (?P<cmd>[a-z-]+)(?P<pos>[^`]*)` \|[^|]*\|(?P<req>[^|]*)\|(?P<opt>[^|]*)\|$"
+)
+FLAG = re.compile(r"--[a-z][a-z-]*")
+
+
+def _documented() -> dict[str, tuple[str, set[str], set[str]]]:
+    """command -> (positional text, required flags, optional flags) from docs/cli.md."""
+    rows = {}
+    for line in CLI_MD.read_text().splitlines():
+        if m := ROW.match(line):
+            rows[m["cmd"]] = (
+                m["pos"].strip(),
+                set(FLAG.findall(m["req"])),
+                set(FLAG.findall(m["opt"])),
+            )
+    return rows
+
+
+def _subparsers(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return dict(action.choices)
+    raise AssertionError("no subcommands")
+
+
+DOCUMENTED = _documented()
+PARSERS = _subparsers(build_parser())
+
+
+def test_docs_list_every_command_and_nothing_else() -> None:
+    assert set(DOCUMENTED) == set(PARSERS)
+
+
+@pytest.mark.parametrize("name", sorted(PARSERS))
+def test_flags_and_required_match_the_docs(name: str) -> None:
+    positional, required, optional = DOCUMENTED[name]
+    actions = [a for a in PARSERS[name]._actions if not isinstance(a, argparse._HelpAction)]
+    flags = {a.option_strings[0]: a for a in actions if a.option_strings}
+    assert set(flags) == required | optional
+    assert {f for f, a in flags.items() if a.required} == required
+    positionals = [a for a in actions if not a.option_strings]
+    if positional == "ID":
+        assert len(positionals) == 1 and positionals[0].nargs is None
+    elif positional == "[ID]":
+        assert len(positionals) == 1 and positionals[0].nargs == "?"
+    else:
+        assert positional == "" and not positionals
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],  # no globals
+        ["--repo", "r", "claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],
+        ["--repo", "r", "--remote", "o", "--no-remote", "reap"],  # both remote options
+        [*GLOBAL, "claim", "tkt-1", "--as", "a", "--ttl", "60"],  # missing --claim-id
+        [*GLOBAL, "renew", "tkt-1", "--claim-id", CLAIM_ID, "--ttl", "30m"],  # ttl is seconds
+        [*GLOBAL, "edit", "tkt-1", "--if-version", "1", "--priority", "2", "--clear-priority"],
+        [*GLOBAL, "release", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done"],
+    ],
+)
+def test_usage_errors_exit_2(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(argv)
+    assert exc.value.code == 2
+
+
+class RecordingStore:
+    """A fake TicketStore that records the call a handler makes."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def __getattr__(self, method: str) -> Any:
+        def record(*args: Any, **kwargs: Any) -> None:
+            self.calls.append((method, args, kwargs))
+
+        return record
+
+
+def _run(argv: list[str]) -> tuple[str, tuple[Any, ...], dict[str, Any]]:
+    args = build_parser().parse_args([*GLOBAL, *argv])
+    store = RecordingStore()
+    args.run(store, args)
+    (call,) = store.calls
+    return call
+
+
+def test_claim_maps_to_ticket_store_claim() -> None:
+    method, args, kwargs = _run(
+        ["claim", "tkt-1", "--as", "coder-7", "--ttl", "1800", "--claim-id", CLAIM_ID]
+    )
+    assert (method, args, kwargs) == ("claim", ("tkt-1", "coder-7", 1800), {"claim_id": CLAIM_ID})
+
+
+def test_edit_absent_flags_are_unset_and_clear_flags_clear() -> None:
+    method, args, kwargs = _run(
+        ["edit", "tkt-1", "--if-version", "3", "--title", "New", "--clear-priority", "--clear-tags"]
+    )
+    assert method == "edit" and args == ("tkt-1", 3)
+    assert kwargs["title"] == "New"
+    assert kwargs["body"] is UNSET and kwargs["blocked_by"] is UNSET
+    assert kwargs["priority"] is None and kwargs["tags"] == ()
+
+
+def test_release_hands_off_with_to_phase() -> None:
+    method, args, kwargs = _run(
+        ["release", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "review"]
+    )
+    assert method == "release" and args == ("tkt-1", CLAIM_ID, "")
+    assert kwargs == {"to_phase": "review"}

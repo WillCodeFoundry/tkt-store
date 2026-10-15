@@ -1,83 +1,103 @@
 # CLI — `tkt`
 
-Global options:
+The CLI is built for agents. It is deliberately thin and explicit:
 
-- `--repo PATH` — the store repository; default `$TKT_REPO`. If neither is set,
-  `tkt` exits with a usage error (there is no cwd fallback: the store lives in its
-  own repository).
-- `--ref REF` — default `refs/heads/tkt`.
-- `--remote NAME` — default `origin`. Each agent works in its own clone (several
-  processes may share one), so the store is remote-backed by default. If the remote is not configured, **every**
-  command (`init` included) fails with a store error; there is no silent
-  local-only fallback.
-- `--no-remote` — use a local-only store (single machine, tests). `tkt init
-  --no-remote` creates only the local ref and does no fetch/push.
-- `--json` — machine-readable output (see below).
+- every command maps to exactly one `TicketStore` method, and its flags to that
+  method's arguments;
+- every input is an explicit flag: no environment-variable defaults, no inferred ticket
+  or claim ids, no local state;
+- every result is one JSON value on stdout.
 
-| Command | Purpose | Key options |
-|---|---|---|
-| `tkt init` | Create the store ref with an empty `tickets/` tree and `tkt-store.json` | |
-| `tkt add TITLE` | Create a ticket; prints its id | `--id ID`, `--as AGENT`, `--kind`, `--body`, `--project`, `--priority`, `--blocked-by ID`…, `--tag`…, `--phase` |
-| `tkt edit ID` | Edit title/body/priority/tags/dependencies | `--if-version N` (required), `--as AGENT`, `--title`, `--body`, `--priority N\|none`, `--blocked-by ID`…, `--tag`… |
-| `tkt list` | List tickets (derived status) | `--status`, `--phase`, `--project`, `--agent`, `--kind` |
-| `tkt show ID` | One ticket, with derived status, claim age and its `content_version` | |
-| `tkt claim ID` | Claim a ticket; prints the claim id | `--as AGENT` (required), `--ttl DURATION`, `--claim-id CLAIM_ID` |
-| `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT` (required), `--ttl`, `--claim-id CLAIM_ID`, `--project`, `--kind`, `--phase` |
-| `tkt renew ID` | Extend a lease | `--claim-id CLAIM_ID`, `--ttl` |
-| `tkt release ID` | Give a claim back; optionally hand off to another phase | `--claim-id CLAIM_ID`, `--reason`, `--to-phase` |
-| `tkt done ID` | Complete it (resolution `done`, final) | `--claim-id CLAIM_ID` |
-| `tkt cancel ID` | Abandon it (resolution `cancelled`, final; no claim needed) | `--as AGENT`, `--reason` |
-| `tkt reap` | Release every claim lapsed past the skew grace | |
-| `tkt log [ID]` | History from commit trailers | `--limit` |
+It is verbose and repetitive by design: an agent re-runs a command by repeating it
+unchanged, and there is nothing implicit to get wrong.
 
-Notes:
+## Global options (required)
 
-- **Ids for safe re-runs.** `--id` (add) and `--claim-id` (claim, claim-next) let a
-  caller choose the id up front, so re-running the same command converges instead of
-  creating a second ticket or claim. Ticket ids must match `^tkt-[0-9a-f]+$`; claim
-  ids are exactly 32 lowercase hex characters. Without them, ids are generated, and a
-  failure prints the generated ids so the command can be re-run with them. A claim id
-  is single-use and names one claim on one ticket: re-use it only to retry the same
-  claim. After its claim ends it is refused (`NOT_HOLDER`) while any ticket still
-  records it (as `ended_claim_id`).
-- **Re-runs of holder ops.** Re-running a `release` that landed is a no-op even if
-  someone has claimed the ticket since (with `--to-phase`, only while the ticket is still
-  in that phase; otherwise `NOT_HOLDER`). Re-running a landed `done` is a no-op. The exact rules are the
-  holder-op table in `docs/design.md` §5.
+| Option | Meaning |
+|---|---|
+| `--repo PATH` | The store repository: this agent's clone of the store repository. |
+| `--remote NAME` or `--no-remote` | Exactly one. `--remote` names the shared remote (normally `origin`); if it is not configured, every command fails with a store error. `--no-remote` selects a local-only store (single machine, tests); `init --no-remote` creates only the local ref. |
+
+Global options come before the command: `tkt --repo /work/tasks --remote origin claim …`.
+
+## Commands
+
+Commands are grouped by the part of the ticket they change (docs/design.md, *Data
+model*). Flags in **Required** must be given; flags in **Optional** may be.
+
+### Setup
+
+| Command | Purpose | Required | Optional |
+|---|---|---|---|
+| `tkt init` | Create the store ref with an empty `tickets/` tree and `tkt-store.json` | | |
+
+### Content
+
+| Command | Purpose | Required | Optional |
+|---|---|---|---|
+| `tkt add` | Create a ticket | `--id ID`, `--title TEXT`, `--kind KIND`, `--phase PHASE` | `--body TEXT`, `--project PROJECT`, `--priority N`, `--blocked-by ID`…, `--tag TAG`…, `--as AGENT` |
+| `tkt edit ID` | Change content fields | `--if-version N` | `--title TEXT`, `--body TEXT`, `--priority N` or `--clear-priority`, `--blocked-by ID`… or `--clear-blocked-by`, `--tag TAG`… or `--clear-tags`, `--as AGENT` |
+
+### Work (needs a claim)
+
+| Command | Purpose | Required | Optional |
+|---|---|---|---|
+| `tkt claim ID` | Claim a ticket | `--as AGENT`, `--ttl SECONDS`, `--claim-id CLAIM_ID` | |
+| `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT`, `--ttl SECONDS`, `--claim-id CLAIM_ID` | `--phase PHASE`, `--project PROJECT`, `--kind KIND` |
+| `tkt renew ID` | Extend a lease | `--claim-id CLAIM_ID`, `--ttl SECONDS` | |
+| `tkt release ID` | Give a claim back, optionally handing off to a phase | `--claim-id CLAIM_ID` | `--to-phase PHASE`, `--reason TEXT` |
+| `tkt reap` | Release every claim lapsed past the skew grace | | |
+
+### Lifecycle
+
+| Command | Purpose | Required | Optional |
+|---|---|---|---|
+| `tkt done ID` | Complete it: resolution `done`, final (holder only) | `--claim-id CLAIM_ID` | |
+| `tkt cancel ID` | Abandon it: resolution `cancelled`, final (no claim needed) | | `--reason TEXT`, `--as AGENT` |
+
+### Read
+
+| Command | Purpose | Required | Optional |
+|---|---|---|---|
+| `tkt list` | List tickets | | `--status STATUS`, `--phase PHASE`, `--project PROJECT`, `--agent AGENT`, `--kind KIND` |
+| `tkt show ID` | One ticket with its derived status | | |
+| `tkt log [ID]` | History from commit trailers | | `--limit N` |
+
+Values: `KIND` is `story`, `task` or `bug`; `PHASE` is `development`, `review` or `qa`;
+`STATUS` is `open`, `blocked`, `claimed`, `expired`, `done` or `cancelled`. Repeated
+flags (`…`) may be given several times.
+
+## Rules worth knowing
+
+- **Ids.** The caller supplies every id: ticket ids match `^tkt-[0-9a-f]+$`; claim ids
+  are exactly 32 lowercase hex characters. Re-running a command with the same ids
+  converges (`unchanged`) instead of creating a second ticket or claim. A claim id is
+  single-use and names one claim on one ticket; after its claim ends it is refused
+  (`NOT_HOLDER`) while any ticket still records it (as `ended_claim_id`).
+- **TTL** is an integer number of seconds, `0 < ttl <= 86400` (24 h). It should exceed
+  the renew interval plus the 60 s skew grace plus the expected clock skew.
+- **Expiry.** A claim reads `expired` from its `lease_until`, but can be taken over or
+  reaped only 60 s later. A ticket that is both blocked and expired reads `blocked`;
+  `reap` still releases its claim. `reap` is idempotent; any writer may run it on a
+  schedule.
+- **Edit.** An omitted option leaves that field unchanged; `--clear-…` empties it.
+  `--if-version` is the ticket's `content_version` you based the edit on (from
+  `tkt show`): if it was edited since, the edit is refused `STALE` instead of
+  overwriting. Re-running an edit that already landed is `unchanged`. Only `edit` changes
+  the content version, so claims and renewals never cause `STALE`. `kind` and `project`
+  cannot be changed.
+- **Holder re-runs.** Re-running a `release` that landed is `unchanged`, even if someone
+  has claimed the ticket since (with `--to-phase`, only while the ticket is still in
+  that phase; otherwise `NOT_HOLDER`). Re-running a landed `done` is `unchanged`. The
+  exact rules are the holder-op table in `docs/design.md` §5.
+- **Text.** `--title`, `--reason` and `--as` must not contain newlines or other control
+  characters (they are written into the commit message).
 - **Actor.** `--as` on `add`, `edit` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
-- **`edit`.** An omitted option means "unchanged"; `--priority none` clears the
-  priority. `kind` and `project` cannot be changed. `--if-version N` is required: the
-  ticket's `content_version` you based the edit on (from `tkt show`). If someone updated the
-  ticket since, the edit is refused `STALE` (exit 1) instead of overwriting theirs:
-  re-read and retry. Re-running an edit that already landed is a no-op. Only `edit`
-  changes the content version, so claims and renewals never cause `STALE`.
-- **Text fields.** `--as`, `--reason` and `TITLE`/`--title` must not contain newlines
-  or other control characters (they are written into the commit message).
-- **Durations.** `--ttl` takes `Ns`, `Nm`, `Nh` or bare seconds (`90s`, `30m`, `2h`,
-  `1800`). Default: 30 minutes; maximum 24 hours.
-- **Expiry.** A claim reads `expired` from its `lease_until`, but can be taken over or
-  reaped only 60 s later (the fixed skew grace). A ticket that is both blocked and
-  expired reads `blocked`, so `list --status expired` omits it; `reap` still releases
-  its claim. Choose a TTL well above your renew interval plus the grace and expected
-  clock skew.
-- **Reaping.** `tkt reap` is idempotent; any writer can run it on a schedule.
 
-## Exit codes
+## Output (always JSON)
 
-| Code | Meaning |
-|---|---|
-| 0 | Committed, or unchanged (idempotent repeat) |
-| 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit) |
-| 2 | Usage error (including no `--repo` and no `$TKT_REPO`) |
-| 3 | Retries exhausted after repeated conflicts; nothing written — re-run with the printed ids |
-| 4 | Store error (git failure, remote unreachable or not configured, corrupt data). A failure during the push may mean the commit landed: re-run with the printed ids, which converges either way |
-
-## JSON output
-
-With `--json`, each command prints one JSON value. Every mutation prints an object. For
-`committed` and `unchanged`, `tickets` lists the affected tickets as they are after the op
-(empty for `init`); refusals carry a code and message, failures carry the op:
+Every command prints one JSON value. Mutations print an object:
 
 ```json
 {"outcome": "committed", "revision": "a1b2c3…", "tickets": [{…}]}
@@ -86,10 +106,20 @@ With `--json`, each command prints one JSON value. Every mutation prints an obje
 {"outcome": "error", "exit": 4, "message": "push failed: …", "op": {"op": "claim", "ticket_id": "tkt-7f3a91c2", "claim_id": "…"}}
 ```
 
-- An `unchanged` claim or claim-next still shows the claim it holds, so the claim id is
-  never lost on a re-run.
-- Failures (exit 3 and 4) print the op with the ids it was last tried with; without
-  `--json` they go to stderr with a "re-run with `--id`/`--claim-id`" hint.
-- `show` prints the ticket object with its derived `status` and `claim_age` (seconds since
-  `claim.claimed_at`).
-- `list` prints an array of tickets; `log` prints an array of history entries.
+- `tickets` lists the affected tickets as they are after the op, in their on-branch
+  form (docs/format.md): exactly one for single-ticket commands, none for `init`, zero
+  or more for `reap`. An `unchanged` claim or claim-next still shows the claim it holds.
+- Refusals carry a `code` and `message`; failures carry the `op` with the ids it was
+  last tried with, so the same command can simply be re-run.
+- Reads: `list` and `log` print a JSON array; `show` prints
+  `{"ticket": {…}, "status": "…"}`, or a refused `NOT_FOUND` object for an unknown id.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Committed, unchanged, or a successful read |
+| 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit, not found) |
+| 2 | Usage error (missing or conflicting flags) |
+| 3 | Retries exhausted after repeated conflicts; nothing written — re-run the same command |
+| 4 | Store error (git failure, remote unreachable or not configured, corrupt data). A failure during the push may mean the commit landed: re-run the same command, which converges either way |

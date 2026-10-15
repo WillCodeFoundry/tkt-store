@@ -37,7 +37,7 @@ from tkt_store.application.transaction import Committed, Refused
 from tkt_store.domain.outcomes import RefusalCode
 from tkt_store.domain.ticket import AgentId, TicketId
 from tkt_store.infrastructure.backoff import JitteredBackoff
-from tkt_store.infrastructure.clock import SystemClock, sleep
+from tkt_store.infrastructure.clock import SystemClock, monotonic, sleep
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError, git_runner
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
@@ -94,7 +94,7 @@ def clone(url: str, workdir: Path, name: str) -> Path:
 def service(repo: Path) -> tuple[TicketStore, CountingRunner]:
     """The production wiring of open_store, with a counting runner."""
     runner = CountingRunner(repo)
-    backoff = JitteredBackoff(sleep=sleep, jitter=jitter)
+    backoff = JitteredBackoff(sleep=sleep, jitter=jitter, monotonic=monotonic)
     store = GitStore(runner, remote="origin")
     return TicketStore(store, SystemClock(), RandomIds(), backoff=backoff), runner
 

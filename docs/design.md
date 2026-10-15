@@ -121,24 +121,32 @@ it is agnostic to git vs in-memory by construction.
 
 ## 4. The transaction
 
-Every mutation goes through `application.transaction.transact(store, op, clock)`:
+Every mutation goes through `application.transaction.transact(store, op, clock, *, backoff)`:
 
 ```text
+0. wait_after_loss = backoff.begin()        # an attempt starts (it is timed)
 1. snap  = store.snapshot()                 # revision + tickets
 2. dec   = rules.decide(snap, op, now)      # pure; dec.record.at = now
 3. if dec is Refusal → return Refused       # nothing written
    if dec is NoOp    → return Unchanged     # idempotent repeat
 4. try store.commit(snap.revision, dec.changes, dec.record)
        → return Committed(revision, record, tickets)
-   except Conflict → backoff.wait(attempt), goto 1 (bounded attempts), rules re-run
-                     on fresh state
+   except Conflict → wait_after_loss(attempt), goto 0 (bounded attempts), rules
+                     re-run on fresh state
 ```
 
 **Backoff.** Between lost races the loop waits through the `Backoff` port: the
 production `JitteredBackoff` (`infrastructure/backoff.py`, wired by `open_store`) waits a
-uniform random time from a window that doubles from 1 s up to 16 s ("full jitter"), so
-contending writers spread out instead of colliding again. Without a backoff the loop
-retries at once (tests). Measured effect: ADR 0001.
+uniform random time ("full jitter") from a window counted in *slots*, where a slot is
+how long the attempt that lost took: 1, 2, 4, … slots, capped at 60 s. Attempts take
+seconds against GitHub and milliseconds against a local ref, so the same policy fits
+both without tuning, and contending writers spread out instead of colliding again.
+The cap bounds the total: at most 9 waits of 60 s (9 minutes) plus the 10 attempts
+themselves, however slow; with ~3.5 s attempts, about 6 minutes at worst and 3 on
+average. That fits the 10 minutes (plus the 60 s grace) a renewal at two-thirds of a
+30-minute lease leaves, so the cap should not exceed 60 s. The backoff keeps no state
+between attempts. Without a backoff the loop retries at once (tests). Measured effect:
+ADR 0001.
 
 The **expected old value** in step 4 is the base the decision was computed from,
 never a fresh read (lesson from balls' bl-cdec G1).

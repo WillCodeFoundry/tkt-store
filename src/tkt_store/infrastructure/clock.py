@@ -15,6 +15,11 @@ class SystemClock:
         return int(time.time())
 
 
+def monotonic() -> float:
+    """Seconds on a clock that never jumps (to time attempts, for backoff)."""
+    return time.monotonic()
+
+
 def sleep(seconds: float) -> None:
     """Block for `seconds` (the transaction loop's backoff, via JitteredBackoff)."""
     time.sleep(seconds)

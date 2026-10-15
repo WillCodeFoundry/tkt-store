@@ -65,13 +65,15 @@ def transact(
     - Refusal and NoOp return immediately; nothing is written. A NoOp's
       `ticket_ids` are resolved against the snapshot into `Unchanged.tickets`.
     - Committed.tickets are the tickets written by the Apply.
-    - After a Conflict, `backoff.wait(attempt)` before the next attempt (none after the
-      last; no backoff means retry at once).
+    - Each attempt starts with `backoff.begin()`; after a Conflict, the wait it returned
+      is called with the attempt number before the next attempt (never after the last;
+      no backoff means retry at once).
     - After `max_attempts` conflicts, raise RetriesExhausted(op).
     - A StoreError from the store is re-raised as StoreError(message, op=op) from the
       original, so the caller has the ids to re-run with.
     """
     for attempt in range(1, max_attempts + 1):
+        wait_after_loss = None if backoff is None else backoff.begin()
         try:
             snapshot = store.snapshot()
         except StoreError as error:
@@ -85,8 +87,8 @@ def transact(
         try:
             revision = store.commit(snapshot.revision, decision.changes, decision.record)
         except Conflict:
-            if backoff is not None and attempt < max_attempts:
-                backoff.wait(attempt)
+            if wait_after_loss is not None and attempt < max_attempts:
+                wait_after_loss(attempt)
             continue
         except StoreError as error:
             raise StoreError(str(error), op=op) from error

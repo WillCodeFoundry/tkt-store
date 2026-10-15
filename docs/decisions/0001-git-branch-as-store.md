@@ -59,8 +59,11 @@ then `done`, with no work between ops (the worst case):
 | 10 | jittered | 0.34 | 347 of 443 (78%) | 10 | 11.2 / 46.7 / 87.0 s |
 
 Without backoff the latency column counts only operations that succeeded; the others
-gave up after about 35 s. The jittered backoff (`infrastructure/backoff.py`: full
-jitter, window doubling from 1 s to 16 s) turns most of those into slower successes.
+gave up after about 35 s. The jittered row used full jitter with a fixed window doubling
+from 1 s to 16 s; it turns most of those into slower successes. Its first windows were
+shorter than one attempt (~3.5 s), so early retries still collided; the backoff now
+counts its window in slots, the duration of the attempt that lost (design.md §4). That
+version is not yet measured.
 
 **Findings.**
 

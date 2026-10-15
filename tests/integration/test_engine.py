@@ -3,7 +3,7 @@ injected stores that fail on purpose."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 
 import pytest
 
@@ -136,27 +136,50 @@ def test_commit_uses_the_snapshot_revision_not_a_fresh_read(store: MemStore) -> 
 
 
 class RecordingBackoff:
-    def __init__(self) -> None:
-        self.waits: list[int] = []
+    """Records "begin" and "wait N" into a shared event list."""
 
-    def wait(self, attempt: int) -> None:
-        self.waits.append(attempt)
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    def begin(self) -> Callable[[int], None]:
+        self.events.append("begin")
+        return lambda attempt: self.events.append(f"wait {attempt}")
 
 
-def test_backoff_waits_between_attempts_never_after_the_last(store: MemStore) -> None:
-    backoff = RecordingBackoff()
+class SnapshotLogging(FailingStore):
+    """Every commit conflicts; every snapshot is logged into the event list."""
+
+    def __init__(self, inner: MemStore, events: list[str]) -> None:
+        super().__init__(inner, Conflict(None, None))
+        self.events = events
+
+    def snapshot(self) -> Snapshot:
+        self.events.append("snapshot")
+        return super().snapshot()
+
+
+def test_backoff_begins_each_attempt_and_waits_between_never_after_the_last(
+    store: MemStore,
+) -> None:
+    events: list[str] = []
     with pytest.raises(RetriesExhausted):
-        transact(FailingStore(store, Conflict(None, None)), ClaimOp(T1, A, C1, TTL),
-                 FakeClock(NOW), max_attempts=4, backoff=backoff)  # fmt: skip
-    assert backoff.waits == [1, 2, 3]
+        transact(SnapshotLogging(store, events), ClaimOp(T1, A, C1, TTL), FakeClock(NOW),
+                 max_attempts=3, backoff=RecordingBackoff(events))  # fmt: skip
+    assert events == [
+        "begin", "snapshot", "wait 1",
+        "begin", "snapshot", "wait 2",
+        "begin", "snapshot",
+    ]  # fmt: skip
 
 
 def test_backoff_waits_only_after_a_lost_race(store: MemStore) -> None:
-    backoff = RecordingBackoff()
+    events: list[str] = []
+    backoff = RecordingBackoff(events)
     store.before_next_commit(lambda: other_writer(store, tkt(T2)))
     outcome = transact(store, ClaimOp(T1, A, C1, TTL), FakeClock(NOW), backoff=backoff)
-    assert isinstance(outcome, Committed) and backoff.waits == [1]  # one lost race
+    assert isinstance(outcome, Committed) and events == ["begin", "wait 1", "begin"]
+    events.clear()
     assert isinstance(
         transact(store, ClaimOp(T2, A, C2, TTL), FakeClock(NOW), backoff=backoff), Committed
     )
-    assert backoff.waits == [1]
+    assert events == ["begin"]

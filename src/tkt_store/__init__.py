@@ -37,7 +37,7 @@ from tkt_store.domain.outcomes import Refusal, RefusalCode
 from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import Claim, Kind, Phase, Resolution, Revision, Ticket
 from tkt_store.infrastructure.backoff import JitteredBackoff
-from tkt_store.infrastructure.clock import FakeClock, SystemClock, sleep
+from tkt_store.infrastructure.clock import FakeClock, SystemClock, monotonic, sleep
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
 from tkt_store.infrastructure.ids import RandomIds, SequentialIds, jitter
@@ -62,7 +62,7 @@ def open_store(
     composition root — the one place that names concrete adapters.
     """
     store = GitStore.at(repo, ref=ref, remote=remote)
-    backoff = JitteredBackoff(sleep=sleep, jitter=jitter)
+    backoff = JitteredBackoff(sleep=sleep, jitter=jitter, monotonic=monotonic)
     return TicketStore(store, clock or SystemClock(), ids or RandomIds(), backoff=backoff)
 
 

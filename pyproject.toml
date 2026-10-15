@@ -14,6 +14,9 @@ dependencies = []  # stdlib only; requires the `git` binary at runtime
 [dependency-groups]
 dev = ["pytest>=8", "hypothesis>=6", "ruff==0.17.0", "mypy>=1.10", "pre-commit>=3"]
 
+[tool.uv]
+default-groups = []  # dev tools are opt-in: `uv sync --group dev`
+
 [project.scripts]
 tkt = "tkt_store.cli:main"
 
@@ -22,6 +25,7 @@ packages = ["src/tkt_store"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-q"
 markers = [
   "git: needs a real git binary (integration, contract against GitStore)",
   "slow: property tests and race tests",
@@ -37,4 +41,16 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 strict = true
 mypy_path = "src"
-packages = ["tkt_store"]
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# Test functions take fixtures as parameters; their bodies are still checked.
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# The shared fixtures stay fully typed.
+module = ["tests.conftest"]
+disallow_untyped_defs = true

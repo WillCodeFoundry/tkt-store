@@ -11,9 +11,8 @@ wheels/
 *.egg
 .eggs/
 
-# Virtual environments / uv
+# Virtual environments (uv.lock is tracked)
 .venv/
-uv.lock
 
 # Test, coverage and type-check caches
 .pytest_cache/

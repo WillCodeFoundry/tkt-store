@@ -73,7 +73,13 @@ This project uses [uv](https://docs.astral.sh/uv/) for environments,
 dependencies and running tools. Do not use `pip`.
 
 ```sh
-uv sync                       # create .venv with the dev dependency group
-uv run pre-commit install
+uv sync --group dev           # create .venv from uv.lock, with the opt-in dev tools
+uv run pre-commit install     # git hooks as a safety net
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
 uv run pytest
 ```
+
+`uv.lock` is tracked; commit it whenever dependencies change. See `AGENTS.md` for the
+commit rules and hooks.

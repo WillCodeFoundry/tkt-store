@@ -22,12 +22,12 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
-| **Claim id** | A token per claim (random, or supplied by the caller). Fences stale holders: renew/release/done must present it, and a completed ticket remembers it (`closed_by`). |
+| **Claim id** | A token per claim (random, or supplied by the caller). Fences stale holders: renew/release/done must present it, and a completed ticket remembers it (`done_by`). |
 | **Stage** | *Stored* lifecycle position: the workflow phases `development`/`review`/`qa` (no forced order) plus the terminal `done`/`cancelled`. A terminal ticket is never claimable again. |
 | **Status** | *Derived*, never stored — the availability axis: `open`, `blocked`, `claimed`, `expired`, plus `done`/`cancelled` surfaced from a terminal stage. |
 | **Op** | A requested change, carrying the identities it needs (ticket id, and where relevant agent and claim id). |
 | **Decision** | What the rules say about an op against a snapshot: apply these changes, no-op, or refuse. |
-| **Snapshot** | An immutable view of the store at one revision (`base`). |
+| **Snapshot** | An immutable view of the store at one revision (`revision`). |
 | **Revision** | An opaque handle to one committed state (a git commit id, but never parsed or ordered). |
 | **Op record** | The commit message trailers describing an applied op — the audit log entry, including the injected time (`tkt-time`). |
 
@@ -88,11 +88,11 @@ it is agnostic to git vs in-memory by construction.
 Every mutation goes through `application.transaction.transact(store, op, clock)`:
 
 ```text
-1. snap  = store.snapshot()                 # base revision + tickets
+1. snap  = store.snapshot()                 # revision + tickets
 2. dec   = rules.decide(snap, op, now)      # pure; dec.record.at = now
 3. if dec is Refusal → return Refused       # nothing written
    if dec is NoOp    → return Unchanged     # idempotent repeat
-4. try store.commit(snap.base, dec.changes, dec.record)
+4. try store.commit(snap.revision, dec.changes, dec.record)
        → return Committed(new_revision)
    except Conflict → goto 1 (bounded attempts), rules re-run on fresh state
 ```
@@ -109,7 +109,7 @@ never a fresh read (lesson from balls' bl-cdec G1).
 2. **One op = one commit**, published by compare-and-swap against its base.
 3. **Re-validate after conflict.** Rules always run against the snapshot being committed on.
 4. **Fencing.** `renew`, `release`, `done` require the current `claim_id`; otherwise `NOT_HOLDER`.
-   Fencing survives completion: a `done` ticket records the completing claim (`closed_by`).
+   Fencing survives completion: a `done` ticket records the completing claim (`done_by`).
    A holder whose lease lapsed may still renew, release or complete until someone takes
    the claim over or reaps it.
 5. **Idempotence.** Repeating an op whose effect is already present yields `NoOp`, not an error

@@ -81,7 +81,7 @@ def validate_op(op: Op) -> Refusal | None:
 
 
 def decide_init(snapshot: Snapshot, op: InitOp, now: Timestamp) -> Decision:
-    """Apply an empty tree if base is None; NoOp otherwise."""
+    """Apply an empty tree if snapshot.revision is None; NoOp otherwise."""
     raise NotImplementedError
 
 
@@ -145,12 +145,12 @@ def decide_release(snapshot: Snapshot, op: ReleaseOp, now: Timestamp) -> Decisio
 
 def decide_done(snapshot: Snapshot, op: DoneOp, now: Timestamp) -> Decision:
     """Refuse: NOT_FOUND; TERMINAL if CANCELLED; NOT_HOLDER if claimed under another
-    claim_id, or if already DONE with closed_by != op.claim_id (fencing survives
+    claim_id, or if already DONE with done_by != op.claim_id (fencing survives
     completion).
-    NoOp: already DONE and op.claim_id == closed_by (idempotent repeat after success).
+    NoOp: already DONE and op.claim_id == done_by (idempotent repeat after success).
     A matching claim_id is accepted even when the claim has expired, as long as
     nobody took it over (mirrors decide_renew).
-    Apply: stage = DONE, closed_by = op.claim_id, claim = None."""
+    Apply: stage = DONE, done_by = op.claim_id, claim = None."""
     raise NotImplementedError
 
 

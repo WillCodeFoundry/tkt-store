@@ -58,11 +58,11 @@ class TestFencing:
         Refusal(NOT_HOLDER)."""
 
     def test_done_by_stale_holder_after_completion(self) -> None:
-        """B completes (closed_by = B), then stale A sends DoneOp → Refusal(NOT_HOLDER),
+        """B completes (done_by = B), then stale A sends DoneOp → Refusal(NOT_HOLDER),
         not NoOp."""
 
-    def test_done_records_closed_by(self) -> None:
-        """DoneOp → Apply: stage=DONE, closed_by=op.claim_id, claim=None."""
+    def test_done_records_done_by(self) -> None:
+        """DoneOp → Apply: stage=DONE, done_by=op.claim_id, claim=None."""
 
     def test_done_on_lapsed_claim_not_taken_over(self) -> None:
         """Matching claim_id on an expired claim nobody took over → Apply."""
@@ -82,7 +82,7 @@ class TestIdempotence:
         """→ Refusal(DUPLICATE_ID)."""
 
     def test_done_twice_is_noop(self) -> None:
-        """A second DoneOp by the same claim (claim_id == closed_by) → NoOp."""
+        """A second DoneOp by the same claim (claim_id == done_by) → NoOp."""
 
     def test_release_when_unclaimed_is_noop(self) -> None:
         """No to_stage, ticket already unclaimed and non-terminal → NoOp."""

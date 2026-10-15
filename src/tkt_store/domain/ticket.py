@@ -106,7 +106,7 @@ class Ticket:
     tags: tuple[str, ...] = ()
     claim: Claim | None = None
     stage: Stage = Stage.DEVELOPMENT
-    closed_by: ClaimId | None = None
+    done_by: ClaimId | None = None
     """The claim that completed the ticket; set only when stage is DONE. Keeps `done`
     fenced after completion (a repeat is a NoOp only for this claim id)."""
     extra: Mapping[str, Any] = field(default_factory=dict)
@@ -128,10 +128,11 @@ class Ticket:
 class Snapshot:
     """An immutable view of the store at one revision.
 
-    `base` is None only for an unborn store (before `init`).
+    `revision` is None only for an unborn store (before `init`). It is what a commit
+    built from this snapshot passes as its `base` (compare-and-swap).
     """
 
-    base: Revision | None
+    revision: Revision | None
     tickets: Mapping[TicketId, Ticket]
 
     def get(self, ticket_id: TicketId) -> Ticket | None:

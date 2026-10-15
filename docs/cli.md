@@ -23,9 +23,9 @@ Global options:
 | `tkt show ID` | One ticket, with derived status and claim age | |
 | `tkt claim ID` | Claim a ticket; prints the claim id | `--as AGENT` (required), `--ttl DURATION`, `--claim-id CLAIM_ID` |
 | `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT`, `--ttl`, `--claim-id CLAIM_ID`, `--project`, `--kind`, `--stage` |
-| `tkt renew ID` | Extend a lease | `--claim CLAIM_ID`, `--ttl` |
-| `tkt release ID` | Give a claim back; optionally hand off to another stage | `--claim CLAIM_ID`, `--reason`, `--to-stage` |
-| `tkt done ID` | Complete it (terminal `done`) | `--claim CLAIM_ID` |
+| `tkt renew ID` | Extend a lease | `--claim-id CLAIM_ID`, `--ttl` |
+| `tkt release ID` | Give a claim back; optionally hand off to another stage | `--claim-id CLAIM_ID`, `--reason`, `--to-stage` |
+| `tkt done ID` | Complete it (terminal `done`) | `--claim-id CLAIM_ID` |
 | `tkt cancel ID` | Abandon it (terminal `cancelled`, no claim needed) | `--reason` |
 | `tkt reap` | Release every claim lapsed past the skew grace | |
 | `tkt log [ID]` | History from commit trailers | `--limit` |

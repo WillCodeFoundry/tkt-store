@@ -29,7 +29,7 @@ tickets/
   "tags": ["auth"],
   "claim": {"agent": "coder-7", "claim_id": "c9f2e1…", "lease_until": 1791000000},
   "stage": "development",
-  "closed_by": null,
+  "done_by": null,
   "created": 1790990000,
   "updated": 1790995000
 }
@@ -47,7 +47,7 @@ tickets/
 | `tags` | list[string] | free-form |
 | `claim` | object \| null | present ⇒ held (possibly expired); `claim_id` is lowercase hex (`^[0-9a-f]+$`) |
 | `stage` | `"development" \| "review" \| "qa" \| "done" \| "cancelled"` | lifecycle position; `done`/`cancelled` are terminal (final once set) |
-| `closed_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
+| `done_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
 | `created`, `updated` | int | unix seconds (from the injected clock) |
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no

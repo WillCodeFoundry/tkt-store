@@ -20,7 +20,7 @@ class RefusalCode(StrEnum):
     NOT_INITIALISED = "NOT_INITIALISED"
     NOT_FOUND = "NOT_FOUND"
     DUPLICATE_ID = "DUPLICATE_ID"  # add with an existing id but different content
-    ALREADY_CLAIMED = "ALREADY_CLAIMED"  # a live claim held by someone else
+    ALREADY_CLAIMED = "ALREADY_CLAIMED"  # someone else's claim, not yet takeable (live or in grace)
     NOT_HOLDER = "NOT_HOLDER"  # claim_id does not match the current claim (fencing)
     NOT_CLAIMED = "NOT_CLAIMED"
     BLOCKED = "BLOCKED"  # a blocker is not yet done

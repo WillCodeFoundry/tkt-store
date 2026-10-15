@@ -12,7 +12,7 @@ def test_unknown_keys_preserved_at_top_level() -> None:
     """Unknown keys land in Ticket.extra and are written back at top level (no 'extra' key)."""
 
 
-def test_closed_by_round_trips() -> None: ...
+def test_done_by_round_trips() -> None: ...
 
 
 def test_message_round_trip() -> None:

@@ -37,10 +37,10 @@ export TKT_REPO=~/work/tasks   # this agent's clone; origin is the shared remote
 tkt init                       # once per store; fails if origin is not configured
 tkt add "Expire reset tokens" --kind task --priority 2
 tkt claim tkt-7f3a --as coder-7 --ttl 30m      # prints a claim id
-tkt renew tkt-7f3a --claim c9f2… --ttl 30m
-tkt release tkt-7f3a --claim c9f2… --to-stage review   # hand off to the next phase
+tkt renew tkt-7f3a --claim-id c9f2… --ttl 30m
+tkt release tkt-7f3a --claim-id c9f2… --to-stage review   # hand off to the next phase
 tkt claim-next --as reviewer-2 --stage review  # a review agent pulls its phase
-tkt done  tkt-7f3a --claim d4a1…               # terminal: done
+tkt done  tkt-7f3a --claim-id d4a1…               # terminal: done
 tkt list --stage qa --json
 tkt reap                                        # release lapsed claims (any writer, on a schedule)
 ```

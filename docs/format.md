@@ -6,9 +6,9 @@ here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stag
 
 ## Branch layout
 
-Default ref: `refs/heads/tkt/store`, i.e. the branch `tkt/store`. It is an ordinary branch,
+Default ref: `refs/heads/tkt-store`, i.e. the branch `tkt-store`. It is an ordinary branch,
 so it is visible on the git host; branch protection (refuse force-push and deletion)
-must target it, and a `tkt/*` rule also covers any future tkt branches.
+must target it.
 
 ```text
 tkt-store.json

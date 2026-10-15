@@ -17,7 +17,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 
 | Term | Meaning |
 |---|---|
-| **Store** | One git ref (default `refs/heads/tkt/store`, the branch `tkt/store`) holding `tickets/<id>.json`, normally backed by a remote (`origin`). The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
+| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding `tickets/<id>.json`, normally backed by a remote (`origin`). The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
 | **Ticket** | A unit of work. Its fields fall into five groups, each changed one way (see *Data model* below). |
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
@@ -265,7 +265,7 @@ at most an optional convenience, never a safety mechanism. Correctness rests on:
 - compare-and-swap on the ref (one op = one commit; lost races retry), and
 - claim-id fencing (a stale holder can no longer change the ticket), and
 - **a remote that refuses non-fast-forward pushes and deletion of the store branch**
-  (`tkt/store` by default; on GitHub, a branch protection rule or ruleset on `tkt/*`) — a
+  (`tkt-store` by default; on GitHub, a branch protection rule or ruleset on it) — a
   deployment precondition (a self-hosted pre-receive hook, or branch protection on a
   plan that offers it).
 

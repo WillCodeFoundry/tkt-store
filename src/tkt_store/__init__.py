@@ -30,7 +30,7 @@ from tkt_store.application.transaction import Committed, Outcome, Refused, Uncha
 from tkt_store.domain.errors import TktError
 from tkt_store.domain.outcomes import Refusal, RefusalCode
 from tkt_store.domain.status import Status
-from tkt_store.domain.ticket import Claim, Kind, Revision, Stage, Ticket
+from tkt_store.domain.ticket import Claim, Kind, Phase, Resolution, Revision, Ticket
 from tkt_store.infrastructure.clock import FakeClock, SystemClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
@@ -69,15 +69,16 @@ __all__ = [
     "Kind",
     "MemStore",
     "Outcome",
+    "Phase",
     "RandomIds",
     "Refusal",
     "RefusalCode",
     "Refused",
     "RefusedError",
+    "Resolution",
     "RetriesExhausted",
     "Revision",
     "SequentialIds",
-    "Stage",
     "Status",
     "Store",
     "StoreError",

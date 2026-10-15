@@ -22,7 +22,7 @@ TRAILER_OP = "tkt-op"
 TRAILER_ID = "tkt-id"
 TRAILER_AGENT = "tkt-agent"
 TRAILER_CLAIM = "tkt-claim"
-TRAILER_STAGE = "tkt-stage"
+TRAILER_PHASE = "tkt-phase"
 TRAILER_REASON = "tkt-reason"
 TRAILER_TIME = "tkt-time"
 
@@ -66,13 +66,13 @@ def encode_message(record: OpRecord) -> str:
 
     The subject is always emitted on one line (defensively, although the rules
     already refuse control characters in titles). tkt-time (`record.at`) is always
-    written; tkt-stage only when `record.stage` is set.
+    written; tkt-phase only when `record.phase` is set.
     """
     raise NotImplementedError
 
 
 def decode_message(message: str) -> OpRecord | None:
-    """Parse trailers into an OpRecord, including `at` (tkt-time) and `stage` (tkt-stage).
+    """Parse trailers into an OpRecord, including `at` (tkt-time) and `phase` (tkt-phase).
     Returns None for commits without tkt trailers (foreign commits).
     Raises StoreError for an unknown future protocol version, or for a tkt commit
     missing a required trailer: tkt-protocol, tkt-op, tkt-time, and tkt-id (except init)."""

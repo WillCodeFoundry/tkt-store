@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Final, Literal
 
-from tkt_store.domain.ticket import AgentId, ClaimId, Duration, Kind, ProjectId, Stage, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Duration, Kind, Phase, ProjectId, TicketId
 
 
 class Unset(Enum):
@@ -56,16 +56,16 @@ class AddOp:
     priority: int | None = None
     blocked_by: tuple[TicketId, ...] = ()
     tags: tuple[str, ...] = ()
-    stage: Stage = Stage.DEVELOPMENT  # the phase a new ticket starts in
+    phase: Phase = Phase.DEVELOPMENT  # the phase a new ticket starts in
     agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)
 class UpdateOp:
     """Edit descriptive fields. UNSET means 'leave unchanged'; `priority=None` clears it.
-    Never touches claim/stage; kind and project are not updatable.
+    Changes content fields only (never identity, workflow or occupancy).
 
-    `expected_version` is required: the ticket version the edit was based on. A ticket
+    `expected_version` is required: the content_version the edit was based on. A ticket
     changed since then is refused STALE instead of silently overwritten.
     """
 
@@ -96,7 +96,7 @@ class ClaimNextOp:
     ttl: Duration
     project: ProjectId | None = None
     kind: Kind | None = None
-    stage: Stage | None = None  # e.g. a review agent pulls only stage=review
+    phase: Phase | None = None  # e.g. a review agent pulls only phase=review
 
 
 @dataclass(frozen=True)
@@ -108,18 +108,18 @@ class RenewOp:
 
 @dataclass(frozen=True)
 class ReleaseOp:
-    """Give up a claim. `to_stage`, if set, hands the ticket on to another phase
-    (a non-terminal stage) in the same commit. Use DoneOp/CancelOp to finish."""
+    """Give up a claim. `to_phase`, if set, hands the ticket on to that phase in the
+    same commit. Finishing is DoneOp/CancelOp (they set the resolution)."""
 
     ticket_id: TicketId
     claim_id: ClaimId
     reason: str = ""
-    to_stage: Stage | None = None
+    to_phase: Phase | None = None
 
 
 @dataclass(frozen=True)
 class DoneOp:
-    """Complete the ticket: move it to the terminal DONE stage. Holder-only."""
+    """Complete the ticket: resolution = DONE (terminal). Holder-only."""
 
     ticket_id: TicketId
     claim_id: ClaimId
@@ -127,7 +127,7 @@ class DoneOp:
 
 @dataclass(frozen=True)
 class CancelOp:
-    """Abandon the ticket: move it to the terminal CANCELLED stage.
+    """Abandon the ticket: resolution = CANCELLED (terminal).
     Requires no claim (an administrative act)."""
 
     ticket_id: TicketId

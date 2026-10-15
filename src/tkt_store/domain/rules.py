@@ -7,7 +7,7 @@ live. The result is a `Decision` from `domain.outcomes`.
 
 Every `Apply.record` carries `at=now`, the injected time (`OpRecord.at`), and the
 acting `agent` when the op names one. Every ticket an Apply writes gets updated = now;
-its content `version` starts at 1 (add) and only `update` increments it. The full
+its `content_version` starts at 1 (add) and only `update` increments it. The full
 op x state -> outcome table is in docs/design.md §5; the docstrings below summarise it.
 """
 
@@ -86,53 +86,52 @@ def decide_init(snapshot: Snapshot, op: InitOp, now: Timestamp) -> Decision:
 
 
 def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
-    """Refuse: NOT_INITIALISED, INVALID (empty title, unknown or self blocker,
-    op.stage in TERMINAL — a ticket reaches DONE only through its holder),
+    """Refuse: NOT_INITIALISED, INVALID (empty title, unknown or self blocker),
     DUPLICATE_ID (the id exists with different content).
     NoOp: the id exists and the stored ticket's AddOp fields (title, body, kind,
-    project, priority, blocked_by, tags, stage) equal the op's; created/updated are not
-    compared. Once the ticket has been updated, a late re-run gets DUPLICATE_ID.
-    Apply: a new ticket at op.stage with created = updated = now, version = 1."""
+    project, priority, blocked_by, tags, phase) equal the op's; created/updated are not
+    compared. Once the ticket has been edited, a late re-run gets DUPLICATE_ID.
+    Apply: a new, unresolved ticket in op.phase with created = updated = now,
+    content_version = 1. (A ticket cannot be created finished: AddOp has no resolution.)"""
     raise NotImplementedError
 
 
 def decide_update(snapshot: Snapshot, op: UpdateOp, now: Timestamp) -> Decision:
-    """In this order:
+    """Content op. In this order:
     NOT_FOUND; TERMINAL; INVALID (empty title, unknown or self blocker, dependency cycle);
     NoOp if every field the op sets already has that value (checked BEFORE the version, so
       a re-run of an update that already landed converges);
-    STALE if ticket.version != op.expected_version (someone changed it since it was read).
-    Apply: changed descriptive fields, updated = now, version + 1. Never touches
-    claim/stage; may add blockers to a claimed ticket without disturbing the claim.
-    No silent overwrite: concurrent edits of the same ticket are refused STALE, never
-    last-writer-wins."""
+    STALE if ticket.content_version != op.expected_version (edited since it was read).
+    Apply: the content fields it sets, updated = now, content_version + 1. Never touches
+    identity, workflow or occupancy; may add blockers to a claimed ticket without
+    disturbing the claim. No silent overwrite: concurrent edits are refused STALE."""
     raise NotImplementedError
 
 
 def decide_claim(snapshot: Snapshot, op: ClaimOp, now: Timestamp) -> Decision:
-    """In this order:
+    """Occupancy op. In this order:
     NOT_FOUND; TERMINAL;
     this ticket's current claim has op.claim_id: same agent -> NoOp (live or lapsed — it
       was not taken over; the caller should renew), another agent -> ALREADY_CLAIMED;
     ALREADY_CLAIMED if op.claim_id is the current claim on another ticket (one claim id
       names one claim on one ticket);
-    NOT_HOLDER if op.claim_id equals any ticket's last_claim_id or done_by (an ended
-      claim's id is fenced and cannot claim again);
+    NOT_HOLDER if op.claim_id equals any ticket's ended_claim_id (an ended claim's id is
+      fenced and cannot claim again);
     then `status.why_not_claimable` (BLOCKED, ALREADY_CLAIMED; TERMINAL already handled).
     Apply: claim = (agent, claim_id, lease_until = now + ttl, claimed_at = now). Taking
-    over a takeable claim sets last_claim_id to the old claim id, fencing it. Stage is
+    over a takeable claim sets ended_claim_id to the old claim id, fencing it. Phase is
     untouched. For a new claim id, accepts exactly when `status.claimable` is true."""
     raise NotImplementedError
 
 
 def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> Decision:
-    """In this order:
+    """Occupancy op. In this order:
     some ticket's current claim has op.claim_id: same agent -> NoOp naming that ticket
       (live or lapsed — a retry never takes a second ticket), another agent ->
       ALREADY_CLAIMED;
-    NOT_HOLDER if op.claim_id equals any ticket's last_claim_id or done_by;
+    NOT_HOLDER if op.claim_id equals any ticket's ended_claim_id;
     choose min(sort_key_for_next) among tickets for which `status.claimable` is true and
-      that match the filters (project, kind, stage; a project filter matches that exact
+      that match the filters (project, kind, phase; a project filter matches that exact
       value only, never a null project), then apply as decide_claim;
     NOTHING_CLAIMABLE if there is none."""
     raise NotImplementedError
@@ -141,7 +140,7 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
 def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
     """Holder op (design.md §5 table), in this order after NOT_FOUND:
     TERMINAL; current claim has op.claim_id -> Apply (even if lapsed, as long as nobody
-    took it over); op.claim_id == last_claim_id -> NOT_HOLDER; no claim -> NOT_CLAIMED;
+    took it over); op.claim_id == ended_claim_id -> NOT_HOLDER; no claim -> NOT_CLAIMED;
     claimed by another -> NOT_HOLDER.
     Apply: lease_until = now + ttl (claimed_at unchanged)."""
     raise NotImplementedError
@@ -149,42 +148,43 @@ def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
 
 def decide_release(snapshot: Snapshot, op: ReleaseOp, now: Timestamp) -> Decision:
     """Holder op (design.md §5 table), in this order after NOT_FOUND:
-    TERMINAL (terminal tickets are unclaimed, so this comes first);
-    INVALID if to_stage is terminal (use done/cancel);
+    TERMINAL (resolved tickets are unclaimed, so this comes first);
     current claim has op.claim_id -> Apply (even if lapsed, as long as nobody took it over);
-    op.claim_id == last_claim_id (the claim already ended: released, reaped or taken
-      over) -> NoOp if to_stage is absent or equals the current stage, else NOT_HOLDER
+    op.claim_id == ended_claim_id (the claim already ended: released, reaped or taken
+      over) -> NoOp if to_phase is absent or equals the current phase, else NOT_HOLDER
       ("claim ended before the handoff"); the NoOp reason says the claim ended;
     no claim -> NOT_CLAIMED; claimed by another -> NOT_HOLDER.
     A re-run of a landed release (including after a push-landed-then-conflict retry, or
     after someone else claimed the ticket) is therefore a NoOp.
-    Apply: claim = None, last_claim_id = op.claim_id; stage = op.to_stage when given (a
-    handoff to another phase), with record.stage = op.to_stage."""
+    Apply: claim = None, ended_claim_id = op.claim_id; phase = op.to_phase when given (a
+    handoff), with record.phase = op.to_phase."""
     raise NotImplementedError
 
 
 def decide_done(snapshot: Snapshot, op: DoneOp, now: Timestamp) -> Decision:
     """Holder op (design.md §5 table), in this order after NOT_FOUND:
-    terminal: CANCELLED -> TERMINAL; DONE and done_by == op.claim_id -> NoOp
+    resolved: CANCELLED -> TERMINAL; DONE and ended_claim_id == op.claim_id -> NoOp
       (idempotent repeat); DONE otherwise -> NOT_HOLDER (fencing survives completion);
     current claim has op.claim_id -> Apply (even if lapsed, as long as nobody took it over);
-    op.claim_id == last_claim_id -> NOT_HOLDER; no claim -> NOT_CLAIMED;
+    op.claim_id == ended_claim_id -> NOT_HOLDER; no claim -> NOT_CLAIMED;
     claimed by another -> NOT_HOLDER.
     Not gated by blockers: invariant 10 gates claims, not completion.
-    Apply: stage = DONE, done_by = op.claim_id, claim = None."""
+    Apply: resolution = DONE, claim = None, ended_claim_id = op.claim_id. Phase is kept."""
     raise NotImplementedError
 
 
 def decide_cancel(snapshot: Snapshot, op: CancelOp, now: Timestamp) -> Decision:
-    """Refuse: NOT_FOUND, TERMINAL as done. NoOp: already CANCELLED.
-    Apply: stage = CANCELLED, claim = None; a cleared claim's id goes to last_claim_id
-    (for uniformity — the terminal check means it never changes a holder-op result)."""
+    """Workflow op, deliberately unfenced (anyone may cancel; no claim needed).
+    Refuse: NOT_FOUND, TERMINAL if resolved DONE. NoOp: already CANCELLED.
+    Apply: resolution = CANCELLED, claim = None; a cleared claim's id goes to
+    ended_claim_id (the terminal check means it never changes a holder-op result).
+    Phase is kept, so the ticket records where it was abandoned."""
     raise NotImplementedError
 
 
 def decide_reap(snapshot: Snapshot, op: ReapOp, now: Timestamp) -> Decision:
-    """Apply: claim = None and last_claim_id = the reaped claim's id on every ticket whose
-    claim is takeable (`Claim.is_takeable`: past lease_until + SKEW_GRACE), blocked or
-    not; one record listing them all. NoOp: none is past the grace period.
-    Safe to run from any writer on a schedule (idempotent)."""
+    """Occupancy op. Apply: claim = None and ended_claim_id = the reaped claim's id on
+    every ticket whose claim is takeable (`Claim.is_takeable`: past lease_until +
+    SKEW_GRACE), blocked or not; one record listing them all. NoOp: none is past the
+    grace period. Safe to run from any writer on a schedule (idempotent)."""
     raise NotImplementedError

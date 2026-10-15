@@ -13,7 +13,7 @@ def test_never_two_live_holders() -> None:
     """Invariant 1."""
 
 
-def test_terminal_tickets_never_change_stage() -> None:
+def test_resolved_tickets_never_change() -> None:
     """Invariant 9."""
 
 

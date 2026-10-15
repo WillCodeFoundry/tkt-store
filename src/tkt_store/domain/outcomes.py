@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from tkt_store.domain.operations import OpName
-from tkt_store.domain.ticket import AgentId, ClaimId, Stage, Ticket, TicketId, Timestamp
+from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Ticket, TicketId, Timestamp
 
 
 class RefusalCode(StrEnum):
@@ -28,12 +28,12 @@ class RefusalCode(StrEnum):
     )
     NOT_CLAIMED = "NOT_CLAIMED"
     BLOCKED = "BLOCKED"  # a blocker is not yet done
-    TERMINAL = "TERMINAL"  # the ticket is already in a terminal stage (done/cancelled)
+    TERMINAL = "TERMINAL"  # the ticket is already resolved (done/cancelled): final
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
     # malformed op: bad id, control characters, ttl out of bounds, expected_version < 1,
-    # empty title, unknown/self blocker, dependency cycle, terminal add stage or to_stage
+    # empty title, unknown/self blocker, dependency cycle
     INVALID = "INVALID"
-    STALE = "STALE"  # update based on an older ticket version; re-read and retry
+    STALE = "STALE"  # update based on an older content_version; re-read and retry
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,7 @@ class OpRecord:
     `at` is the injected `now` the decision was made at (set by the rules), so the
     audit time is deterministic and needs no clock in the store. Clocks may skew
     across writers: `at` is informational and never grants exclusivity.
-    `stage` is the new stage on a release that hands off (`tkt-stage`).
+    `phase` is the new phase on a release that hands off (`tkt-phase`).
     """
 
     op: OpName
@@ -72,7 +72,7 @@ class OpRecord:
     claim_id: ClaimId | None = None
     reason: str = ""
     summary: str = ""
-    stage: Stage | None = None
+    phase: Phase | None = None
 
 
 @dataclass(frozen=True)

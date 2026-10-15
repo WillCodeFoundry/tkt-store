@@ -1,8 +1,8 @@
 # On-branch format — tkt-protocol 1
 
 Pre-1.0, while no store is deployed, format changes keep protocol 1 when documented
-here (AGENTS.md). Protocol 1 includes `done_by`, `last_claim_id`, `claim.claimed_at`,
-`version` and `tkt-store.json`.
+here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`),
+`ended_claim_id`, `claim.claimed_at`, `content_version` and `tkt-store.json`.
 
 ## Branch layout
 
@@ -39,12 +39,12 @@ tickets/
   "blocked_by": ["tkt-91c20b4e"],
   "tags": ["auth"],
   "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000, "claimed_at": 1790995000},
-  "stage": "development",
-  "done_by": null,
-  "last_claim_id": null,
+  "phase": "development",
+  "resolution": null,
+  "ended_claim_id": null,
   "created": 1790990000,
   "updated": 1790995000,
-  "version": 3
+  "content_version": 3
 }
 ```
 
@@ -59,11 +59,11 @@ tickets/
 | `blocked_by` | list[string] | ticket ids (same pattern as `id`) that must be `done` before claiming |
 | `tags` | list[string] | free-form |
 | `claim` | object \| null | present ⇒ held (possibly expired): `agent`, `claim_id` (exactly 32 lowercase hex characters), `lease_until`, `claimed_at` (unix seconds; renew keeps it) |
-| `stage` | `"development" \| "review" \| "qa" \| "done" \| "cancelled"` | lifecycle position; `done`/`cancelled` are terminal (final once set) |
-| `done_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
-| `last_claim_id` | string \| null | the most recent claim id that ended other than by `done` (released, reaped, taken over, cancelled); fenced: while recorded here it cannot claim again |
+| `phase` | `"development" \| "review" \| "qa"` | workflow position; moved only by the holder's handoff |
+| `resolution` | `"done" \| "cancelled"` \| null | null while open; set once by `done`/`cancel`; non-null means terminal (final) |
+| `ended_claim_id` | string \| null | the most recent claim id to end, however it ended (released, reaped, taken over, cancelled, done); fenced: while recorded here it cannot claim again |
 | `created`, `updated` | int | unix seconds (from the injected clock); `updated` is set by every op that writes the ticket |
-| `version` | int | content version for optimistic concurrency: 1 when added, incremented only by `update`; an update must name it (`STALE` otherwise) |
+| `content_version` | int | optimistic concurrency for content: 1 when added, incremented only by `update`; an update must name it (`STALE` otherwise) |
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).
@@ -94,7 +94,7 @@ tkt-claim: c9f2e1d07b3a4e58a6f0c2b9e4d1a873
 | `tkt-id` | yes (except `init`) | ticket id; `reap` lists one `tkt-id` per released ticket |
 | `tkt-agent` | when an agent acted | agent id (no control characters) |
 | `tkt-claim` | for claim-scoped ops | claim id |
-| `tkt-stage` | when a `release` hands off | the ticket's new stage |
+| `tkt-phase` | when a `release` hands off | the ticket's new phase |
 | `tkt-reason` | optional | free text, no control characters (cancel/release reasons) |
 
 A commit without tkt trailers is foreign and ignored by history. A tkt commit missing

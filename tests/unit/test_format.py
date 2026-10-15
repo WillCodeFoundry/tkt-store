@@ -12,13 +12,15 @@ def test_unknown_keys_preserved_at_top_level() -> None:
     """Unknown keys land in Ticket.extra and are written back at top level (no 'extra' key)."""
 
 
-@pytest.mark.parametrize("field", ["done_by", "last_claim_id", "claim.claimed_at", "version"])
+@pytest.mark.parametrize(
+    "field", ["phase", "resolution", "ended_claim_id", "claim.claimed_at", "content_version"]
+)
 def test_new_fields_round_trip(field: str) -> None: ...
 
 
 def test_message_round_trip() -> None:
     """encode_message → decode_message returns an equal OpRecord, including `at`
-    (tkt-time) and `stage` (tkt-stage)."""
+    (tkt-time) and `phase` (tkt-phase)."""
 
 
 def test_subject_is_one_line() -> None:

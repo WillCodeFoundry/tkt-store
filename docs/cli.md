@@ -17,16 +17,16 @@ Global options:
 | Command | Purpose | Key options |
 |---|---|---|
 | `tkt init` | Create the store ref with an empty `tickets/` tree and `tkt-store.json` | |
-| `tkt add TITLE` | Create a ticket; prints its id | `--id ID`, `--as AGENT`, `--kind`, `--body`, `--project`, `--priority`, `--blocked-by ID`…, `--tag`…, `--stage` (non-terminal; `done`/`cancelled` are refused) |
+| `tkt add TITLE` | Create a ticket; prints its id | `--id ID`, `--as AGENT`, `--kind`, `--body`, `--project`, `--priority`, `--blocked-by ID`…, `--tag`…, `--phase` |
 | `tkt update ID` | Edit title/body/priority/tags/dependencies | `--if-version N` (required), `--as AGENT`, `--title`, `--body`, `--priority N\|none`, `--blocked-by ID`…, `--tag`… |
-| `tkt list` | List tickets (derived status) | `--status`, `--stage`, `--project`, `--agent`, `--kind` |
-| `tkt show ID` | One ticket, with derived status, claim age and its content `version` | |
+| `tkt list` | List tickets (derived status) | `--status`, `--phase`, `--project`, `--agent`, `--kind` |
+| `tkt show ID` | One ticket, with derived status, claim age and its `content_version` | |
 | `tkt claim ID` | Claim a ticket; prints the claim id | `--as AGENT` (required), `--ttl DURATION`, `--claim-id CLAIM_ID` |
-| `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT` (required), `--ttl`, `--claim-id CLAIM_ID`, `--project`, `--kind`, `--stage` |
+| `tkt claim-next` | Claim the most urgent claimable ticket | `--as AGENT` (required), `--ttl`, `--claim-id CLAIM_ID`, `--project`, `--kind`, `--phase` |
 | `tkt renew ID` | Extend a lease | `--claim-id CLAIM_ID`, `--ttl` |
-| `tkt release ID` | Give a claim back; optionally hand off to another stage | `--claim-id CLAIM_ID`, `--reason`, `--to-stage` |
-| `tkt done ID` | Complete it (terminal `done`) | `--claim-id CLAIM_ID` |
-| `tkt cancel ID` | Abandon it (terminal `cancelled`, no claim needed) | `--as AGENT`, `--reason` |
+| `tkt release ID` | Give a claim back; optionally hand off to another phase | `--claim-id CLAIM_ID`, `--reason`, `--to-phase` |
+| `tkt done ID` | Complete it (resolution `done`, final) | `--claim-id CLAIM_ID` |
+| `tkt cancel ID` | Abandon it (resolution `cancelled`, final; no claim needed) | `--as AGENT`, `--reason` |
 | `tkt reap` | Release every claim lapsed past the skew grace | |
 | `tkt log [ID]` | History from commit trailers | `--limit` |
 
@@ -39,19 +39,19 @@ Notes:
   failure prints the generated ids so the command can be re-run with them. A claim id
   is single-use and names one claim on one ticket: re-use it only to retry the same
   claim. After its claim ends it is refused (`NOT_HOLDER`) while any ticket still
-  records it (as `done_by` or `last_claim_id`).
+  records it (as `ended_claim_id`).
 - **Re-runs of holder ops.** Re-running a `release` that landed is a no-op even if
-  someone has claimed the ticket since (with `--to-stage`, only while the ticket is still
-  at that stage; otherwise `NOT_HOLDER`). Re-running a landed `done` is a no-op. The exact rules are the
+  someone has claimed the ticket since (with `--to-phase`, only while the ticket is still
+  in that phase; otherwise `NOT_HOLDER`). Re-running a landed `done` is a no-op. The exact rules are the
   holder-op table in `docs/design.md` §5.
 - **Actor.** `--as` on `add`, `update` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
 - **`update`.** An omitted option means "unchanged"; `--priority none` clears the
   priority. `kind` and `project` cannot be changed. `--if-version N` is required: the
-  ticket's `version` you based the edit on (from `tkt show`). If someone updated the
+  ticket's `content_version` you based the edit on (from `tkt show`). If someone updated the
   ticket since, the edit is refused `STALE` (exit 1) instead of overwriting theirs:
   re-read and retry. Re-running an update that already landed is a no-op. Only `update`
-  changes the version, so claims and renewals never cause `STALE`.
+  changes the content version, so claims and renewals never cause `STALE`.
 - **Text fields.** `--as`, `--reason` and `TITLE`/`--title` must not contain newlines
   or other control characters (they are written into the commit message).
 - **Durations.** `--ttl` takes `Ns`, `Nm`, `Nh` or bare seconds (`90s`, `30m`, `2h`,

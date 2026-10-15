@@ -1,20 +1,33 @@
 """The Store, implemented on git plumbing (ADR 0001).
 
 No worktree, no index: a crash can only ever leave unreachable objects behind.
+Several processes may share one clone; the local ref is only a cache of the remote.
 
 snapshot():
-    [remote] remote.fetch + remote.fast_forward_local
-    git rev-parse --verify <ref>              -> base (None if unborn)
-    git ls-tree -r <base> tickets/            -> blob ids
-    git cat-file --batch                      -> file contents -> wire.decode_ticket
+    [remote] remote.fetch -> remote head (the snapshot's revision; never re-read the
+             shared local ref, and never FETCH_HEAD, which concurrent fetches overwrite)
+    [remote] remote.fast_forward_local(remote head)
+    [local]  git rev-parse --verify <ref>    -> revision (None if unborn)
+    git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError if
+                                                missing on a born ref or a newer protocol
+    git ls-tree -r <revision> tickets/       -> blob ids of wire.is_ticket_path entries only
+    git cat-file --batch                     -> file contents (bytes) -> wire.decode_ticket;
+                                                one corrupt ticket fails the whole snapshot
 
 commit(base, changes, record):
-    git hash-object -w --stdin                 (one per changed ticket)
-    git mktree                                 (base tree with replaced entries)
-    git commit-tree <tree> -p <base> -F -      (message = wire.encode_message(record))
-    [remote] remote.publish(new)               -> Conflict on non-fast-forward
-    git update-ref <ref> <new> <base>          -> Conflict if the local ref moved
-                                                  (for an unborn store: old value = zero id)
+    git hash-object -w --stdin                (one per changed ticket)
+    git mktree                                (base tree with replaced entries; when base
+                                               is None, also wire.encode_store_meta() as
+                                               tkt-store.json in the root commit)
+    git commit-tree <tree> [-p <base>] -F -   (message = wire.encode_message(record))
+    [remote] remote.publish(new)              -> Conflict on non-fast-forward; nothing published
+    [remote] git update-ref <ref> <new> <base> best-effort: once published, any failure
+                                               (ref moved, cannot lock ref, ...) is ignored
+                                               and commit returns `new`; the next snapshot
+                                               repairs the cache
+    [local]  git update-ref <ref> <new> <base> -> Conflict if the ref moved: here update-ref
+                                               IS the compare-and-swap
+                                               (for an unborn store: old value = zero id)
 """
 
 from __future__ import annotations
@@ -30,22 +43,27 @@ from tkt_store.infrastructure.git.wire import DEFAULT_REF
 
 
 class GitStore:
-    """A Store backed by one ref in one git repository, optionally mirrored to a remote."""
+    """A Store backed by one ref in one git repository.
+
+    `remote` has no default: name the shared remote (normally "origin"), or pass None
+    to choose a local-only store explicitly. It is never a silent fallback.
+    """
 
     def __init__(
         self,
         git: GitRunner,
+        *,
+        remote: str | None,
         ref: str = DEFAULT_REF,
-        remote: str | None = None,
     ) -> None:
         self._git = git
         self._ref = ref
         self._remote = remote
 
     @classmethod
-    def at(cls, repo: Path, ref: str = DEFAULT_REF, remote: str | None = None) -> GitStore:
+    def at(cls, repo: Path, *, remote: str | None, ref: str = DEFAULT_REF) -> GitStore:
         """Convenience constructor using git_runner(repo)."""
-        return cls(git_runner(repo), ref=ref, remote=remote)
+        return cls(git_runner(repo), remote=remote, ref=ref)
 
     def snapshot(self) -> Snapshot:
         raise NotImplementedError

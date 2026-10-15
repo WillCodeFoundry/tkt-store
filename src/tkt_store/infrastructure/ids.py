@@ -6,14 +6,13 @@ the caller BEFORE a transaction (invariant 7), so retries reuse them.
 
 from __future__ import annotations
 
-from tkt_store.domain.ticket import ClaimId, TicketId
-
-TICKET_PREFIX = "tkt-"
+from tkt_store.domain.ticket import TICKET_PREFIX, ClaimId, TicketId  # noqa: F401  (ticket ids)
 
 
 class RandomIds:
-    """Production ids from `secrets`. Ticket ids: prefix + 4+ hex chars, lengthened on
-    collision by the caller (rules refuse DUPLICATE_ID; the service retries with a new id)."""
+    """Production ids from `secrets`. Ticket ids: TICKET_PREFIX + 8 hex chars (short
+    enough to type); on the rare collision the rules refuse DUPLICATE_ID and the service
+    re-mints a fresh id."""
 
     def ticket_id(self) -> TicketId:
         raise NotImplementedError
@@ -25,7 +24,7 @@ class RandomIds:
 
 class SequentialIds:
     """Deterministic ids for tests, counting in hex so they pass the rules' id
-    patterns: tickets f"tkt-{n:04x}" (tkt-0001, ...), claims f"{n:08x}" (00000001, ...)."""
+    patterns: tickets f"tkt-{n:04x}" (tkt-0001, ...), claims f"{n:032x}" (32 hex digits)."""
 
     def __init__(self) -> None:
         self._n = 0

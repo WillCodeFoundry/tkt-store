@@ -1,37 +1,50 @@
 # On-branch format — tkt-protocol 1
 
+Pre-1.0, while no store is deployed, format changes keep protocol 1 when documented
+here (AGENTS.md). Protocol 1 includes `done_by`, `last_claim_id`, `claim.claimed_at`,
+`version` and `tkt-store.json`.
+
 ## Branch layout
 
 Default ref: `refs/heads/tkt`.
 
 ```text
+tkt-store.json
 tickets/
-  tkt-7f3a.json
-  tkt-91c2.json
+  tkt-7f3a91c2.json
+  tkt-91c20b4e.json
 ```
 
-- One file per ticket; the id is both the filename stem and the `id` field.
+- `tkt-store.json` records the format version, `{"protocol": 1}`. `init` writes it into
+  the root commit; every snapshot checks it and fails (`StoreError`) if it is missing or
+  newer than the client supports.
+- One file per ticket, `tickets/tkt-<hex>.json`; the id is both the filename stem and the
+  `id` field (a mismatch is an error).
 - Files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
   (stable diffs, byte-identical round trips).
-- No other files are meaningful. Unknown files are preserved, never interpreted.
+- No other files are meaningful. Unknown files (anything not matching the two paths
+  above) are preserved, never interpreted. A ticket file that fails to decode fails the
+  whole snapshot; repair it with an ordinary git commit.
 
 ## Ticket schema
 
 ```json
 {
-  "id": "tkt-7f3a",
+  "id": "tkt-7f3a91c2",
   "title": "Expire reset tokens",
   "body": "Markdown text …",
   "kind": "task",
   "project": "91c6469b14fef602e0bb5ab9957b09937623a0da",
   "priority": 2,
-  "blocked_by": ["tkt-91c2"],
+  "blocked_by": ["tkt-91c20b4e"],
   "tags": ["auth"],
-  "claim": {"agent": "coder-7", "claim_id": "c9f2e1…", "lease_until": 1791000000},
+  "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000, "claimed_at": 1790995000},
   "stage": "development",
-  "closed_by": null,
+  "done_by": null,
+  "last_claim_id": null,
   "created": 1790990000,
-  "updated": 1790995000
+  "updated": 1790995000,
+  "version": 3
 }
 ```
 
@@ -41,19 +54,21 @@ tickets/
 | `title` | string | required, non-empty, no control characters |
 | `body` | string | may be empty |
 | `kind` | `"story" \| "task" \| "bug"` | |
-| `project` | string \| null | project identity; null = any project |
+| `project` | string \| null | opaque project identity (never interpreted); null = no project; a `--project` filter matches that exact value only |
 | `priority` | int \| null | lower = more urgent; null sorts last |
 | `blocked_by` | list[string] | ticket ids (same pattern as `id`) that must be `done` before claiming |
 | `tags` | list[string] | free-form |
-| `claim` | object \| null | present ⇒ held (possibly expired); `claim_id` is lowercase hex (`^[0-9a-f]+$`) |
+| `claim` | object \| null | present ⇒ held (possibly expired): `agent`, `claim_id` (exactly 32 lowercase hex characters), `lease_until`, `claimed_at` (unix seconds; renew keeps it) |
 | `stage` | `"development" \| "review" \| "qa" \| "done" \| "cancelled"` | lifecycle position; `done`/`cancelled` are terminal (final once set) |
-| `closed_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
-| `created`, `updated` | int | unix seconds (from the injected clock) |
+| `done_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
+| `last_claim_id` | string \| null | the most recent claim id that ended other than by `done` (released, reaped, taken over, cancelled); fenced: while recorded here it cannot claim again |
+| `created`, `updated` | int | unix seconds (from the injected clock); `updated` is set by every op that writes the ticket |
+| `version` | int | content version for optimistic concurrency: 1 when added, incremented only by `update`; an update must name it (`STALE` otherwise) |
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).
 
-**Not stored:** status, claim age, history. All derived.
+**Not stored:** status and history (derived). Claim age is derived from `claim.claimed_at`.
 
 ## Commit messages
 
@@ -61,14 +76,14 @@ Every op is one commit. The subject line is human-readable and always one line;
 trailers are machine-readable:
 
 ```text
-claim tkt-7f3a: Expire reset tokens
+claim tkt-7f3a91c2: Expire reset tokens
 
 tkt-protocol: 1
 tkt-op: claim
 tkt-time: 1790995000
-tkt-id: tkt-7f3a
+tkt-id: tkt-7f3a91c2
 tkt-agent: coder-7
-tkt-claim: c9f2e1…
+tkt-claim: c9f2e1d07b3a4e58a6f0c2b9e4d1a873
 ```
 
 | Trailer | Required | Values |
@@ -76,7 +91,7 @@ tkt-claim: c9f2e1…
 | `tkt-protocol` | yes | integer protocol version |
 | `tkt-op` | yes | `init`, `add`, `update`, `claim`, `claim-next`, `renew`, `release`, `done`, `cancel`, `reap` |
 | `tkt-time` | yes | unix seconds from the writer's injected clock; informational across writers |
-| `tkt-id` | yes (except `init`, `reap`) | ticket id; `reap` lists one `tkt-id` per released ticket |
+| `tkt-id` | yes (except `init`) | ticket id; `reap` lists one `tkt-id` per released ticket |
 | `tkt-agent` | when an agent acted | agent id (no control characters) |
 | `tkt-claim` | for claim-scoped ops | claim id |
 | `tkt-stage` | when a `release` hands off | the ticket's new stage |

@@ -20,13 +20,20 @@ class RefusalCode(StrEnum):
     NOT_INITIALISED = "NOT_INITIALISED"
     NOT_FOUND = "NOT_FOUND"
     DUPLICATE_ID = "DUPLICATE_ID"  # add with an existing id but different content
-    ALREADY_CLAIMED = "ALREADY_CLAIMED"  # a live claim held by someone else
-    NOT_HOLDER = "NOT_HOLDER"  # claim_id does not match the current claim (fencing)
+    # a claim not yet takeable (live or in grace), or the claim id is already another
+    # ticket's or another agent's current claim
+    ALREADY_CLAIMED = "ALREADY_CLAIMED"
+    NOT_HOLDER = (
+        "NOT_HOLDER"  # fencing: not the current claim, an ended claim id, or done by another
+    )
     NOT_CLAIMED = "NOT_CLAIMED"
     BLOCKED = "BLOCKED"  # a blocker is not yet done
     TERMINAL = "TERMINAL"  # the ticket is already in a terminal stage (done/cancelled)
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
-    INVALID = "INVALID"  # malformed op (empty title, bad ttl, bad blocker, terminal to_stage)
+    # malformed op: bad id, control characters, ttl out of bounds, expected_version < 1,
+    # empty title, unknown/self blocker, dependency cycle, terminal add stage or to_stage
+    INVALID = "INVALID"
+    STALE = "STALE"  # update based on an older ticket version; re-read and retry
 
 
 @dataclass(frozen=True)
@@ -78,9 +85,14 @@ class Apply:
 
 @dataclass(frozen=True)
 class NoOp:
-    """The op's effect is already present (invariant 5: idempotence). Nothing to persist."""
+    """The op's effect is already present (invariant 5: idempotence). Nothing to persist.
+
+    `ticket_ids` names the tickets the op concerns (e.g. the ticket a re-run of
+    claim-next already holds), so the caller still learns which ticket and claim it has.
+    """
 
     reason: str
+    ticket_ids: tuple[TicketId, ...] = ()
 
 
 Decision = Apply | NoOp | Refusal

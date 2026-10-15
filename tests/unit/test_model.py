@@ -28,6 +28,15 @@ def test_claimable_is_false_within_grace() -> None:
 def test_claimable_is_false_when_blocked() -> None: ...
 
 
+@pytest.mark.parametrize("state", ["terminal", "blocked", "live", "in_grace"])
+def test_why_not_claimable_gives_the_refusal(state: str) -> None:
+    """TERMINAL, BLOCKED, ALREADY_CLAIMED (live and in-grace); None when claimable."""
+
+
+def test_claim_age_is_since_claimed_at() -> None:
+    """Claim.age(now) == now - claimed_at; renew does not reset claimed_at."""
+
+
 def test_unknown_dependency_counts_as_not_done() -> None: ...
 
 

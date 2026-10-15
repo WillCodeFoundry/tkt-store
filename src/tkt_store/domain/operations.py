@@ -8,9 +8,21 @@ them and converges instead of duplicating.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
+from typing import Final, Literal
 
 from tkt_store.domain.ticket import AgentId, ClaimId, Duration, Kind, ProjectId, Stage, TicketId
+
+
+class Unset(Enum):
+    """'Leave this field unchanged' in an update, distinct from None ('clear it').
+    A plain Enum, not a StrEnum: it must never compare equal to a real string value."""
+
+    UNSET = "unset"
+
+
+UNSET: Final = Unset.UNSET
+UnsetType = Literal[Unset.UNSET]
 
 
 class OpName(StrEnum):
@@ -30,7 +42,8 @@ class OpName(StrEnum):
 
 @dataclass(frozen=True)
 class InitOp:
-    """Create the store ref with an empty tickets/ tree. A no-op if it exists."""
+    """Create the store ref with an empty tickets/ tree (the git store also writes
+    tkt-store.json). A no-op if it exists."""
 
 
 @dataclass(frozen=True)
@@ -44,18 +57,26 @@ class AddOp:
     blocked_by: tuple[TicketId, ...] = ()
     tags: tuple[str, ...] = ()
     stage: Stage = Stage.DEVELOPMENT  # the phase a new ticket starts in
+    agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)
 class UpdateOp:
-    """Edit descriptive fields. None means 'leave unchanged'. Never touches claim/stage."""
+    """Edit descriptive fields. UNSET means 'leave unchanged'; `priority=None` clears it.
+    Never touches claim/stage; kind and project are not updatable.
+
+    `expected_version` is required: the ticket version the edit was based on. A ticket
+    changed since then is refused STALE instead of silently overwritten.
+    """
 
     ticket_id: TicketId
-    title: str | None = None
-    body: str | None = None
-    priority: int | None = None
-    blocked_by: tuple[TicketId, ...] | None = None
-    tags: tuple[str, ...] | None = None
+    expected_version: int
+    title: str | UnsetType = UNSET
+    body: str | UnsetType = UNSET
+    priority: int | UnsetType | None = UNSET
+    blocked_by: tuple[TicketId, ...] | UnsetType = UNSET
+    tags: tuple[str, ...] | UnsetType = UNSET
+    agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)
@@ -111,6 +132,7 @@ class CancelOp:
 
     ticket_id: TicketId
     reason: str = ""
+    agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)

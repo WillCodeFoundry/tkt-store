@@ -36,7 +36,7 @@ Dependencies point **inward only**: `domain` ← `application` ← `infrastructu
 
 Any change to the on-branch format bumps `PROTOCOL_VERSION` in
 `infrastructure/git/wire.py` and updates `docs/format.md` in the same change.
-Exception: pre-1.0 format additions that no deployed store relies on may keep
+Exception: before 1.0, any format change made while no store is deployed may keep
 `PROTOCOL_VERSION` when documented in `docs/format.md`.
 
 ## Tooling

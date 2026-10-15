@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from tkt_store.domain.outcomes import Refusal
 from tkt_store.domain.ticket import Snapshot, Ticket, Timestamp
 
 
@@ -41,12 +42,21 @@ def derive_status(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Status:
     raise NotImplementedError
 
 
-def claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> bool:
-    """True iff `decide_claim` would accept a claim now: not terminal, not blocked,
-    and either unclaimed or the claim is takeable (`Claim.is_takeable`: past
-    lease_until + SKEW_GRACE). Not the same as status in {OPEN, EXPIRED}: a claim
-    within the grace reads EXPIRED but cannot be taken yet."""
+def why_not_claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Refusal | None:
+    """The single claimability check, shared by `claimable` and the claim rules.
+
+    None if a NEW claim may be taken now; otherwise the refusal, in this order:
+    TERMINAL; BLOCKED (any blocker not DONE; unknown counts as not done);
+    ALREADY_CLAIMED (a claim that is not takeable: live, or lapsed within SKEW_GRACE).
+    Not the same as status in {OPEN, EXPIRED}: a claim within the grace reads EXPIRED
+    but cannot be taken yet. Claim-id checks (re-runs, ended ids) are the rules' concern.
+    """
     raise NotImplementedError
+
+
+def claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> bool:
+    """True iff a new claim on `ticket` would be accepted now."""
+    return why_not_claimable(snapshot, ticket, now) is None
 
 
 def sort_key_for_next(ticket: Ticket) -> tuple[int, int, str]:

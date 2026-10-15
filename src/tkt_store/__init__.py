@@ -42,16 +42,17 @@ def open_store(
     repo: Path,
     *,
     ref: str = DEFAULT_REF,
-    remote: str | None = None,
+    remote: str | None = "origin",
     clock: Clock | None = None,
     ids: IdSource | None = None,
 ) -> TicketStore:
     """Open a ticket store with the production wiring: a GitStore at `repo`, the
     system clock, and random ids.
 
-    `clock` and `ids` can be overridden (e.g. for simulations) but default to the
-    real implementations. This is the composition root — the one place that names
-    concrete adapters.
+    `remote` defaults to "origin", like the CLI; pass None to choose a local-only
+    store explicitly (single machine, tests). `clock` and `ids` can be overridden
+    (e.g. for simulations) but default to the real implementations. This is the
+    composition root — the one place that names concrete adapters.
     """
     store = GitStore.at(repo, ref=ref, remote=remote)
     return TicketStore(store, clock or SystemClock(), ids or RandomIds())

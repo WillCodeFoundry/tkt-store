@@ -13,12 +13,14 @@ from typing import Protocol
 
 
 class GitRunner(Protocol):
-    """Runs one git command in the store repository and returns stdout.
+    """Runs one git command in the store repository and returns stdout as raw bytes.
 
+    Bytes, not text: `git cat-file --batch` reports object sizes in bytes, so decoding
+    first would misparse any non-ASCII content. Callers decode what they know is text.
     Raises StoreError on a non-zero exit, except where a caller handles a known code.
     """
 
-    def __call__(self, *args: str, stdin: bytes | None = None) -> str: ...
+    def __call__(self, *args: str, stdin: bytes | None = None) -> bytes: ...
 
 
 def git_runner(repo: Path) -> GitRunner:

@@ -27,14 +27,20 @@ class Store(Protocol):
     """Contract:
 
     snapshot()
-        Returns the current head and all tickets. Reflects every commit that
+        Returns the current revision and all tickets. Reflects every commit that
         returned successfully before the call. May fetch first (remote-backed).
+        Raises StoreError if the store's format version is missing or newer than
+        supported, or if a ticket file is corrupt (the whole snapshot fails: a partial
+        view could mislead dependency checks and claim-next).
 
     commit(base, changes, record)
         Atomically applies `changes` as ONE commit whose parent is `base`, and
         moves the head from `base` to it — compare-and-swap.
-        - Raises Conflict if the head is not `base` (nothing becomes visible).
-        - Raises StoreError on infrastructure failure.
+        - Raises Conflict if the head is not `base`. Conflict always means nothing
+          became visible: once a commit is published it is never reported as a
+          Conflict, even if a local cache could not be updated.
+        - Raises StoreError on infrastructure failure. A StoreError raised while
+          publishing may hide a commit that landed; re-running the op converges.
         - Either the whole commit is visible afterwards, or none of it.
         `base` is the revision the changes were computed from (design.md §4),
         never a value re-read at commit time.

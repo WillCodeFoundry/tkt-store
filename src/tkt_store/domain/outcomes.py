@@ -20,7 +20,9 @@ class RefusalCode(StrEnum):
     NOT_INITIALISED = "NOT_INITIALISED"
     NOT_FOUND = "NOT_FOUND"
     DUPLICATE_ID = "DUPLICATE_ID"  # add with an existing id but different content
-    ALREADY_CLAIMED = "ALREADY_CLAIMED"  # someone else's claim, not yet takeable (live or in grace)
+    # a claim not yet takeable (live or in grace), or the claim id is already another
+    # ticket's or another agent's current claim
+    ALREADY_CLAIMED = "ALREADY_CLAIMED"
     NOT_HOLDER = (
         "NOT_HOLDER"  # fencing: not the current claim, an ended claim id, or done by another
     )

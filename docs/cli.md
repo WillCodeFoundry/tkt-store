@@ -38,8 +38,8 @@ Notes:
   ids are exactly 32 lowercase hex characters. Without them, ids are generated, and a
   failure prints the generated ids so the command can be re-run with them. A claim id
   is single-use and names one claim on one ticket: re-use it only to retry the same
-  claim. After its claim ends it is refused (`NOT_HOLDER`) while the ticket still
-  records it.
+  claim. After its claim ends it is refused (`NOT_HOLDER`) while any ticket still
+  records it (as `done_by` or `last_claim_id`).
 - **Re-runs of holder ops.** Re-running a `release` that landed is a no-op even if
   someone has claimed the ticket since (with `--to-stage`, only while the ticket is still
   at that stage; otherwise `NOT_HOLDER`). Re-running a landed `done` is a no-op. The exact rules are the

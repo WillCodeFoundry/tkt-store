@@ -136,8 +136,8 @@ class Ticket:
     fenced after completion (a repeat is a NoOp only for this claim id)."""
     last_claim_id: ClaimId | None = None
     """The most recent claim that ended other than by `done`: released, reaped, taken
-    over, or cleared by cancel. Fences that id (it cannot claim again) and makes a
-    release re-run converge."""
+    over, or cleared by cancel. Fences that id while recorded here (it cannot claim
+    again) and makes a release re-run converge."""
     extra: Mapping[str, Any] = field(default_factory=dict)
     """Unknown keys from the file, preserved verbatim on write-back."""
 

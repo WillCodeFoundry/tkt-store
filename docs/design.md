@@ -40,7 +40,7 @@ That is the whole mental model: to know how a field behaves, find its group.
 | Group | Fields | Changed by | Guard |
 |---|---|---|---|
 | Identity | `id`, `kind`, `project`, `created` | `add` only | never changes |
-| Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `update`, by anyone | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
+| Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `edit`, by anyone | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
 | Workflow | `phase`, `resolution` | the lifecycle table below | per transition; `resolution` is set once |
 | Occupancy | `claim`, `ended_claim_id` | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | claim-id fencing (holder-op table, §5) |
 | Bookkeeping | `updated`, unknown keys | the system | — |
@@ -169,18 +169,18 @@ never a fresh read (lesson from balls' bl-cdec G1).
 10. **Dependencies gate claims.** While any `blocked_by` entry is not yet `done`, a ticket
     cannot be claimed — even if it carries a lapsed claim — and reads `blocked` unless it
     is live-claimed. A *cancelled* blocker
-    does not satisfy a dependency. Blockers do not gate completion: `update` may add a
+    does not satisfy a dependency. Blockers do not gate completion: `edit` may add a
     blocker to a claimed ticket without disturbing the claim, and the holder may still
     finish it.
-11. **No silent overwrite of edits.** `update` names the `content_version` it was based
+11. **No silent overwrite of edits.** `edit` names the `content_version` it was based
     on; if the ticket was updated since, it is refused `STALE`, never last-writer-wins.
-    It counts content edits only (`add` sets 1, each `update` adds 1), so claims
-    and renewals never make an edit stale. Edits to different fields compose: an update
+    It counts content edits only (`add` sets 1, each `edit` adds 1), so claims
+    and renewals never make an edit stale. Edits to different fields compose: an edit
     only writes the fields it names, and every retry re-decides on fresh state.
 12. **Validated input.** Ticket ids match `^tkt-[0-9a-f]+$` (they are file names), claim ids
     are exactly 32 lowercase hex characters, `agent`/`reason`/`title` contain no control
     characters (they are written into the commit message), TTLs are within bounds, and
-    an update's `expected_version` is at least 1.
+    an edit's `expected_version` is at least 1.
     Otherwise `INVALID`.
 
 ### Holder ops (`renew`, `release`, `done`)
@@ -220,7 +220,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 |---|---|---|---|
 | init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
 | add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker), `DUPLICATE_ID` | same id and identical AddOp fields (`created`/`updated` not compared) | new ticket |
-| update | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
+| edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
 | claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (live or lapsed) | new claim; a takeover fences the old id |
 | claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (names it) | as claim, on the most urgent claimable match |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |

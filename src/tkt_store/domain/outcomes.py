@@ -33,7 +33,7 @@ class RefusalCode(StrEnum):
     # malformed op: bad id, control characters, ttl out of bounds, expected_version < 1,
     # empty title, unknown/self blocker, dependency cycle
     INVALID = "INVALID"
-    STALE = "STALE"  # update based on an older content_version; re-read and retry
+    STALE = "STALE"  # edit based on an older content_version; re-read and retry
 
 
 @dataclass(frozen=True)

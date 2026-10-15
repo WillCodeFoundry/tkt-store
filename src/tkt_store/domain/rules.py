@@ -7,7 +7,7 @@ live. The result is a `Decision` from `domain.outcomes`.
 
 Every `Apply.record` carries `at=now`, the injected time (`OpRecord.at`), and the
 acting `agent` when the op names one. Every ticket an Apply writes gets updated = now;
-its `content_version` starts at 1 (add) and only `update` increments it. The full
+its `content_version` starts at 1 (add) and only `edit` increments it. The full
 op x state -> outcome table is in docs/design.md §5; the docstrings below summarise it.
 """
 
@@ -21,12 +21,12 @@ from tkt_store.domain.operations import (
     ClaimNextOp,
     ClaimOp,
     DoneOp,
+    EditOp,
     InitOp,
     Op,
     ReapOp,
     ReleaseOp,
     RenewOp,
-    UpdateOp,
 )
 from tkt_store.domain.outcomes import Decision, Refusal
 from tkt_store.domain.ticket import Snapshot, Timestamp
@@ -48,8 +48,8 @@ def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
             return decide_init(snapshot, op, now)
         case AddOp():
             return decide_add(snapshot, op, now)
-        case UpdateOp():
-            return decide_update(snapshot, op, now)
+        case EditOp():
+            return decide_edit(snapshot, op, now)
         case ClaimOp():
             return decide_claim(snapshot, op, now)
         case ClaimNextOp():
@@ -73,7 +73,7 @@ def validate_op(op: Op) -> Refusal | None:
     - `claim_id` must match ticket.CLAIM_ID_RE;
     - `agent`, `reason` and `title` must not contain CONTROL_CHARS_RE;
     - `ttl` (claim, claim-next, renew) must satisfy 0 < ttl <= MAX_TTL;
-    - `expected_version` (update) must be >= 1.
+    - `expected_version` (edit) must be >= 1.
     Shape checks only; anything that depends on the snapshot is each rule's concern.
     """
     raise NotImplementedError
@@ -96,11 +96,11 @@ def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
     raise NotImplementedError
 
 
-def decide_update(snapshot: Snapshot, op: UpdateOp, now: Timestamp) -> Decision:
+def decide_edit(snapshot: Snapshot, op: EditOp, now: Timestamp) -> Decision:
     """Content op. In this order:
     NOT_FOUND; TERMINAL; INVALID (empty title, unknown or self blocker, dependency cycle);
     NoOp if every field the op sets already has that value (checked BEFORE the version, so
-      a re-run of an update that already landed converges);
+      a re-run of an edit that already landed converges);
     STALE if ticket.content_version != op.expected_version (edited since it was read).
     Apply: the content fields it sets, updated = now, content_version + 1. Never touches
     identity, workflow or occupancy; may add blockers to a claimed ticket without

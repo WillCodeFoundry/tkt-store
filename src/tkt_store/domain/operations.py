@@ -15,7 +15,7 @@ from tkt_store.domain.ticket import AgentId, ClaimId, Duration, Kind, Phase, Pro
 
 
 class Unset(Enum):
-    """'Leave this field unchanged' in an update, distinct from None ('clear it').
+    """'Leave this field unchanged' in an edit, distinct from None ('clear it').
     A plain Enum, not a StrEnum: it must never compare equal to a real string value."""
 
     UNSET = "unset"
@@ -30,7 +30,7 @@ class OpName(StrEnum):
 
     INIT = "init"
     ADD = "add"
-    UPDATE = "update"
+    EDIT = "edit"
     CLAIM = "claim"
     CLAIM_NEXT = "claim-next"
     RENEW = "renew"
@@ -61,7 +61,7 @@ class AddOp:
 
 
 @dataclass(frozen=True)
-class UpdateOp:
+class EditOp:
     """Edit descriptive fields. UNSET means 'leave unchanged'; `priority=None` clears it.
     Changes content fields only (never identity, workflow or occupancy).
 
@@ -143,7 +143,7 @@ class ReapOp:
 Op = (
     InitOp
     | AddOp
-    | UpdateOp
+    | EditOp
     | ClaimOp
     | ClaimNextOp
     | RenewOp

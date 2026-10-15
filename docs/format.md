@@ -63,7 +63,7 @@ tickets/
 | `resolution` | `"done" \| "cancelled"` \| null | null while open; set once by `done`/`cancel`; non-null means terminal (final) |
 | `ended_claim_id` | string \| null | the most recent claim id to end, however it ended (released, reaped, taken over, cancelled, done); fenced: while recorded here it cannot claim again |
 | `created`, `updated` | int | unix seconds (from the injected clock); `updated` is set by every op that writes the ticket |
-| `content_version` | int | optimistic concurrency for content: 1 when added, incremented only by `update`; an update must name it (`STALE` otherwise) |
+| `content_version` | int | optimistic concurrency for content: 1 when added, incremented only by `edit`; an edit must name it (`STALE` otherwise) |
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).
@@ -89,7 +89,7 @@ tkt-claim: c9f2e1d07b3a4e58a6f0c2b9e4d1a873
 | Trailer | Required | Values |
 |---|---|---|
 | `tkt-protocol` | yes | integer protocol version |
-| `tkt-op` | yes | `init`, `add`, `update`, `claim`, `claim-next`, `renew`, `release`, `done`, `cancel`, `reap` |
+| `tkt-op` | yes | `init`, `add`, `edit`, `claim`, `claim-next`, `renew`, `release`, `done`, `cancel`, `reap` |
 | `tkt-time` | yes | unix seconds from the writer's injected clock; informational across writers |
 | `tkt-id` | yes (except `init`) | ticket id; `reap` lists one `tkt-id` per released ticket |
 | `tkt-agent` | when an agent acted | agent id (no control characters) |

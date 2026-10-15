@@ -18,7 +18,7 @@ Global options:
 |---|---|---|
 | `tkt init` | Create the store ref with an empty `tickets/` tree and `tkt-store.json` | |
 | `tkt add TITLE` | Create a ticket; prints its id | `--id ID`, `--as AGENT`, `--kind`, `--body`, `--project`, `--priority`, `--blocked-by ID`…, `--tag`…, `--phase` |
-| `tkt update ID` | Edit title/body/priority/tags/dependencies | `--if-version N` (required), `--as AGENT`, `--title`, `--body`, `--priority N\|none`, `--blocked-by ID`…, `--tag`… |
+| `tkt edit ID` | Edit title/body/priority/tags/dependencies | `--if-version N` (required), `--as AGENT`, `--title`, `--body`, `--priority N\|none`, `--blocked-by ID`…, `--tag`… |
 | `tkt list` | List tickets (derived status) | `--status`, `--phase`, `--project`, `--agent`, `--kind` |
 | `tkt show ID` | One ticket, with derived status, claim age and its `content_version` | |
 | `tkt claim ID` | Claim a ticket; prints the claim id | `--as AGENT` (required), `--ttl DURATION`, `--claim-id CLAIM_ID` |
@@ -44,13 +44,13 @@ Notes:
   someone has claimed the ticket since (with `--to-phase`, only while the ticket is still
   in that phase; otherwise `NOT_HOLDER`). Re-running a landed `done` is a no-op. The exact rules are the
   holder-op table in `docs/design.md` §5.
-- **Actor.** `--as` on `add`, `update` and `cancel` is optional and only recorded in the
+- **Actor.** `--as` on `add`, `edit` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
-- **`update`.** An omitted option means "unchanged"; `--priority none` clears the
+- **`edit`.** An omitted option means "unchanged"; `--priority none` clears the
   priority. `kind` and `project` cannot be changed. `--if-version N` is required: the
   ticket's `content_version` you based the edit on (from `tkt show`). If someone updated the
   ticket since, the edit is refused `STALE` (exit 1) instead of overwriting theirs:
-  re-read and retry. Re-running an update that already landed is a no-op. Only `update`
+  re-read and retry. Re-running an edit that already landed is a no-op. Only `edit`
   changes the content version, so claims and renewals never cause `STALE`.
 - **Text fields.** `--as`, `--reason` and `TITLE`/`--title` must not contain newlines
   or other control characters (they are written into the commit message).
@@ -68,7 +68,7 @@ Notes:
 | Code | Meaning |
 |---|---|
 | 0 | Committed, or unchanged (idempotent repeat) |
-| 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale update) |
+| 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit) |
 | 2 | Usage error (including no `--repo` and no `$TKT_REPO`) |
 | 3 | Retries exhausted after repeated conflicts; nothing written — re-run with the printed ids |
 | 4 | Store error (git failure, remote unreachable or not configured, corrupt data). A failure during the push may mean the commit landed: re-run with the printed ids, which converges either way |

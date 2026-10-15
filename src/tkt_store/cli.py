@@ -25,7 +25,7 @@ class ExitCode(IntEnum):
 COMMANDS = (
     "init",
     "add",
-    "update",
+    "edit",
     "list",
     "show",
     "claim",

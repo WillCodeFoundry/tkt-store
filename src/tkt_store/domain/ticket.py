@@ -115,7 +115,7 @@ class Ticket:
 
     - identity     id, kind, project, created  — set by `add`, never change
     - content      title, body, priority, blocked_by, tags, content_version
-                   — changed only by `update` (anyone), guarded by content_version
+                   — changed only by `edit` (anyone), guarded by content_version
     - workflow     phase, resolution — phase by the holder's handoff; resolution set
                    once by `done` (holder) or `cancel` (anyone)
     - occupancy    claim, ended_claim_id — changed only by claim ops, fenced by claim id
@@ -128,14 +128,14 @@ class Ticket:
     project: ProjectId | None = None
     created: Timestamp
 
-    # --- content: changed only by update, guarded by content_version
+    # --- content: changed only by edit, guarded by content_version
     title: str
     body: str = ""
     priority: int | None = None
     blocked_by: tuple[TicketId, ...] = ()
     tags: tuple[str, ...] = ()
     content_version: int = 1
-    """1 when added, incremented only by `update`. An update must name the version it was
+    """1 when added, incremented only by `edit`. An edit must name the version it was
     based on (STALE otherwise). Claims, renewals and handoffs never change it."""
 
     # --- workflow: phase by the holder's handoff; resolution set once by done/cancel

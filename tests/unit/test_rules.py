@@ -121,7 +121,7 @@ class TestIdempotence:
     def test_add_same_id_same_content_is_noop(self) -> None:
         """Only AddOp fields are compared; created/updated differ on a later re-run."""
 
-    def test_add_rerun_after_update_is_duplicate_id(self) -> None: ...
+    def test_add_rerun_after_edit_is_duplicate_id(self) -> None: ...
 
     def test_add_same_id_different_content_is_refused(self) -> None:
         """→ Refusal(DUPLICATE_ID)."""
@@ -170,7 +170,7 @@ class TestValidation:
     def test_ttl_out_of_bounds_is_invalid(self, op: str, ttl: int) -> None:
         """ttl <= 0 or ttl > MAX_TTL → Refusal(INVALID), for every op with a ttl."""
 
-    def test_update_validates_like_add(self) -> None:
+    def test_edit_validates_like_add(self) -> None:
         """Empty title, unknown or self blocker, dependency cycle → Refusal(INVALID)."""
 
     def test_validation_wins_over_every_other_outcome(self) -> None:
@@ -179,7 +179,7 @@ class TestValidation:
 
     @pytest.mark.parametrize("expected_version", [0, -1])
     def test_bad_expected_version_is_invalid(self, expected_version: int) -> None:
-        """UpdateOp.expected_version < 1 → Refusal(INVALID)."""
+        """EditOp.expected_version < 1 → Refusal(INVALID)."""
 
 
 class TestClaimNext:
@@ -216,7 +216,7 @@ class TestReap:
         """None past the grace period → NoOp."""
 
 
-class TestUpdate:
+class TestEdit:
     @pytest.mark.parametrize("state", ["missing", "resolved"])
     def test_refused_on_missing_or_terminal(self, state: str) -> None:
         """NOT_FOUND / TERMINAL."""
@@ -226,7 +226,7 @@ class TestUpdate:
     def test_unset_fields_are_unchanged(self) -> None: ...
 
     def test_priority_none_clears_it(self) -> None:
-        """UpdateOp(priority=None) → Apply with priority=None (UNSET would leave it)."""
+        """EditOp(priority=None) → Apply with priority=None (UNSET would leave it)."""
 
     def test_apply_increments_version(self) -> None:
         """expected_version == content_version → Apply with content_version + 1."""
@@ -235,7 +235,7 @@ class TestUpdate:
         """Ticket updated since it was read (content_version != expected_version) and the op
         changes something → Refusal(STALE); nothing is overwritten."""
 
-    def test_rerun_of_landed_update_is_noop(self) -> None:
+    def test_rerun_of_landed_edit_is_noop(self) -> None:
         """Fields already hold the op's values → NoOp, even though content_version moved
         on (the NoOp check comes before the version check)."""
 
@@ -246,9 +246,9 @@ class TestUpdate:
     @pytest.mark.parametrize(
         "op", ["claim", "claim-next", "renew", "release", "done", "cancel", "reap"]
     )
-    def test_only_update_changes_the_version(self, op: str) -> None:
-        """Every op except add (sets 1) and update (+1) leaves content_version unchanged, so a
-        holder's renewals never make an editor's update STALE."""
+    def test_only_edit_changes_the_version(self, op: str) -> None:
+        """Every op except add (sets 1) and edit (+1) leaves content_version unchanged, so a
+        holder's renewals never make an editor's edit STALE."""
 
 
 class TestInitAndAdd:
@@ -264,6 +264,6 @@ class TestRecord:
     def test_record_carries_injected_time(self) -> None:
         """Every Apply.record has at == now."""
 
-    @pytest.mark.parametrize("op", ["add", "update", "cancel"])
+    @pytest.mark.parametrize("op", ["add", "edit", "cancel"])
     def test_record_carries_optional_actor(self, op: str) -> None:
         """op.agent, when given, is record.agent (tkt-agent); omitted otherwise."""

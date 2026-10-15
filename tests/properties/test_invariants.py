@@ -1,6 +1,6 @@
 """Property tests (hypothesis) over random op sequences against MemStore.
 
-Each generated scenario: several agents, random ops (claim, renew, release, done, reap,
+Each generated scenario: several agents, random ops (claim, renew, move, release, done, reap,
 clock advances), random interleavings and injected conflicts. After every step:
 """
 

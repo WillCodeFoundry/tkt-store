@@ -1,15 +1,19 @@
 """The Store, implemented on git plumbing (ADR 0001).
 
 No worktree, no index: a crash can only ever leave unreachable objects behind.
-Several processes may share one clone; the local ref is only a cache of the remote.
+One process per clone is assumed (design.md §7); the local ref is only a cache of the
+remote.
 
 snapshot():
-    [remote] remote.fetch -> remote head (the snapshot's revision; never re-read the
-             shared local ref, and never FETCH_HEAD, which concurrent fetches overwrite)
+    [remote] remote.fetch -> remote head (the snapshot's revision; read from the fetch
+             result, never re-read from the local ref or FETCH_HEAD)
     [remote] remote.fast_forward_local(remote head)
     [local]  git rev-parse --verify <ref>    -> revision (None if unborn)
     git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError if
-                                                missing on a born ref or a newer protocol
+                                                missing on a born ref, a newer protocol,
+                                                or a mode that is not this store's (a
+                                                remote-backed store opened with remote=None,
+                                                or a local-only one opened with a remote)
     git ls-tree -r <revision> tickets/       -> blob ids of wire.is_ticket_path entries only
     git cat-file --batch                     -> file contents (bytes) -> wire.decode_ticket;
                                                 one corrupt ticket fails the whole snapshot
@@ -17,10 +21,12 @@ snapshot():
 commit(base, changes, record):
     git hash-object -w --stdin                (one per changed ticket)
     git mktree                                (base tree with replaced entries; when base
-                                               is None, also wire.encode_store_meta() as
-                                               tkt-store.json in the root commit)
+                                               is None, also wire.encode_store_meta(mode)
+                                               as tkt-store.json in the root commit, mode
+                                               "remote" or "local" by self._remote)
     git commit-tree <tree> [-p <base>] -F -   (message = wire.encode_message(record))
-    [remote] remote.publish(new)              -> Conflict on non-fast-forward; nothing published
+    [remote] remote.publish(new, base)        -> push with --force-with-lease=<ref>:<base>;
+                                               Conflict if the lease fails; nothing published
     [remote] git update-ref <ref> <new> <base> best-effort: once published, any failure
                                                (ref moved, cannot lock ref, ...) is ignored
                                                and commit returns `new`; the next snapshot

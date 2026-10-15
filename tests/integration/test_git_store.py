@@ -6,8 +6,19 @@ import pytest
 pytestmark = [pytest.mark.git, pytest.mark.skip(reason="skeleton")]
 
 
-def test_init_writes_store_meta() -> None:
-    """The root commit contains tkt-store.json = {"protocol": 1}."""
+@pytest.mark.parametrize("mode", ["remote", "local"])
+def test_init_writes_store_meta(mode: str) -> None:
+    """The root commit contains tkt-store.json = {"mode": mode, "protocol": 1}."""
+
+
+@pytest.mark.parametrize("opened_as", ["local_on_remote_store", "remote_on_local_store"])
+def test_opening_in_the_other_mode_is_refused(opened_as: str) -> None:
+    """A store opened in the mode it was not created with → StoreError, nothing written,
+    so a stray --no-remote can never diverge a clone."""
+
+
+def test_publish_uses_force_with_lease_on_base() -> None:
+    """The push carries --force-with-lease=<ref>:<base>; a moved remote → Conflict."""
 
 
 @pytest.mark.parametrize("meta", ["missing", "newer", "malformed"])
@@ -32,7 +43,8 @@ def test_local_only_stale_base_is_conflict() -> None:
 
 
 def test_fast_forward_local_tolerates_a_local_ref_ahead() -> None:
-    """Another process on the clone pushed and moved the ref: no-op, not StoreError."""
+    """Local ref equal to, or a descendant of, the remote head → no-op, not StoreError.
+    (A local ref that is behind is fast-forwarded: a separate repair.)"""
 
 
 def test_fast_forward_local_rejects_divergence() -> None:

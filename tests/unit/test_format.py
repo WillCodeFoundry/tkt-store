@@ -13,7 +13,7 @@ def test_unknown_keys_preserved_at_top_level() -> None:
 
 
 @pytest.mark.parametrize(
-    "field", ["phase", "resolution", "ended_claim_id", "claim.claimed_at", "content_version"]
+    "field", ["phase", "resolution", "ended_claim_ids", "claim.claimed_at", "content_version"]
 )
 def test_new_fields_round_trip(field: str) -> None: ...
 

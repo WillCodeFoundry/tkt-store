@@ -9,6 +9,7 @@ chosen at the composition root (`tkt_store.open_store`), never here.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import RefusedError
@@ -19,7 +20,6 @@ from tkt_store.domain.operations import UNSET, UnsetType
 from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import (
     AgentId,
-    Claim,
     ClaimId,
     Duration,
     Kind,
@@ -31,6 +31,14 @@ from tkt_store.domain.ticket import (
 )
 
 DEFAULT_TTL: Duration = 30 * 60
+
+
+@dataclass(frozen=True)
+class TicketView:
+    """A ticket with its derived status, both taken from the same snapshot."""
+
+    ticket: Ticket
+    status: Status
 
 
 class TicketStore:
@@ -65,7 +73,7 @@ class TicketStore:
         priority: int | None = None,
         blocked_by: Sequence[TicketId] = (),
         tags: Sequence[str] = (),
-        phase: Phase = Phase.DEVELOPMENT,
+        phase: Phase = Phase.TRIAGE,
         ticket_id: TicketId | None = None,
         agent: AgentId | None = None,
     ) -> Outcome:
@@ -108,9 +116,10 @@ class TicketStore:
         """Transacts ClaimOp. The claim id is in the resulting ticket.
 
         `claim_id` None: mint one from the IdSource. Supplied: used verbatim
-        (validated by the rules), so re-running with the same id and agent converges
-        (NoOp, even if the lease has lapsed). A claim id is single-use: never reuse one
-        whose claim has ended.
+        (validated by the rules), so re-running with the same id and agent converges:
+        NoOp (Unchanged) while the claim is live; if it lapsed and nobody took it over,
+        it is renewed (Committed). A claim id is single-use: never reuse one whose claim
+        has ended.
         """
         raise NotImplementedError
 
@@ -125,21 +134,20 @@ class TicketStore:
         claim_id: ClaimId | None = None,
     ) -> Outcome:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
-        and agent converges on the ticket it already holds (Unchanged names it)."""
+        and agent converges on the ticket it already holds — Unchanged naming it while the
+        claim is live, Committed (renewed) if it lapsed — never a second ticket."""
         raise NotImplementedError
 
     def renew(self, ticket_id: TicketId, claim_id: ClaimId, ttl: Duration = DEFAULT_TTL) -> Outcome:
         raise NotImplementedError
 
-    def release(
-        self,
-        ticket_id: TicketId,
-        claim_id: ClaimId,
-        reason: str = "",
-        *,
-        to_phase: Phase | None = None,
-    ) -> Outcome:
-        """Release the claim; `to_phase` hands the ticket on to that phase."""
+    def move(self, ticket_id: TicketId, claim_id: ClaimId, to_phase: Phase) -> Outcome:
+        """Move the ticket to `to_phase`, keeping the claim (holder only). A handoff is
+        move, then release."""
+        raise NotImplementedError
+
+    def release(self, ticket_id: TicketId, claim_id: ClaimId, reason: str = "") -> Outcome:
+        """Release the claim (holder only); the phase is untouched."""
         raise NotImplementedError
 
     def done(self, ticket_id: TicketId, claim_id: ClaimId) -> Outcome:
@@ -164,7 +172,9 @@ class TicketStore:
     def get(self, ticket_id: TicketId) -> Ticket | None:
         raise NotImplementedError
 
-    def status(self, ticket_id: TicketId) -> Status | None:
+    def view(self, ticket_id: TicketId) -> TicketView | None:
+        """The ticket and its derived status, from ONE snapshot (so they always agree);
+        None if it does not exist."""
         raise NotImplementedError
 
     def list(
@@ -175,10 +185,8 @@ class TicketStore:
         project: ProjectId | None = None,
         agent: AgentId | None = None,
         kind: Kind | None = None,
-    ) -> Sequence[Ticket]:
-        raise NotImplementedError
-
-    def claim_of(self, ticket_id: TicketId) -> Claim | None:
+    ) -> Sequence[TicketView]:
+        """Matching tickets with their derived status, all from one snapshot."""
         raise NotImplementedError
 
     def log(

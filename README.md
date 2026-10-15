@@ -10,8 +10,8 @@ so "who holds which ticket" has exactly one answer.
 
 ## What it guarantees
 
-- **At most one recorded claim per ticket; stale holders are fenced.** Renew / release /
-  done must present the claim's `claim_id` (fencing survives completion). Leases are
+- **At most one recorded claim per ticket; stale holders are fenced.** Renew / move /
+  release / done must present the claim's `claim_id` (fencing survives completion). Leases are
   advisory: skewed clocks can make two agents briefly believe they hold a ticket, but
   only the recorded claim can change it.
 - **Atomic changes.** Each operation is one commit; a lost race is retried on fresh state, never a partial write.
@@ -30,27 +30,34 @@ of the store repository.
 
 ## Quickstart (target behaviour)
 
-The CLI is explicit by design (built for agents): global options on every call, every
-id supplied by the caller, TTLs in seconds, JSON out. Each agent runs it against its
-own clone of the store repository; a shell variable keeps the global options short:
+The CLI is explicit by design (built for agents): store options on every store command, every
+id supplied by the caller (generated with `tkt mint`), TTLs in seconds, JSON out. Each
+agent runs it against its own clone of the store repository; a shell variable keeps the
+store options short:
 
 ```sh
-T="tkt --repo /work/tasks --remote origin"
+S="--repo /work/tasks --remote origin"
 
-$T init                                                   # once per store
-$T add --id tkt-7f3a91c2 --title "Expire reset tokens" --kind task --phase development --priority 2
-$T claim tkt-7f3a91c2 --as coder-7 --ttl 1800 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71
-$T renew tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --ttl 1800
-$T release tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --to-phase review
-$T claim-next --as reviewer-2 --ttl 1800 --phase review --claim-id 8a21c4f09e3b4d7fb6c5a1e2d3f40b9c
-$T done tkt-7f3a91c2 --claim-id 8a21c4f09e3b4d7fb6c5a1e2d3f40b9c
-$T list --phase review
-$T reap                                                   # any writer, on a schedule
+tkt init $S                                                # once per store
+TICKET=$(tkt mint ticket-id)
+tkt add --id "$TICKET" --title "Expire reset tokens" --kind task --phase implementation $S
+
+CLAIM=$(tkt mint claim-id)                                 # keep it: it identifies this claim
+tkt claim "$TICKET" --as coder-7 --ttl 1800 --claim-id "$CLAIM" $S
+tkt renew "$TICKET" --claim-id "$CLAIM" --ttl 1800 $S      # every ~10 min while working
+tkt move "$TICKET" --claim-id "$CLAIM" --to-phase review $S
+tkt release "$TICKET" --claim-id "$CLAIM" $S               # handoff: move, then release
+
+REVIEW=$(tkt mint claim-id)
+tkt claim-next --as reviewer-2 --ttl 1800 --phase review --claim-id "$REVIEW" $S
+tkt done "$TICKET" --claim-id "$REVIEW" $S
+tkt list --phase review $S
+tkt reap $S                                                # any writer, on a schedule
 ```
 
-Every command prints one JSON value. Committed and unchanged outcomes list the affected
-tickets; failures print the op with its ids. Re-running any command unchanged is safe.
-See `docs/cli.md`.
+Store commands print one JSON value: committed and unchanged outcomes list the affected
+tickets, and failures print the op with its ids. Re-running any command unchanged is
+safe. See `docs/cli.md`.
 
 ## Layout
 

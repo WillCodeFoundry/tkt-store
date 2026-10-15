@@ -1,8 +1,10 @@
 # On-branch format — tkt-protocol 1
 
 Pre-1.0, while no store is deployed, format changes keep protocol 1 when documented
-here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`),
-`ended_claim_id`, `claim.claimed_at`, `content_version` and `tkt-store.json`.
+here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`;
+phases are the nine-value set below, without `development`), `ended_claim_ids`,
+`claim.claimed_at`, `content_version`, the `move` op with its `tkt-phase` trailer, and
+`tkt-store.json` with the store's `mode`.
 
 ## Branch layout
 
@@ -17,7 +19,9 @@ tickets/
   tkt-91c20b4e.json
 ```
 
-- `tkt-store.json` records the format version, `{"protocol": 1}`. `init` writes it into
+- `tkt-store.json` records the format version and the store's mode,
+  `{"mode": "remote", "protocol": 1}` (`mode` is `remote` or `local`, fixed for the
+  store's life; opening it in the other mode is refused). `init` writes it into
   the root commit; every snapshot checks it and fails (`StoreError`) if it is missing or
   newer than the client supports.
 - One file per ticket, `tickets/tkt-<hex>.json`; the id is both the filename stem and the
@@ -41,9 +45,9 @@ tickets/
   "blocked_by": ["tkt-91c20b4e"],
   "tags": ["auth"],
   "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000, "claimed_at": 1790995000},
-  "phase": "development",
+  "phase": "implementation",
   "resolution": null,
-  "ended_claim_id": null,
+  "ended_claim_ids": ["8a21c4f09e3b4d7fb6c5a1e2d3f40b9c"],
   "created": 1790990000,
   "updated": 1790995000,
   "content_version": 3
@@ -61,9 +65,9 @@ tickets/
 | `blocked_by` | list[string] | ticket ids (same pattern as `id`) that must be `done` before claiming |
 | `tags` | list[string] | free-form |
 | `claim` | object \| null | present ⇒ held (possibly expired): `agent`, `claim_id` (exactly 32 lowercase hex characters), `lease_until`, `claimed_at` (unix seconds; renew keeps it) |
-| `phase` | `"development" \| "review" \| "qa"` | workflow position; moved only by the holder's handoff |
+| `phase` | `"triage" \| "specification" \| "implementation" \| "cleanup" \| "architecture" \| "hardening" \| "qa" \| "review" \| "release"` | workflow position (which role the ticket waits for); moved only by the holder's `move` |
 | `resolution` | `"done" \| "cancelled"` \| null | null while open; set once by `done`/`cancel`; non-null means terminal (final) |
-| `ended_claim_id` | string \| null | the most recent claim id to end, however it ended (released, reaped, taken over, cancelled, done); fenced: while recorded here it cannot claim again |
+| `ended_claim_ids` | list[string] | every claim id that has ended on this ticket, oldest first, however it ended (released, reaped, taken over, cancelled, done); never truncated; an id here can never claim again; when `resolution` is `done`, the last entry completed the ticket |
 | `created`, `updated` | int | unix seconds (from the injected clock); `updated` is set by every op that writes the ticket |
 | `content_version` | int | optimistic concurrency for content: 1 when added, incremented only by `edit`; an edit must name it (`STALE` otherwise) |
 
@@ -91,12 +95,12 @@ tkt-claim: c9f2e1d07b3a4e58a6f0c2b9e4d1a873
 | Trailer | Required | Values |
 |---|---|---|
 | `tkt-protocol` | yes | integer protocol version |
-| `tkt-op` | yes | `init`, `add`, `edit`, `claim`, `claim-next`, `renew`, `release`, `done`, `cancel`, `reap` |
+| `tkt-op` | yes | `init`, `add`, `edit`, `claim`, `claim-next`, `renew`, `move`, `release`, `done`, `cancel`, `reap` |
 | `tkt-time` | yes | unix seconds from the writer's injected clock; informational across writers |
 | `tkt-id` | yes (except `init`) | ticket id; `reap` lists one `tkt-id` per released ticket |
 | `tkt-agent` | when an agent acted | agent id (no control characters) |
 | `tkt-claim` | for claim-scoped ops | claim id |
-| `tkt-phase` | when a `release` hands off | the ticket's new phase |
+| `tkt-phase` | on `move` | the ticket's new phase |
 | `tkt-reason` | optional | free text, no control characters (cancel/release reasons) |
 
 A commit without tkt trailers is foreign and ignored by history. A tkt commit missing

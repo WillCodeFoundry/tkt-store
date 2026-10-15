@@ -1,8 +1,9 @@
 """The CLI parser against docs/cli.md. REAL tests (the parser is implemented).
 
 The command tables in docs/cli.md are the contract: every documented command exists,
-with exactly the documented flags, and Required/Optional match argparse. Handlers are
-checked against a recording fake TicketStore (injected, not patched).
+with exactly the documented flags, and Required/Optional match argparse. The store
+options are documented once in their own section and required on every store command.
+Handlers are checked against a recording fake TicketStore (injected, not patched).
 """
 
 from __future__ import annotations
@@ -14,11 +15,11 @@ from typing import Any
 
 import pytest
 
-from tkt_store.cli import build_parser
+from tkt_store.cli import STORE_OPTIONS, build_parser
 from tkt_store.domain.operations import UNSET
 
 CLI_MD = Path(__file__).resolve().parents[2] / "docs" / "cli.md"
-GLOBAL = ["--repo", "/work/tasks", "--remote", "origin"]
+STORE = ["--repo", "/work/tasks", "--remote", "origin"]
 CLAIM_ID = "3f9c0d2e8b1a47c6a5e4f30b2d9c8e71"
 
 ROW = re.compile(
@@ -31,7 +32,7 @@ def _documented() -> dict[str, tuple[str, set[str], set[str]]]:
     """command -> (positional text, required flags, optional flags) from docs/cli.md."""
     rows = {}
     for line in CLI_MD.read_text().splitlines():
-        if m := ROW.match(line):
+        if m := ROW.match(line.replace("\\|", "|")):
             rows[m["cmd"]] = (
                 m["pos"].strip(),
                 set(FLAG.findall(m["req"])),
@@ -60,6 +61,9 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
     positional, required, optional = DOCUMENTED[name]
     actions = [a for a in PARSERS[name]._actions if not isinstance(a, argparse._HelpAction)]
     flags = {a.option_strings[0]: a for a in actions if a.option_strings}
+    if name != "mint":
+        assert set(STORE_OPTIONS) <= set(flags)
+        flags = {f: a for f, a in flags.items() if f not in STORE_OPTIONS}
     assert set(flags) == required | optional
     assert {f for f, a in flags.items() if a.required} == required
     positionals = [a for a in actions if not a.option_strings]
@@ -67,6 +71,9 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
         assert len(positionals) == 1 and positionals[0].nargs is None
     elif positional == "[ID]":
         assert len(positionals) == 1 and positionals[0].nargs == "?"
+    elif "|" in positional:
+        choices = set(positionals[0].choices or ())
+        assert len(positionals) == 1 and choices == set(positional.split("|"))
     else:
         assert positional == "" and not positionals
 
@@ -74,19 +81,31 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],  # no globals
-        ["--repo", "r", "claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],
-        ["--repo", "r", "--remote", "o", "--no-remote", "reap"],  # both remote options
-        [*GLOBAL, "claim", "tkt-1", "--as", "a", "--ttl", "60"],  # missing --claim-id
-        [*GLOBAL, "renew", "tkt-1", "--claim-id", CLAIM_ID, "--ttl", "30m"],  # ttl is seconds
-        [*GLOBAL, "edit", "tkt-1", "--if-version", "1", "--priority", "2", "--clear-priority"],
-        [*GLOBAL, "release", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done"],
+        ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],  # no store opts
+        ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID, "--repo", "r"],
+        ["reap", "--repo", "r", "--remote", "o", "--no-remote"],  # both remote options
+        ["claim", "tkt-1", "--as", "a", "--ttl", "60", *STORE],  # missing --claim-id
+        ["renew", "tkt-1", "--claim-id", CLAIM_ID, "--ttl", "30m", *STORE],  # seconds only
+        ["edit", "tkt-1", "--if-version", "1", "--priority", "2", "--clear-priority", *STORE],
+        ["move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done", *STORE],  # not a phase
+        ["move", "tkt-1", "--claim-id", CLAIM_ID, *STORE],  # --to-phase is required
+        ["mint", "token"],  # not a mintable kind
     ],
 )
 def test_usage_errors_exit_2(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args(argv)
     assert exc.value.code == 2
+
+
+def test_mint_needs_no_store_options() -> None:
+    args = build_parser().parse_args(["mint", "claim-id"])
+    assert args.what == "claim-id" and hasattr(args, "local") and not hasattr(args, "run")
+
+
+def test_store_options_may_come_anywhere_after_the_command() -> None:
+    args = build_parser().parse_args(["reap", "--no-remote", "--repo", "r"])
+    assert args.repo == "r" and args.no_remote
 
 
 class RecordingStore:
@@ -103,7 +122,7 @@ class RecordingStore:
 
 
 def _run(argv: list[str]) -> tuple[str, tuple[Any, ...], dict[str, Any]]:
-    args = build_parser().parse_args([*GLOBAL, *argv])
+    args = build_parser().parse_args([*argv, *STORE])
     store = RecordingStore()
     args.run(store, args)
     (call,) = store.calls
@@ -127,9 +146,16 @@ def test_edit_absent_flags_are_unset_and_clear_flags_clear() -> None:
     assert kwargs["priority"] is None and kwargs["tags"] == ()
 
 
-def test_release_hands_off_with_to_phase() -> None:
-    method, args, kwargs = _run(
-        ["release", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "review"]
-    )
-    assert method == "release" and args == ("tkt-1", CLAIM_ID, "")
-    assert kwargs == {"to_phase": "review"}
+def test_move_maps_to_ticket_store_move() -> None:
+    method, args, kwargs = _run(["move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "review"])
+    assert (method, args, kwargs) == ("move", ("tkt-1", CLAIM_ID, "review"), {})
+
+
+def test_release_takes_no_phase() -> None:
+    method, args, kwargs = _run(["release", "tkt-1", "--claim-id", CLAIM_ID])
+    assert (method, args, kwargs) == ("release", ("tkt-1", CLAIM_ID, ""), {})
+
+
+def test_show_uses_one_snapshot() -> None:
+    method, args, _ = _run(["show", "tkt-1"])
+    assert (method, args) == ("view", ("tkt-1",))

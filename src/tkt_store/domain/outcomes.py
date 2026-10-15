@@ -19,7 +19,9 @@ from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Ticket, TicketId, T
 class RefusalCode(StrEnum):
     NOT_INITIALISED = "NOT_INITIALISED"
     NOT_FOUND = "NOT_FOUND"
-    DUPLICATE_ID = "DUPLICATE_ID"  # add with an existing id but different content
+    # add with an existing id: different kind/project, or different content while never
+    # edited (content_version 1)
+    DUPLICATE_ID = "DUPLICATE_ID"
     # a claim not yet takeable (live or in grace), or the claim id is already another
     # ticket's or another agent's current claim
     ALREADY_CLAIMED = "ALREADY_CLAIMED"
@@ -62,7 +64,7 @@ class OpRecord:
     `at` is the injected `now` the decision was made at (set by the rules), so the
     audit time is deterministic and needs no clock in the store. Clocks may skew
     across writers: `at` is informational and never grants exclusivity.
-    `phase` is the new phase on a release that hands off (`tkt-phase`).
+    `phase` is the new phase on a `move` (`tkt-phase`).
     """
 
     op: OpName

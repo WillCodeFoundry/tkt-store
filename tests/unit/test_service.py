@@ -19,3 +19,7 @@ def test_failures_carry_the_last_ids_tried() -> None:
 
 def test_edit_with_stale_expected_version_is_stale() -> None:
     """A stale expected_version → Refused(STALE)."""
+
+
+def test_view_and_list_read_one_snapshot() -> None:
+    """view/list return ticket and status from the same snapshot (one fetch)."""

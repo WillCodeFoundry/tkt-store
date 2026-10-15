@@ -22,8 +22,8 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
-| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/release/done must present it; once its claim ends the ticket records it as `ended_claim_id`, and while it is any ticket's `ended_claim_id` it cannot claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
-| **Phase** | *Stored* workflow position: `development`/`review`/`qa`, no forced order. Moved only by the holder's handoff. |
+| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/move/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history), and an id in any ticket's `ended_claim_ids` can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
+| **Phase** | *Stored* workflow position: which kind of work (or agent role) the ticket waits for. A fixed set named after swarm-forge's roles plus common human steps: `triage`, `specification`, `implementation`, `cleanup`, `architecture`, `hardening`, `qa`, `review`, `release`. No forced order. Moved only by the holder's `move`. |
 | **Resolution** | *Stored*, set once: `done` (by the holder) or `cancelled` (by anyone). A resolved ticket is terminal: never claimable or editable again. |
 | **Status** | *Derived*, never stored — the availability axis: `open`, `blocked`, `claimed`, `expired`, plus `done`/`cancelled` surfaced from the resolution. |
 | **Op** | A requested change, carrying the identities it needs (ticket id, and where relevant agent and claim id). |
@@ -41,8 +41,8 @@ That is the whole mental model: to know how a field behaves, find its group.
 |---|---|---|---|
 | Identity | `id`, `kind`, `project`, `created` | `add` only | never changes |
 | Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `edit`, by anyone | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
-| Workflow | `phase`, `resolution` | the lifecycle table below | per transition; `resolution` is set once |
-| Occupancy | `claim`, `ended_claim_id` | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | holder ops (`renew`, `release`, `done`) fenced by claim id (holder-op table, §5); `reap` and `cancel` deliberately unfenced |
+| Workflow | `phase`, `resolution` | `move` (holder), `done` (holder), `cancel` (anyone): the lifecycle table below | per transition; `resolution` is set once |
+| Occupancy | `claim`, `ended_claim_ids` | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | holder ops (`renew`, `move`, `release`, `done`) fenced by claim id (holder-op table, §5); `reap` and `cancel` deliberately unfenced |
 | Bookkeeping | `updated`, unknown keys | the system | — |
 
 Lifecycle (workflow group):
@@ -50,14 +50,18 @@ Lifecycle (workflow group):
 | From | Op | To | Who |
 |---|---|---|---|
 | — | `add --phase P` | phase P, unresolved | anyone |
-| unresolved, held | `release [--to-phase P]` | phase P (or unchanged), unheld | the holder |
+| unresolved, held | `move --to-phase P` | phase P, still held | the holder |
+| unresolved, held | `release` | same phase, unheld | the holder |
 | unresolved, held | `done` | resolution `done` | the holder |
 | unresolved | `cancel` | resolution `cancelled` (any claim ended) | anyone — deliberately unfenced |
 | resolved | anything | refused `TERMINAL`, except: `done` by the same claim → no-op, `done` by another claim → `NOT_HOLDER`, `cancel` when already cancelled → no-op | — |
 
-`release --to-phase`, `done` and `cancel` each touch two groups in one commit: they end
-the claim (occupancy) and change the workflow. For the handoff that is the point: a
-ticket can never be left released in the wrong phase. A resolved ticket keeps the phase it finished in.
+Every command changes one group, with two deliberate exceptions: `done` and `cancel` end
+the claim (occupancy) as they resolve the ticket (workflow), because a finished ticket
+cannot stay held. A handoff is two commands, `move` then `release`. In that order the
+in-between state is "still held, already in the new phase", which is harmless: if the
+holder crashes between them, the lease lapses and the ticket becomes available in the
+right phase. A resolved ticket keeps the phase it finished in.
 
 ## 3. Layers and boundaries
 
@@ -136,16 +140,18 @@ never a fresh read (lesson from balls' bl-cdec G1).
    that only the recorded claim id can change it.
 2. **One op = one commit**, published by compare-and-swap against its base.
 3. **Re-validate after conflict.** Rules always run against the snapshot being committed on.
-4. **Fencing.** `renew`, `release`, `done` require the current `claim_id`; otherwise
-   `NOT_HOLDER`, or `NOT_CLAIMED` when there is no claim (exact rules in the table below).
-   Fencing survives the end of a claim: the ticket records the claim that ended
-   (`ended_claim_id`, which every claim end sets, including `done`); while an id is
-   recorded there on any ticket it cannot claim again (`NOT_HOLDER`). A holder whose lease lapsed may still renew, release or
+4. **Fencing.** `renew`, `move`, `release`, `done` require the current `claim_id`;
+   otherwise `NOT_HOLDER`, or `NOT_CLAIMED` when there is no claim (exact rules in the
+   table below). Fencing survives the end of a claim: every claim that ends (released,
+   reaped, taken over, cancelled, done) is appended to the ticket's `ended_claim_ids`, a
+   complete history, and an id recorded there on any ticket can never claim again
+   (`NOT_HOLDER`). A holder whose lease lapsed may still renew, move, release or
    complete until someone takes the claim over or reaps it.
 5. **Idempotence.** Repeating an op whose effect is already present yields `NoOp`, not an error
-   (e.g. `done` on a ticket already done by the same claim, a re-run of a landed `release`,
-   a re-run of `claim`/`claim-next` with the same claim id and agent, `add` with an id that
-   exists with identical content). Committed and Unchanged outcomes carry the affected
+   (e.g. `done` on a ticket already done by the same claim, a re-run of a landed `move` or
+   `release` however many claims came since, a re-run of `claim`/`claim-next` with the
+   same claim id and agent (which renews the claim if it lapsed), a re-run of `add` —
+   see the add row below). Committed and Unchanged outcomes carry the affected
    tickets, and failures carry the op with its ids, so a caller can always re-run with the
    same ids.
 6. **Derived status.** No status field is stored; status comes from the stored
@@ -155,19 +161,19 @@ never a fresh read (lesson from balls' bl-cdec G1).
    relevant agent and claim id). Ticket and claim ids are minted *before* the transaction,
    or supplied by the caller, so retries and re-runs reuse them and converge. **Claim ids
    are single-use:** re-use one only to retry the same claim attempt. A claim id names one
-   claim on one ticket, and it is fenced once its claim ends; reuse after a later claim
-   cycle on that ticket has replaced its `ended_claim_id` is not detected.
+   claim on one ticket, and it is fenced for good once its claim ends.
 8. **Injected time.** Lease checks and audit times (`tkt-time`) use the injected clock.
    Expiry is acted on only by `reap` (or by a claim that takes over a lapsed claim), and
    only from `lease_until + SKEW_GRACE` — never implicitly on read. Audit times are
    informational across writers; nothing that grants exclusivity depends on them.
-   A lease TTL is bounded: `0 < ttl <= MAX_TTL` (24 h).
+   A lease TTL is bounded: `0 < ttl <= MAX_TTL` (2 h).
 9. **Resolution is final.** A resolved ticket (`done` or `cancelled`) cannot be claimed,
    renewed, released, edited, re-phased or reopened; a ticket cannot be created resolved.
    `done` is reached only by its holder; `cancel` is administrative. Phases carry no
    forced order (rework can move back).
 10. **Dependencies gate claims.** While any `blocked_by` entry is not yet `done`, a ticket
-    cannot be claimed — even if it carries a lapsed claim — and reads `blocked` unless it
+    cannot be newly claimed — even if it carries a lapsed claim (the holder's own re-run
+    still renews it, like `renew`) — and reads `blocked` unless it
     is live-claimed. A *cancelled* blocker
     does not satisfy a dependency. Blockers do not gate completion: `edit` may add a
     blocker to a claimed ticket without disturbing the claim, and the holder may still
@@ -184,46 +190,51 @@ never a fresh read (lesson from balls' bl-cdec G1).
     an edit's `expected_version` is at least 1.
     Otherwise `INVALID`.
 
-### Holder ops (`renew`, `release`, `done`)
+### Holder ops (`renew`, `move`, `release`, `done`)
 
-The single reference for these three ops; the `decide_*` docstrings point here. Checked
+The single reference for these four ops; the `decide_*` docstrings point here. Checked
 in this order after `NOT_FOUND`, the first that applies deciding:
 
 1. resolved ticket (first table);
 2. the current claim has `op.claim_id`;
-3. an ended claim has it (`op.claim_id == ended_claim_id`);
+3. an ended claim has it (`op.claim_id in ended_claim_ids`);
 4. no claim;
 5. claimed by another.
 
 | op | resolved ticket |
 |---|---|
 | renew | `TERMINAL` |
+| move | `TERMINAL` |
 | release | `TERMINAL` |
-| done | cancelled → `TERMINAL`; done and `ended_claim_id == op.claim_id` → NoOp; done otherwise → `NOT_HOLDER` |
+| done | cancelled → `TERMINAL`; done and `op.claim_id` is the last of `ended_claim_ids` → NoOp; done otherwise → `NOT_HOLDER` |
 
 | op | 2. current claim matches | 3. ended claim matches | 4. no claim | 5. claimed by another |
 |---|---|---|---|---|
 | renew | Apply | `NOT_HOLDER` | `NOT_CLAIMED` | `NOT_HOLDER` |
-| release | Apply | `to_phase` absent or equal to the current phase → NoOp ("claim ended"); otherwise `NOT_HOLDER` | `NOT_CLAIMED` | `NOT_HOLDER` |
+| move | already in `to_phase` → NoOp; otherwise Apply | already in `to_phase` → NoOp; otherwise `NOT_HOLDER` ("claim ended before the move") | `NOT_CLAIMED` | `NOT_HOLDER` |
+| release | Apply | NoOp ("claim already ended") | `NOT_CLAIMED` | `NOT_HOLDER` |
 | done | Apply | `NOT_HOLDER` | `NOT_CLAIMED` | `NOT_HOLDER` |
 
 - A matching current claim is accepted even if lapsed, as long as nobody took it over.
-- `ended_claim_id` is set whenever a claim ends: release, reap, takeover, cancel, done.
-  Because the resolved check comes first, done and cancel setting it only matters for
-  `done`'s fenced no-op repeat and for fencing claims.
-- A re-run of a landed release (including after a push that landed but was retried, or
-  after someone else claimed the ticket) is a NoOp at step 3. A fenced agent cannot move
-  the phase: its `release --to-phase X` is refused unless the ticket is already at `X`.
+- Every claim end appends to `ended_claim_ids`: release, reap, takeover, cancel, done.
+  The list is never truncated, so step 3 recognises an ended claim however many claims
+  came after it. A ticket only accumulates a handful of claims in its life, so the list
+  stays small.
+- A re-run of a landed `move` or `release` (including after a push that landed but was
+  retried, or after other claims came and went) is a NoOp at step 3. A fenced agent
+  cannot move the phase: its `move` is refused unless the ticket is already there.
+- Refusal messages say which case applied: "claim already ended on this ticket" (step 3
+  for renew/done), "claim was never used on this ticket", or "held by another claim".
 
 ### Other ops
 
 | op | refusals (in order) | NoOp | Apply |
 |---|---|---|---|
 | init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
-| add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker), `DUPLICATE_ID` | same id and identical AddOp fields (`created`/`updated` not compared) | new ticket |
+| add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
 | edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
-| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (live or lapsed) | new claim; a takeover fences the old id |
-| claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (names it) | as claim, on the most urgent claimable match |
+| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
+| claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |
 | reap | — | no claim past the grace | every claim past the grace cleared, one record |
 
@@ -238,7 +249,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |
 | Remote moved since the snapshot | Push rejected as non-fast-forward → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
-| Push landed, local update failed (e.g. another process on the clone moved the ref) | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
+| Push landed, local update failed | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
+| Store opened in the other mode (`--no-remote` on a remote-backed store, or vice versa) | `StoreError` on every snapshot; nothing written | Use the mode recorded in `tkt-store.json` |
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |
 | Holder dies | Lease lapses → `expired` status | After `SKEW_GRACE`, `reap` or a new `claim` takes over; old holder fenced by claim id |
 | Remote unreachable or not configured | `StoreError` | Retry later; never falls back to local-only |
@@ -252,15 +264,17 @@ no push: there `update-ref ref new base` is the compare-and-swap, and a moved re
 
 Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
 preserved and ignored.
-The store's format version lives in `tkt-store.json` at the tree root and is checked on
-every snapshot.
+The store's format version and mode (remote-backed or local-only) live in
+`tkt-store.json` at the tree root and are checked on every snapshot. The push states its
+expected old value (`--force-with-lease=<ref>:<base>`), so compare-and-swap does not rely
+on branch protection alone.
 
 ## 7. Deployment model
 
 **Multi-writer: agents read and write the store directly**, each through `tkt`, with
-`origin` as the shared remote. Agents normally use their own clone; several processes
-sharing one clone are also supported (the local ref is only a cache). A coordinator is
-at most an optional convenience, never a safety mechanism. Correctness rests on:
+`origin` as the shared remote. **One process per clone** is an assumption: each agent
+gets its own clone (several processes sharing a clone are not supported). A coordinator
+is at most an optional convenience, never a safety mechanism. Correctness rests on:
 
 - compare-and-swap on the ref (one op = one commit; lost races retry), and
 - claim-id fencing (a stale holder can no longer change the ticket), and
@@ -283,17 +297,43 @@ coordinator-gated writes and is out of scope.
 
 **Clocks.** Each writer uses its own clock, so clocks may skew. Leases are advisory and
 acted on only after `SKEW_GRACE`; a TTL should comfortably exceed
-`renew interval + SKEW_GRACE + expected skew`, and may not exceed `MAX_TTL` (24 h).
+`renew interval + SKEW_GRACE + expected skew`, and may not exceed `MAX_TTL` (2 h).
 Fencing is authoritative.
 
+**Scale.** Designed for about 10 agents working in parallel. With 30-minute leases
+renewed every ~10 minutes, renewals (the bulk of writes) are about 0.02 per second, well
+inside what whole-ref compare-and-swap on a hosted remote is assumed to sustain (ADR
+0001; to be measured in the first milestone).
+
+**Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
+`ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
+the next `claim` or `claim-next` takes it over; no supervisor or `reap` is required. A
+supervisor that knows the agent's claim id may release it early, as an optional
+speed-up (an ordinary `release`, not an administrative one). The agent owns
+its claim id (from `tkt mint claim-id`); a restarted agent re-running its claim with the
+same id and name gets the lapsed claim renewed.
+
 **Reaping.** `reap` is an idempotent job any writer may run on a schedule (cron, CI).
-Concurrent reapers simply conflict and converge.
+Concurrent reapers simply conflict and converge. It is not needed for recovery (claims
+take over lapsed claims directly); it tidies what `list` shows.
 
 A local-only store (no remote) remains supported for single-machine use and tests; it
 is selected explicitly (`--no-remote`, or `remote=None` in the library), never as a
 fallback.
 
-## 8. Open questions and deferred work
+## 8. Open questions, accepted limitations and deferred work
+
+Accepted limitations (decided; revisit only if they cause trouble):
+
+- No administrative release: a dead holder blocks a ticket for at most its lease plus
+  the grace (30-minute default, `MAX_TTL` 2 h), unless the ticket is cancelled.
+- `--as` (the agent name) is not authenticated; it is trusted under the trust model.
+- Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
+- `SKEW_GRACE` stays a fixed 60-second constant.
+- Phases and kinds are fixed enums; a new phase is a format change.
+
+Open questions:
+
 
 - Q1: Should resolved (done/cancelled) tickets be kept on the branch (current design) or moved to `archive/`?
 - Q2: Project identity is now the caller's concern (an opaque string). Should callers

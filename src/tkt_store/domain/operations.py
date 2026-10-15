@@ -34,6 +34,7 @@ class OpName(StrEnum):
     CLAIM = "claim"
     CLAIM_NEXT = "claim-next"
     RENEW = "renew"
+    MOVE = "move"
     RELEASE = "release"
     DONE = "done"
     CANCEL = "cancel"
@@ -48,7 +49,7 @@ class InitOp:
 
 @dataclass(frozen=True)
 class AddOp:
-    ticket_id: TicketId  # minted by the caller; a repeat with identical content is a no-op
+    ticket_id: TicketId  # minted by the caller; a re-run is a no-op (see decide_add)
     title: str
     body: str = ""
     kind: Kind = Kind.TASK
@@ -56,7 +57,7 @@ class AddOp:
     priority: int | None = None
     blocked_by: tuple[TicketId, ...] = ()
     tags: tuple[str, ...] = ()
-    phase: Phase = Phase.DEVELOPMENT  # the phase a new ticket starts in
+    phase: Phase = Phase.TRIAGE  # the phase a new ticket starts in
     agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
@@ -108,13 +109,22 @@ class RenewOp:
 
 @dataclass(frozen=True)
 class ReleaseOp:
-    """Give up a claim. `to_phase`, if set, hands the ticket on to that phase in the
-    same commit. Finishing is DoneOp/CancelOp (they set the resolution)."""
+    """Give up a claim (occupancy only; the phase is untouched). A handoff is MoveOp
+    then ReleaseOp. Finishing is DoneOp/CancelOp (they set the resolution)."""
 
     ticket_id: TicketId
     claim_id: ClaimId
     reason: str = ""
-    to_phase: Phase | None = None
+
+
+@dataclass(frozen=True)
+class MoveOp:
+    """Move the ticket to another phase (workflow only). Holder-only; the claim is kept,
+    so a handoff (move, then release) never leaves the ticket unheld in the old phase."""
+
+    ticket_id: TicketId
+    claim_id: ClaimId
+    to_phase: Phase
 
 
 @dataclass(frozen=True)
@@ -147,6 +157,7 @@ Op = (
     | ClaimOp
     | ClaimNextOp
     | RenewOp
+    | MoveOp
     | ReleaseOp
     | DoneOp
     | CancelOp

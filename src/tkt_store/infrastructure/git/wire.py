@@ -7,6 +7,8 @@ updates docs/format.md in the same change (pre-1.0 exception: see AGENTS.md).
 
 from __future__ import annotations
 
+from typing import Literal
+
 from tkt_store.domain.outcomes import OpRecord
 from tkt_store.domain.ticket import Ticket, TicketId
 
@@ -14,8 +16,9 @@ PROTOCOL_VERSION = 1
 TICKETS_DIR = "tickets"
 DEFAULT_REF = "refs/heads/tkt-store"
 STORE_META_PATH = "tkt-store.json"
-"""Root file recording the store's format version: {"protocol": <int>}. Written into the
-root commit by `init`; checked on every snapshot."""
+"""Root file recording the store's format version and mode:
+{"mode": "remote" | "local", "protocol": <int>}. Written into the root commit by `init`;
+checked on every snapshot."""
 
 TRAILER_PROTOCOL = "tkt-protocol"
 TRAILER_OP = "tkt-op"
@@ -38,14 +41,19 @@ def is_ticket_path(path: str) -> bool:
     raise NotImplementedError
 
 
-def encode_store_meta() -> bytes:
-    """The tkt-store.json written by init: canonical JSON {"protocol": PROTOCOL_VERSION}."""
+StoreMode = Literal["remote", "local"]
+
+
+def encode_store_meta(mode: StoreMode) -> bytes:
+    """The tkt-store.json written by init: canonical JSON
+    {"mode": mode, "protocol": PROTOCOL_VERSION}. The mode is fixed for the store's life."""
     raise NotImplementedError
 
 
-def decode_store_meta(data: bytes) -> int:
-    """The store's protocol version. Raises StoreError if malformed or newer than
-    PROTOCOL_VERSION."""
+def decode_store_meta(data: bytes) -> tuple[int, StoreMode]:
+    """The store's (protocol version, mode). Raises StoreError if malformed or the
+    protocol is newer than PROTOCOL_VERSION. The caller refuses a mode that does not match
+    how the store was opened, so a stray --no-remote can never diverge a clone."""
     raise NotImplementedError
 
 

@@ -1,8 +1,9 @@
 """`tkt` command line (docs/cli.md).
 
-A thin, explicit adapter for agents: every command maps to exactly one TicketStore
+A thin, explicit adapter for agents: every store command maps to one TicketStore
 method, every input is an explicit flag (no environment defaults, no inferred ids, no
-local state), and every result is printed as one JSON value. It holds no rules.
+local state), and every store result is printed as one JSON value. `mint` is local and
+prints a bare value; usage errors are argparse's plain text (exit 2). It holds no rules.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
-from tkt_store import open_store
+from tkt_store import new_id_source, open_store
 from tkt_store.application.service import TicketStore
 from tkt_store.domain.errors import TktError
 from tkt_store.domain.operations import UNSET
@@ -48,23 +49,40 @@ def _ids(values: Sequence[str] | None) -> tuple[TicketId, ...]:
     return tuple(TicketId(v) for v in values or ())
 
 
+STORE_OPTIONS = ("--repo", "--remote", "--no-remote")
+"""Required on every store command (not on `mint`), anywhere after the command name."""
+
+MINT_KINDS = ("claim-id", "ticket-id")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    """Required global options (--repo, and exactly one of --remote/--no-remote) and one
-    subcommand per TicketStore method. Each subcommand stores its handler as `run`."""
+    """One subcommand per TicketStore method, each with the store options (--repo, and
+    exactly one of --remote/--no-remote) and its handler stored as `run`; plus the local
+    `mint`, whose handler is stored as `local`."""
     parser = argparse.ArgumentParser(
         prog="tkt",
-        description="Ticket store for coordinating agents. All output is JSON (docs/cli.md).",
+        description="Ticket store for coordinating agents (docs/cli.md).",
     )
-    parser.add_argument("--repo", required=True, help="store repository (a clone)")
-    remote = parser.add_mutually_exclusive_group(required=True)
+    store_options = argparse.ArgumentParser(add_help=False)
+    store_options.add_argument("--repo", required=True, help="store repository (a clone)")
+    remote = store_options.add_mutually_exclusive_group(required=True)
     remote.add_argument("--remote", help="the shared remote, e.g. origin")
     remote.add_argument("--no-remote", action="store_true", help="local-only store")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
     def command(name: str, help: str, run: Run) -> argparse.ArgumentParser:
-        cmd = sub.add_parser(name, help=help)
+        cmd = sub.add_parser(name, help=help, parents=[store_options])
         cmd.set_defaults(run=run)
         return cmd
+
+    # --- local
+    c = sub.add_parser("mint", help="print a fresh random id (no store access)")
+    c.add_argument("what", choices=MINT_KINDS, metavar="claim-id|ticket-id")
+    c.set_defaults(
+        local=lambda a: (
+            new_id_source().claim_id() if a.what == "claim-id" else new_id_source().ticket_id()
+        )
+    )
 
     def ticket_id(cmd: argparse.ArgumentParser) -> None:
         cmd.add_argument("ticket_id", metavar="ID")
@@ -172,19 +190,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = command(
         "release",
-        "give a claim back, optionally handing off to a phase",
-        lambda s, a: s.release(
-            TicketId(a.ticket_id), ClaimId(a.claim_id), a.reason, to_phase=a.to_phase
-        ),
+        "give a claim back (the phase is untouched)",
+        lambda s, a: s.release(TicketId(a.ticket_id), ClaimId(a.claim_id), a.reason),
     )
     ticket_id(c)
     c.add_argument("--claim-id", required=True)
-    c.add_argument("--to-phase", type=Phase, choices=list(Phase))
     c.add_argument("--reason", default="")
 
     command("reap", "release every claim lapsed past the grace", lambda s, a: s.reap())
 
-    # --- lifecycle
+    # --- workflow
+    c = command(
+        "move",
+        "move the ticket to another phase, keeping the claim (holder only)",
+        lambda s, a: s.move(TicketId(a.ticket_id), ClaimId(a.claim_id), a.to_phase),
+    )
+    ticket_id(c)
+    c.add_argument("--claim-id", required=True)
+    c.add_argument("--to-phase", required=True, type=Phase, choices=list(Phase))
+
     c = command(
         "done",
         "complete a ticket (holder only)",
@@ -227,10 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = command(
         "show",
         "one ticket with its derived status",
-        lambda s, a: {
-            "ticket": s.get(TicketId(a.ticket_id)),
-            "status": s.status(TicketId(a.ticket_id)),
-        },
+        lambda s, a: s.view(TicketId(a.ticket_id)),
     )
     ticket_id(c)
 
@@ -251,8 +272,10 @@ def emit(result: object) -> int:
     Outcomes: Committed -> {"outcome": "committed", "revision", "tickets"} (0);
     Unchanged -> {"outcome": "unchanged", "reason", "tickets"} (0);
     Refused -> {"outcome": "refused", "code", "message"} (1).
-    Reads: list/log -> a JSON array; show -> {"ticket", "status"}, or a refused
-    NOT_FOUND object (1) when the ticket does not exist.
+    Reads: show -> {"ticket", "status"} (a TicketView), or a refused NOT_FOUND object (1)
+    when the ticket does not exist; list -> a JSON array of {"ticket", "status"}; log ->
+    a JSON array of history entries. Results are complete before anything is printed,
+    so output is never partial: a failure prints only the error object.
     Tickets are rendered as their on-branch JSON (docs/format.md).
     """
     raise NotImplementedError
@@ -267,7 +290,13 @@ def emit_error(error: TktError) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)  # usage errors exit 2
+    args = parser.parse_args(argv)  # usage errors: plain text on stderr, exit 2
+    if hasattr(args, "local"):
+        try:
+            print(args.local(args))
+        except NotImplementedError:
+            parser.exit(ExitCode.STORE_ERROR, "tkt: not implemented yet (skeleton)\n")
+        return ExitCode.OK
     try:
         store = open_store(Path(args.repo), remote=None if args.no_remote else args.remote)
         try:

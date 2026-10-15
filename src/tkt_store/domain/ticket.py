@@ -101,19 +101,19 @@ class Claim:
     """When this claim was taken (the claimant's injected clock); renew keeps it."""
 
     def age(self, now: Timestamp) -> Duration:
-        """Seconds since `claimed_at` (claim age, shown by `tkt show`). Informational:
-        clocks may skew across writers."""
-        raise NotImplementedError
+        """Seconds since `claimed_at` (claim age, shown by `tkt show`), never negative.
+        Informational: clocks may skew across writers."""
+        return max(0, now - self.claimed_at)
 
     def is_live(self, now: Timestamp) -> bool:
         """True while the lease has not expired (now < lease_until)."""
-        raise NotImplementedError
+        return now < self.lease_until
 
     def is_takeable(self, now: Timestamp) -> bool:
         """True once the claim may be acted on as expired — taken over or reaped:
         now >= lease_until + SKEW_GRACE. Display (Status.EXPIRED) starts earlier, at
         lease_until."""
-        raise NotImplementedError
+        return now >= self.lease_until + SKEW_GRACE
 
 
 @dataclass(frozen=True, kw_only=True)

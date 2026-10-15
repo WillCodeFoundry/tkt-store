@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from tkt_store.domain.outcomes import Refusal
-from tkt_store.domain.ticket import Snapshot, Ticket, Timestamp
+from tkt_store.domain.outcomes import Refusal, RefusalCode
+from tkt_store.domain.ticket import Resolution, Snapshot, Ticket, TicketId, Timestamp
 
 
 class Status(StrEnum):
@@ -27,6 +27,16 @@ class Status(StrEnum):
     EXPIRED = "expired"  # a claim is present, its lease has lapsed, not blocked
     DONE = "done"  # terminal: resolution is DONE
     CANCELLED = "cancelled"  # terminal: resolution is CANCELLED
+
+
+def open_blockers(snapshot: Snapshot, ticket: Ticket) -> tuple[TicketId, ...]:
+    """The blockers that are not resolved DONE. An unknown id counts as not done, and a
+    cancelled blocker does not satisfy the dependency (invariant 10)."""
+    return tuple(
+        blocker
+        for blocker in ticket.blocked_by
+        if (found := snapshot.get(blocker)) is None or not found.is_done
+    )
 
 
 def derive_status(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Status:
@@ -39,7 +49,17 @@ def derive_status(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Status:
     releases that claim once it is past the grace. Blockers are resolved against
     `snapshot`; an unknown blocker id counts as not done.
     """
-    raise NotImplementedError
+    if ticket.resolution is Resolution.DONE:
+        return Status.DONE
+    if ticket.resolution is Resolution.CANCELLED:
+        return Status.CANCELLED
+    if ticket.claim is not None and ticket.claim.is_live(now):
+        return Status.CLAIMED
+    if open_blockers(snapshot, ticket):
+        return Status.BLOCKED
+    if ticket.claim is not None:
+        return Status.EXPIRED
+    return Status.OPEN
 
 
 def why_not_claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Refusal | None:
@@ -51,7 +71,18 @@ def why_not_claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Ref
     Not the same as status in {OPEN, EXPIRED}: a claim within the grace reads EXPIRED
     but cannot be taken yet. Claim-id checks (re-runs, ended ids) are the rules' concern.
     """
-    raise NotImplementedError
+    if ticket.resolution is not None:
+        return Refusal(RefusalCode.TERMINAL, f"{ticket.id} is {ticket.resolution.value}")
+    if blockers := open_blockers(snapshot, ticket):
+        return Refusal(RefusalCode.BLOCKED, f"{ticket.id} is blocked by {', '.join(blockers)}")
+    claim = ticket.claim
+    if claim is not None and not claim.is_takeable(now):
+        state = "until" if claim.is_live(now) else "lapsed at"
+        return Refusal(
+            RefusalCode.ALREADY_CLAIMED,
+            f"{ticket.id} is held by {claim.agent} ({state} {claim.lease_until})",
+        )
+    return None
 
 
 def claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> bool:
@@ -59,6 +90,6 @@ def claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> bool:
     return why_not_claimable(snapshot, ticket, now) is None
 
 
-def sort_key_for_next(ticket: Ticket) -> tuple[int, int, str]:
-    """Ordering for claim-next: priority (None last), then created, then id."""
-    raise NotImplementedError
+def sort_key_for_next(ticket: Ticket) -> tuple[bool, int, int, str]:
+    """Ordering for claim-next: priority (lower first, None last), then created, then id."""
+    return (ticket.priority is None, ticket.priority or 0, ticket.created, ticket.id)

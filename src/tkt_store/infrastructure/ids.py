@@ -10,8 +10,9 @@ from tkt_store.domain.ticket import TICKET_PREFIX, ClaimId, TicketId  # noqa: F4
 
 
 class RandomIds:
-    """Production ids from `secrets`. Ticket ids: prefix + 4+ hex chars, lengthened on
-    collision by the caller (rules refuse DUPLICATE_ID; the service retries with a new id)."""
+    """Production ids from `secrets`. Ticket ids: TICKET_PREFIX + 8 hex chars (short
+    enough to type); on the rare collision the rules refuse DUPLICATE_ID and the service
+    re-mints a fresh id."""
 
     def ticket_id(self) -> TicketId:
         raise NotImplementedError

@@ -11,7 +11,7 @@ snapshot():
     git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError if
                                                 missing on a born ref or a newer protocol
     git ls-tree -r <revision> tickets/       -> blob ids of wire.is_ticket_path entries only
-    git cat-file --batch                     -> file contents -> wire.decode_ticket;
+    git cat-file --batch                     -> file contents (bytes) -> wire.decode_ticket;
                                                 one corrupt ticket fails the whole snapshot
 
 commit(base, changes, record):

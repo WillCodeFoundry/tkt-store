@@ -192,6 +192,13 @@ class TestReap:
         """None past the grace period → NoOp."""
 
 
+class TestUpdate:
+    def test_unset_fields_are_unchanged(self) -> None: ...
+
+    def test_priority_none_clears_it(self) -> None:
+        """UpdateOp(priority=None) → Apply with priority=None (UNSET would leave it)."""
+
+
 class TestRecord:
     def test_record_carries_injected_time(self) -> None:
         """Every Apply.record has at == now."""

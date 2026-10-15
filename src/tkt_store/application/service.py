@@ -15,6 +15,7 @@ from tkt_store.application.errors import RefusedError
 from tkt_store.application.ids import IdSource
 from tkt_store.application.store import HistoryEntry, Store
 from tkt_store.application.transaction import Outcome, Refused
+from tkt_store.domain.operations import UNSET, UnsetType
 from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import (
     AgentId,
@@ -78,7 +79,19 @@ class TicketStore:
         """
         raise NotImplementedError
 
-    def update(self, ticket_id: TicketId, **fields: object) -> Outcome:
+    def update(
+        self,
+        ticket_id: TicketId,
+        *,
+        title: str | UnsetType = UNSET,
+        body: str | UnsetType = UNSET,
+        priority: int | UnsetType | None = UNSET,
+        blocked_by: Sequence[TicketId] | UnsetType = UNSET,
+        tags: Sequence[str] | UnsetType = UNSET,
+        agent: AgentId | None = None,
+    ) -> Outcome:
+        """Transacts UpdateOp. Omitted fields are unchanged; `priority=None` clears it.
+        `agent`, when given, is recorded as the actor."""
         raise NotImplementedError
 
     def claim(

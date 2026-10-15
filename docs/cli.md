@@ -18,7 +18,7 @@ Global options:
 |---|---|---|
 | `tkt init` | Create the store ref with an empty `tickets/` tree and `tkt-store.json` | |
 | `tkt add TITLE` | Create a ticket; prints its id | `--id ID`, `--as AGENT`, `--kind`, `--body`, `--project`, `--priority`, `--blocked-by ID`…, `--tag`…, `--stage` (non-terminal; `done`/`cancelled` are refused) |
-| `tkt update ID` | Edit title/body/priority/tags/dependencies | `--as AGENT`, `--title`, `--body`, `--priority`, `--blocked-by ID`…, `--tag`… |
+| `tkt update ID` | Edit title/body/priority/tags/dependencies | `--as AGENT`, `--title`, `--body`, `--priority N\|none`, `--blocked-by ID`…, `--tag`… |
 | `tkt list` | List tickets (derived status) | `--status`, `--stage`, `--project`, `--agent`, `--kind` |
 | `tkt show ID` | One ticket, with derived status and claim age | |
 | `tkt claim ID` | Claim a ticket; prints the claim id | `--as AGENT` (required), `--ttl DURATION`, `--claim-id CLAIM_ID` |
@@ -44,8 +44,8 @@ Notes:
   holder-op table in `docs/design.md` §5.
 - **Actor.** `--as` on `add`, `update` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
-- **`update` limits.** `kind` and `project` cannot be changed. `--priority` cannot be
-  reset to null in v1 (an omitted option means "unchanged").
+- **`update`.** An omitted option means "unchanged"; `--priority none` clears the
+  priority. `kind` and `project` cannot be changed.
 - **Text fields.** `--as`, `--reason` and `TITLE`/`--title` must not contain newlines
   or other control characters (they are written into the commit message).
 - **Durations.** `--ttl` takes `Ns`, `Nm`, `Nh` or bare seconds (`90s`, `30m`, `2h`,

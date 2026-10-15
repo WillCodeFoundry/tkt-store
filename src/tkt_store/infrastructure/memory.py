@@ -1,7 +1,7 @@
 """An in-memory Store with the same compare-and-swap semantics as the git store.
 
-Uses: fast unit/property tests, deterministic race injection, callers' own
-tests, and dry runs. Kept honest by tests/contract/test_store.py, which runs
+Uses: fast unit/property tests, deterministic race injection, and callers' own
+tests. Kept honest by tests/contract/test_store.py, which runs
 the same contract against this and the git store.
 """
 
@@ -11,15 +11,15 @@ from collections.abc import Callable, Iterator, Sequence
 
 from tkt_store.application.store import HistoryEntry
 from tkt_store.domain.outcomes import Change, OpRecord
-from tkt_store.domain.ticket import Revision, Snapshot, TicketId, Timestamp
+from tkt_store.domain.ticket import Revision, Snapshot, TicketId
 
 
 class MemStore:
-    """Commits are kept as a list of (revision, tickets, record). Revisions are
-    deterministic counters."""
+    """Commits are kept as a list of (snapshot, record); each snapshot holds its own
+    revision. Revisions are deterministic counters."""
 
     def __init__(self) -> None:
-        self._commits: list[tuple[Revision, Snapshot, OpRecord]] = []
+        self._commits: list[tuple[Snapshot, OpRecord]] = []
         self._before_next_commit: Callable[[], None] | None = None
 
     # --- Store protocol -------------------------------------------------
@@ -51,16 +51,6 @@ class MemStore:
         Use it to make another writer win the race at exactly that moment."""
         self._before_next_commit = hook
 
-    def force_advance(
-        self,
-        at: Timestamp,
-        changes: Sequence[Change] = (),
-        record: OpRecord | None = None,
-    ) -> Revision:
-        """Append a commit as if another writer landed first (moves the head).
-        `at` stamps the default record; ignored when `record` is given."""
-        raise NotImplementedError
-
-    def copy(self) -> MemStore:
-        """An independent copy (for dry runs against a snapshot of real state)."""
+    def force_advance(self, changes: Sequence[Change], record: OpRecord) -> Revision:
+        """Append a commit as if another writer landed first (moves the head)."""
         raise NotImplementedError

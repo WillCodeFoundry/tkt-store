@@ -1,7 +1,7 @@
 """The value types: tickets, claims, and the identities that name them.
 
-PURE module. No IO, no git, no clock reads, no randomness. The only thing it
-imports from the package is `errors`; everything else is the standard library.
+PURE module. No IO, no git, no clock reads, no randomness. It imports nothing from
+the package; only the standard library.
 Status is NOT here — it is derived in `domain.status`.
 """
 

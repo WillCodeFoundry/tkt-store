@@ -120,6 +120,11 @@ def _check_protocol(protocol: int) -> None:
 def encode_ticket(ticket: Ticket) -> bytes:
     """Canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline.
     `extra` keys are merged back at top level. Round-trips byte-identically."""
+    return _canonical(ticket_document(ticket))
+
+
+def ticket_document(ticket: Ticket) -> dict[str, Any]:
+    """The ticket file's content as a JSON-ready dict (also what the CLI prints)."""
     claim = ticket.claim
     fields: dict[str, Any] = {
         "id": ticket.id,
@@ -145,7 +150,7 @@ def encode_ticket(ticket: Ticket) -> bytes:
         "ended_claim_ids": list(ticket.ended_claim_ids),
         "updated": ticket.updated,
     }
-    return _canonical({**ticket.extra, **fields})
+    return {**ticket.extra, **fields}
 
 
 def decode_ticket(data: bytes) -> Ticket:

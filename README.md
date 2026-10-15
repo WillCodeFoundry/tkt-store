@@ -4,9 +4,9 @@ A small ticket store for coordinating AI agents. Tickets live as JSON files on a
 dedicated git branch; every change is one commit published by compare-and-swap,
 so "who holds which ticket" has exactly one answer.
 
-> **Status: skeleton.** Interfaces, data structures and documentation are
-> specified; logic is stubbed (`NotImplementedError`). This revision exists for
-> architecture review — see `docs/design.md`.
+> **Status: milestone 1 in progress.** The domain, the git store and the `tkt` CLI
+> work end to end (the quickstart below runs as a test). Not yet measured against a
+> real GitHub remote; see `docs/decisions/0001-git-branch-as-store.md`.
 
 ## What it guarantees
 
@@ -28,7 +28,7 @@ agents, create worktrees, or merge code. Agents use it directly — the `tkt` co
 or `tkt_store.open_store(repo)`, which returns a `TicketStore` — each in its own clone
 of the store repository.
 
-## Quickstart (target behaviour)
+## Quickstart
 
 The CLI is explicit by design (built for agents): store options on every store command, every
 id supplied by the caller (generated with `tkt mint`), TTLs in seconds, JSON out. Each

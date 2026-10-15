@@ -2,8 +2,8 @@
 
 The CLI is built for agents. It is deliberately thin and explicit:
 
-- every command maps to exactly one `TicketStore` method, and its flags to that
-  method's arguments;
+- every command maps to one `TicketStore` method, and its flags to that method's
+  arguments (`show` combines the `get` and `status` reads);
 - every input is an explicit flag: no environment-variable defaults, no inferred ticket
   or claim ids, no local state;
 - every result is one JSON value on stdout.
@@ -38,7 +38,7 @@ model*). Flags in **Required** must be given; flags in **Optional** may be.
 | `tkt add` | Create a ticket | `--id ID`, `--title TEXT`, `--kind KIND`, `--phase PHASE` | `--body TEXT`, `--project PROJECT`, `--priority N`, `--blocked-by ID`…, `--tag TAG`…, `--as AGENT` |
 | `tkt edit ID` | Change content fields | `--if-version N` | `--title TEXT`, `--body TEXT`, `--priority N` or `--clear-priority`, `--blocked-by ID`… or `--clear-blocked-by`, `--tag TAG`… or `--clear-tags`, `--as AGENT` |
 
-### Work (needs a claim)
+### Work (occupancy)
 
 | Command | Purpose | Required | Optional |
 |---|---|---|---|

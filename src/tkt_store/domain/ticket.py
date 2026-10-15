@@ -118,7 +118,8 @@ class Ticket:
                    — changed only by `edit` (anyone), guarded by content_version
     - workflow     phase, resolution — phase by the holder's handoff; resolution set
                    once by `done` (holder) or `cancel` (anyone)
-    - occupancy    claim, ended_claim_id — changed only by claim ops, fenced by claim id
+    - occupancy    claim, ended_claim_id — changed by claim ops, done, cancel and reap;
+                   holder ops (renew/release/done) fenced by claim id
     - bookkeeping  updated, extra — maintained by the system
     """
 
@@ -143,7 +144,7 @@ class Ticket:
     resolution: Resolution | None = None
     """None while open; set once by done/cancel. Non-None means terminal (final)."""
 
-    # --- occupancy: changed only by claim ops, fenced by claim id
+    # --- occupancy: claim ops, done, cancel, reap; holder ops fenced by claim id
     claim: Claim | None = None
     ended_claim_id: ClaimId | None = None
     """The id of the most recent claim to end, however it ended: released, reaped,

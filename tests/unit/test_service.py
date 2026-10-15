@@ -17,5 +17,5 @@ def test_failures_carry_the_last_ids_tried() -> None:
     """RetriesExhausted / StoreError .op holds the ids of the last attempt."""
 
 
-def test_edit_requires_expected_version() -> None:
+def test_edit_with_stale_expected_version_is_stale() -> None:
     """A stale expected_version → Refused(STALE)."""

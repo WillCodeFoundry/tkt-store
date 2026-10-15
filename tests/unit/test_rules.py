@@ -36,6 +36,9 @@ class TestClaim:
     def test_refuses_blocked_even_with_a_lapsed_claim(self) -> None:
         """Blocked + claim past the grace → Refusal(BLOCKED), not a takeover."""
 
+    def test_claim_keeps_the_phase(self) -> None:
+        """A claim never moves the phase."""
+
     def test_refuses_terminal(self) -> None:
         """Resolved (done/cancelled) → Refusal(TERMINAL)."""
 
@@ -138,6 +141,8 @@ class TestWorkflow:
 
     def test_add_starts_unresolved_in_its_phase(self) -> None:
         """AddOp(phase=P) → resolution None, phase P, content_version 1."""
+
+    def test_release_without_to_phase_keeps_the_phase(self) -> None: ...
 
     def test_cancel_keeps_the_phase(self) -> None:
         """Cancelling a ticket in review → resolution cancelled, phase still review."""

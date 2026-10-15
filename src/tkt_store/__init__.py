@@ -49,7 +49,8 @@ def open_store(
     """Open a ticket store with the production wiring: a GitStore at `repo`, the
     system clock, and random ids.
 
-    `remote` defaults to "origin", like the CLI; pass None to choose a local-only
+    `remote` defaults to "origin" (the CLI has no default: it requires --remote or
+    --no-remote); pass None to choose a local-only
     store explicitly (single machine, tests). `clock` and `ids` can be overridden
     (e.g. for simulations) but default to the real implementations. This is the
     composition root — the one place that names concrete adapters.

@@ -42,7 +42,7 @@ That is the whole mental model: to know how a field behaves, find its group.
 | Identity | `id`, `kind`, `project`, `created` | `add` only | never changes |
 | Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `edit`, by anyone | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
 | Workflow | `phase`, `resolution` | the lifecycle table below | per transition; `resolution` is set once |
-| Occupancy | `claim`, `ended_claim_id` | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | claim-id fencing (holder-op table, §5) |
+| Occupancy | `claim`, `ended_claim_id` | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | holder ops (`renew`, `release`, `done`) fenced by claim id (holder-op table, §5); `reap` and `cancel` deliberately unfenced |
 | Bookkeeping | `updated`, unknown keys | the system | — |
 
 Lifecycle (workflow group):
@@ -53,11 +53,11 @@ Lifecycle (workflow group):
 | unresolved, held | `release [--to-phase P]` | phase P (or unchanged), unheld | the holder |
 | unresolved, held | `done` | resolution `done` | the holder |
 | unresolved | `cancel` | resolution `cancelled` (any claim ended) | anyone — deliberately unfenced |
-| resolved | anything | refused `TERMINAL` (except `done`'s fenced no-op repeat) | — |
+| resolved | anything | refused `TERMINAL`, except: `done` by the same claim → no-op, `done` by another claim → `NOT_HOLDER`, `cancel` when already cancelled → no-op | — |
 
-`release --to-phase` is the one op that touches two groups: it ends the claim
-(occupancy) and moves the phase (workflow) in one commit, so a handoff can never leave a
-ticket released in the wrong phase. A resolved ticket keeps the phase it finished in.
+`release --to-phase`, `done` and `cancel` each touch two groups in one commit: they end
+the claim (occupancy) and change the workflow. For the handoff that is the point: a
+ticket can never be left released in the wrong phase. A resolved ticket keeps the phase it finished in.
 
 ## 3. Layers and boundaries
 
@@ -173,7 +173,8 @@ never a fresh read (lesson from balls' bl-cdec G1).
     blocker to a claimed ticket without disturbing the claim, and the holder may still
     finish it.
 11. **No silent overwrite of edits.** `edit` names the `content_version` it was based
-    on; if the ticket was updated since, it is refused `STALE`, never last-writer-wins.
+    on; if it was edited since (its `content_version` moved on), it is refused `STALE`,
+    never last-writer-wins.
     It counts content edits only (`add` sets 1, each `edit` adds 1), so claims
     and renewals never make an edit stale. Edits to different fields compose: an edit
     only writes the fields it names, and every retry re-decides on fresh state.
@@ -211,7 +212,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   Because the resolved check comes first, done and cancel setting it only matters for
   `done`'s fenced no-op repeat and for fencing claims.
 - A re-run of a landed release (including after a push that landed but was retried, or
-  after someone else claimed the ticket) is a NoOp at step 4. A fenced agent cannot move
+  after someone else claimed the ticket) is a NoOp at step 3. A fenced agent cannot move
   the phase: its `release --to-phase X` is refused unless the ticket is already at `X`.
 
 ### Other ops

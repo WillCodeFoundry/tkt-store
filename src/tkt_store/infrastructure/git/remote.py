@@ -7,6 +7,8 @@ directly. One process per clone is assumed (design.md §7).
 
 from __future__ import annotations
 
+import re
+
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.domain.ticket import Revision
 from tkt_store.infrastructure.git.runner import GitError, GitRunner
@@ -117,12 +119,19 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
         raise
 
 
-LOST_RACE = ("\t[rejected]", "(incorrect old value provided)")
+LOST_RACE = re.compile(
+    r"\t\[rejected\]"  # the client-side lease check: "[rejected] (stale info)"
+    r"|\(incorrect old value provided\)"  # git's receive-pack (e.g. a bare remote)
+    r"|\(cannot lock ref '[^']*': is at [0-9a-f]+ but expected [0-9a-f]+\)"  # GitHub
+)
 """Porcelain push status that proves nothing was published because the ref moved:
-the client-side lease check ("!\t<src>:<dst>\t[rejected] (stale info)") or the remote's
-own compare-and-swap losing a concurrent update ("[remote rejected] (incorrect old value
-provided)"). Any other "[remote rejected]" (a hook, branch protection) stays a StoreError."""
+the client-side lease check ("!\t<src>:<dst>\t[rejected] (stale info)"), or the remote's
+own compare-and-swap losing a concurrent update. That last one is worded by the server:
+"[remote rejected] (incorrect old value provided)" from git itself, "[remote rejected]
+(cannot lock ref '<ref>': is at <oid> but expected <oid>)" from GitHub (observed in the
+ADR 0001 benchmark). Any other "[remote rejected]" (a hook, branch protection, a lock
+that could not be taken) stays a StoreError: re-running the op converges."""
 
 
 def _lost_race(line: str) -> bool:
-    return any(marker in line for marker in LOST_RACE)
+    return LOST_RACE.search(line) is not None

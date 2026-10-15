@@ -37,6 +37,8 @@ def status(flag_and_reason: str) -> str:
         "[rejected] (stale info)",
         "[rejected] (fetch first)",
         "[remote rejected] (incorrect old value provided)",
+        # GitHub, observed in the ADR 0001 benchmark
+        f"[remote rejected] (cannot lock ref '{REF}': is at {'c' * 40} but expected {BASE})",
     ],
 )
 def test_lost_race_is_conflict(reason: str) -> None:
@@ -50,6 +52,7 @@ def test_lost_race_is_conflict(reason: str) -> None:
         "[remote rejected] (pre-receive hook declined)",
         "[remote rejected] (protected branch hook declined)",
         "[remote rejected] (failed to update ref)",
+        f"[remote rejected] (cannot lock ref '{REF}': Unable to create '{REF}.lock': File exists)",
     ],
 )
 def test_other_rejections_are_store_errors_that_say_why(reason: str) -> None:

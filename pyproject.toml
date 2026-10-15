@@ -25,6 +25,7 @@ packages = ["src/tkt_store"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-q"
 markers = [
   "git: needs a real git binary (integration, contract against GitStore)",
   "slow: property tests and race tests",

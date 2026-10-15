@@ -59,8 +59,11 @@ Run these explicitly; they must pass (they are what CI runs):
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
-uv run pytest -q
+uv run pytest
 ```
+
+pytest is quiet by default (`addopts = "-q"` in `pyproject.toml`); use `-vv` to list
+individual tests.
 
 Two hooks back this up; they are a safety net, not the check:
 

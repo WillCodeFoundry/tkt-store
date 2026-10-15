@@ -36,6 +36,10 @@ SKEW_GRACE: Duration = 60
 reaped). Absorbs clock skew between writers so a fast-clocked writer cannot take a
 claim its holder still considers live. A fixed v1 constant, not per-store."""
 
+MAX_TTL: Duration = 24 * 60 * 60
+"""Upper bound on a lease TTL (claim, claim-next, renew). Without it a huge TTL would be
+a permanent lock that neither reap nor takeover can clear."""
+
 
 class Kind(StrEnum):
     STORY = "story"
@@ -109,6 +113,10 @@ class Ticket:
     done_by: ClaimId | None = None
     """The claim that completed the ticket; set only when stage is DONE. Keeps `done`
     fenced after completion (a repeat is a NoOp only for this claim id)."""
+    last_claim_id: ClaimId | None = None
+    """The most recent claim that ended other than by `done`: released, reaped, taken
+    over, or cleared by cancel. Fences that id (it cannot claim again) and makes a
+    release re-run converge."""
     extra: Mapping[str, Any] = field(default_factory=dict)
     """Unknown keys from the file, preserved verbatim on write-back."""
 

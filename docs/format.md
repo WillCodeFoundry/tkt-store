@@ -5,15 +5,22 @@
 Default ref: `refs/heads/tkt`.
 
 ```text
+tkt-store.json
 tickets/
   tkt-7f3a.json
   tkt-91c2.json
 ```
 
-- One file per ticket; the id is both the filename stem and the `id` field.
+- `tkt-store.json` records the format version, `{"protocol": 1}`. `init` writes it into
+  the root commit; every snapshot checks it and fails (`StoreError`) if it is missing or
+  newer than the client supports.
+- One file per ticket, `tickets/tkt-<hex>.json`; the id is both the filename stem and the
+  `id` field (a mismatch is an error).
 - Files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
   (stable diffs, byte-identical round trips).
-- No other files are meaningful. Unknown files are preserved, never interpreted.
+- No other files are meaningful. Unknown files (anything not matching the two paths
+  above) are preserved, never interpreted. A ticket file that fails to decode fails the
+  whole snapshot; repair it with an ordinary git commit.
 
 ## Ticket schema
 
@@ -27,9 +34,10 @@ tickets/
   "priority": 2,
   "blocked_by": ["tkt-91c2"],
   "tags": ["auth"],
-  "claim": {"agent": "coder-7", "claim_id": "c9f2e1…", "lease_until": 1791000000},
+  "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000},
   "stage": "development",
   "done_by": null,
+  "last_claim_id": null,
   "created": 1790990000,
   "updated": 1790995000
 }
@@ -45,9 +53,10 @@ tickets/
 | `priority` | int \| null | lower = more urgent; null sorts last |
 | `blocked_by` | list[string] | ticket ids (same pattern as `id`) that must be `done` before claiming |
 | `tags` | list[string] | free-form |
-| `claim` | object \| null | present ⇒ held (possibly expired); `claim_id` is lowercase hex (`^[0-9a-f]+$`) |
+| `claim` | object \| null | present ⇒ held (possibly expired); `claim_id` is exactly 32 lowercase hex characters (`^[0-9a-f]{32}$`) |
 | `stage` | `"development" \| "review" \| "qa" \| "done" \| "cancelled"` | lifecycle position; `done`/`cancelled` are terminal (final once set) |
 | `done_by` | string \| null | the claim id that completed the ticket; set only when `stage` is `done` |
+| `last_claim_id` | string \| null | the most recent claim id that ended other than by `done` (released, reaped, taken over, cancelled); fenced, it cannot claim again |
 | `created`, `updated` | int | unix seconds (from the injected clock) |
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
@@ -68,7 +77,7 @@ tkt-op: claim
 tkt-time: 1790995000
 tkt-id: tkt-7f3a
 tkt-agent: coder-7
-tkt-claim: c9f2e1…
+tkt-claim: c9f2e1d07b3a4e58a6f0c2b9e4d1a873
 ```
 
 | Trailer | Required | Values |

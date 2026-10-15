@@ -36,6 +36,10 @@ class TicketStore:
     """All mutating methods return the transaction Outcome. Callers that prefer
     exceptions can wrap a call in `raise_for_refusal`, which raises on a refusal.
 
+    Committed and Unchanged carry the affected tickets (so a re-run still reports the
+    claim id it holds). RetriesExhausted and StoreError carry the `op` with the ids it
+    was last tried with: re-run with those ids to converge.
+
     Construct it with explicit dependencies, or use `tkt_store.open_store(repo)`
     for the production wiring.
     """
@@ -62,12 +66,15 @@ class TicketStore:
         tags: Sequence[str] = (),
         stage: Stage = Stage.DEVELOPMENT,
         ticket_id: TicketId | None = None,
+        agent: AgentId | None = None,
     ) -> Outcome:
-        """Transacts AddOp.
+        """Transacts AddOp. `agent`, when given, is recorded as the actor.
 
-        `ticket_id` None: mint one from the IdSource; on DUPLICATE_ID retry with a
-        fresh id. Supplied: used verbatim (validated by the rules) and the
-        DUPLICATE_ID / NoOp outcome is returned without retrying, so a re-run converges.
+        `ticket_id` None: mint one from the IdSource; on DUPLICATE_ID re-mint and try
+        again (a mint collision, never a re-run: a re-run of your own add is a NoOp).
+        Supplied: used verbatim (validated by the rules) and the DUPLICATE_ID / NoOp
+        outcome is returned without retrying, so a re-run converges. Failures carry the
+        op with the last id tried.
         """
         raise NotImplementedError
 
@@ -85,7 +92,9 @@ class TicketStore:
         """Transacts ClaimOp. The claim id is in the resulting ticket.
 
         `claim_id` None: mint one from the IdSource. Supplied: used verbatim
-        (validated by the rules), so re-running with the same id converges (NoOp).
+        (validated by the rules), so re-running with the same id and agent converges
+        (NoOp, even if the lease has lapsed). A claim id is single-use: never reuse one
+        whose claim has ended.
         """
         raise NotImplementedError
 
@@ -100,7 +109,7 @@ class TicketStore:
         claim_id: ClaimId | None = None,
     ) -> Outcome:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
-        converges on the ticket it already holds."""
+        and agent converges on the ticket it already holds (Unchanged names it)."""
         raise NotImplementedError
 
     def renew(self, ticket_id: TicketId, claim_id: ClaimId, ttl: Duration = DEFAULT_TTL) -> Outcome:
@@ -121,8 +130,11 @@ class TicketStore:
         """Complete the ticket (terminal DONE). Holder-only."""
         raise NotImplementedError
 
-    def cancel(self, ticket_id: TicketId, reason: str = "") -> Outcome:
-        """Abandon the ticket (terminal CANCELLED). Administrative; needs no claim."""
+    def cancel(
+        self, ticket_id: TicketId, reason: str = "", *, agent: AgentId | None = None
+    ) -> Outcome:
+        """Abandon the ticket (terminal CANCELLED). Administrative; needs no claim.
+        `agent`, when given, is recorded as the actor."""
         raise NotImplementedError
 
     def reap(self) -> Outcome:

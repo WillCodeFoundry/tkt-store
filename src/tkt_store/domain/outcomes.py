@@ -78,9 +78,14 @@ class Apply:
 
 @dataclass(frozen=True)
 class NoOp:
-    """The op's effect is already present (invariant 5: idempotence). Nothing to persist."""
+    """The op's effect is already present (invariant 5: idempotence). Nothing to persist.
+
+    `ticket_ids` names the tickets the op concerns (e.g. the ticket a re-run of
+    claim-next already holds), so the caller still learns which ticket and claim it has.
+    """
 
     reason: str
+    ticket_ids: tuple[TicketId, ...] = ()
 
 
 Decision = Apply | NoOp | Refusal

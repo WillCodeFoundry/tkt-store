@@ -13,6 +13,9 @@ from tkt_store.domain.ticket import Ticket, TicketId
 PROTOCOL_VERSION = 1
 TICKETS_DIR = "tickets"
 DEFAULT_REF = "refs/heads/tkt"
+STORE_META_PATH = "tkt-store.json"
+"""Root file recording the store's format version: {"protocol": <int>}. Written into the
+root commit by `init`; checked on every snapshot."""
 
 TRAILER_PROTOCOL = "tkt-protocol"
 TRAILER_OP = "tkt-op"
@@ -29,6 +32,23 @@ def ticket_path(ticket_id: TicketId) -> str:
     return f"{TICKETS_DIR}/{ticket_id}.json"
 
 
+def is_ticket_path(path: str) -> bool:
+    """True only for 'tickets/tkt-<hex>.json'. Every other path on the branch is
+    preserved and never interpreted."""
+    raise NotImplementedError
+
+
+def encode_store_meta() -> bytes:
+    """The tkt-store.json written by init: canonical JSON {"protocol": PROTOCOL_VERSION}."""
+    raise NotImplementedError
+
+
+def decode_store_meta(data: bytes) -> int:
+    """The store's protocol version. Raises StoreError if malformed or newer than
+    PROTOCOL_VERSION."""
+    raise NotImplementedError
+
+
 def encode_ticket(ticket: Ticket) -> bytes:
     """Canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline.
     `extra` keys are merged back at top level. Round-trips byte-identically."""
@@ -36,7 +56,8 @@ def encode_ticket(ticket: Ticket) -> bytes:
 
 
 def decode_ticket(data: bytes) -> Ticket:
-    """Parse a ticket file. Unknown keys go to `extra`. Raises StoreError on malformed data."""
+    """Parse a ticket file. Unknown keys go to `extra`. Raises StoreError on malformed data.
+    The caller checks that the filename stem equals the decoded `id` (StoreError if not)."""
     raise NotImplementedError
 
 

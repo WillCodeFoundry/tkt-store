@@ -45,6 +45,9 @@ tkt list --stage qa --json
 tkt reap                                        # release lapsed claims (any writer, on a schedule)
 ```
 
+Claim ids are 32 hex characters; they are shortened here. Every outcome reports the
+affected tickets and ids, and failures print the ids to re-run with.
+
 ## Layout
 
 | Path | Purpose |

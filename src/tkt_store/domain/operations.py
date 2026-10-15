@@ -44,6 +44,7 @@ class AddOp:
     blocked_by: tuple[TicketId, ...] = ()
     tags: tuple[str, ...] = ()
     stage: Stage = Stage.DEVELOPMENT  # the phase a new ticket starts in
+    agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class UpdateOp:
     priority: int | None = None
     blocked_by: tuple[TicketId, ...] | None = None
     tags: tuple[str, ...] | None = None
+    agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ class CancelOp:
 
     ticket_id: TicketId
     reason: str = ""
+    agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
 
 
 @dataclass(frozen=True)

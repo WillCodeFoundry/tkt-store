@@ -12,26 +12,29 @@ from dataclasses import dataclass
 from tkt_store.application.clock import Clock
 from tkt_store.application.store import Store
 from tkt_store.domain.operations import Op
-from tkt_store.domain.outcomes import Apply, Refusal
-from tkt_store.domain.ticket import Revision, Snapshot
+from tkt_store.domain.outcomes import OpRecord, Refusal
+from tkt_store.domain.ticket import Revision, Ticket
 
-DEFAULT_MAX_ATTEMPTS = 5
+DEFAULT_MAX_ATTEMPTS = 10
 
 
 @dataclass(frozen=True)
 class Committed:
-    """The op was applied as a new revision."""
+    """The op was applied as a new revision. `tickets`: the affected tickets after it."""
 
     revision: Revision
-    decision: Apply
-    snapshot_before: Snapshot
+    record: OpRecord
+    tickets: tuple[Ticket, ...]
 
 
 @dataclass(frozen=True)
 class Unchanged:
-    """The op was a no-op: its effect was already present. Nothing was written."""
+    """The op was a no-op: its effect was already present. Nothing was written.
+    `tickets`: the tickets it concerns, as they are now (e.g. the ticket a re-run
+    claim already holds, with its claim id)."""
 
     reason: str
+    tickets: tuple[Ticket, ...]
 
 
 @dataclass(frozen=True)
@@ -51,12 +54,15 @@ def transact(
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> Outcome:
-    """Snapshot -> decide -> commit against the snapshot's base; on Conflict, start over.
+    """Snapshot -> decide -> commit against the snapshot's revision; on Conflict, start over.
 
     - `now` is read once per attempt, so a decision and its timestamps agree
       (ticket times and `OpRecord.at`, which the store persists as tkt-time).
-    - Refusal and NoOp return immediately; nothing is written.
-    - After `max_attempts` conflicts, raise RetriesExhausted. Re-running is safe.
-    - StoreError propagates unchanged.
+    - Refusal and NoOp return immediately; nothing is written. A NoOp's
+      `ticket_ids` are resolved against the snapshot into `Unchanged.tickets`.
+    - Committed.tickets are the tickets written by the Apply.
+    - After `max_attempts` conflicts, raise RetriesExhausted(op).
+    - A StoreError from the store is re-raised as StoreError(message, op=op) from the
+      original, so the caller has the ids to re-run with.
     """
     raise NotImplementedError

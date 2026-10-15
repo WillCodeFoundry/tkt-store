@@ -12,7 +12,7 @@ from tkt_store.domain.ticket import Ticket, TicketId
 
 PROTOCOL_VERSION = 1
 TICKETS_DIR = "tickets"
-DEFAULT_REF = "refs/heads/tkt"
+DEFAULT_REF = "refs/heads/tkt/store"
 STORE_META_PATH = "tkt-store.json"
 """Root file recording the store's format version: {"protocol": <int>}. Written into the
 root commit by `init`; checked on every snapshot."""

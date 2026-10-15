@@ -248,7 +248,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |
 | Remote moved since the snapshot | Push rejected as non-fast-forward → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
-| Push landed, local update failed (e.g. another process on the clone moved the ref) | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
+| Push landed, local update failed | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
+| Store opened in the other mode (`--no-remote` on a remote-backed store, or vice versa) | `StoreError` on every snapshot; nothing written | Use the mode recorded in `tkt-store.json` |
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |
 | Holder dies | Lease lapses → `expired` status | After `SKEW_GRACE`, `reap` or a new `claim` takes over; old holder fenced by claim id |
 | Remote unreachable or not configured | `StoreError` | Retry later; never falls back to local-only |
@@ -262,15 +263,17 @@ no push: there `update-ref ref new base` is the compare-and-swap, and a moved re
 
 Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
 preserved and ignored.
-The store's format version lives in `tkt-store.json` at the tree root and is checked on
-every snapshot.
+The store's format version and mode (remote-backed or local-only) live in
+`tkt-store.json` at the tree root and are checked on every snapshot. The push states its
+expected old value (`--force-with-lease=<ref>:<base>`), so compare-and-swap does not rely
+on branch protection alone.
 
 ## 7. Deployment model
 
 **Multi-writer: agents read and write the store directly**, each through `tkt`, with
-`origin` as the shared remote. Agents normally use their own clone; several processes
-sharing one clone are also supported (the local ref is only a cache). A coordinator is
-at most an optional convenience, never a safety mechanism. Correctness rests on:
+`origin` as the shared remote. **One process per clone** is an assumption: each agent
+gets its own clone (several processes sharing a clone are not supported). A coordinator
+is at most an optional convenience, never a safety mechanism. Correctness rests on:
 
 - compare-and-swap on the ref (one op = one commit; lost races retry), and
 - claim-id fencing (a stale holder can no longer change the ticket), and
@@ -296,14 +299,39 @@ acted on only after `SKEW_GRACE`; a TTL should comfortably exceed
 `renew interval + SKEW_GRACE + expected skew`, and may not exceed `MAX_TTL` (2 h).
 Fencing is authoritative.
 
+**Scale.** Designed for about 10 agents working in parallel. With 30-minute leases
+renewed every ~10 minutes, renewals (the bulk of writes) are about 0.02 per second, well
+inside what whole-ref compare-and-swap on a hosted remote is assumed to sustain (ADR
+0001; to be measured in the first milestone).
+
+**Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
+`ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
+the next `claim` or `claim-next` takes it over; no supervisor or `reap` is required. A
+supervisor that releases a crashed agent's claim is an optional speed-up. The agent owns
+its claim id (from `tkt mint claim-id`); a restarted agent re-running its claim with the
+same id and name gets the lapsed claim renewed.
+
 **Reaping.** `reap` is an idempotent job any writer may run on a schedule (cron, CI).
-Concurrent reapers simply conflict and converge.
+Concurrent reapers simply conflict and converge. It is not needed for recovery (claims
+take over lapsed claims directly); it tidies what `list` shows.
 
 A local-only store (no remote) remains supported for single-machine use and tests; it
 is selected explicitly (`--no-remote`, or `remote=None` in the library), never as a
 fallback.
 
-## 8. Open questions and deferred work
+## 8. Open questions, accepted limitations and deferred work
+
+Accepted limitations (decided; revisit only if they cause trouble):
+
+- No administrative release: a dead holder blocks a ticket for at most its lease plus
+  the grace (30-minute default, `MAX_TTL` 2 h), unless the ticket is cancelled.
+- `--as` (the agent name) is not authenticated; it is trusted under the trust model.
+- Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
+- `SKEW_GRACE` stays a fixed 60-second constant.
+- Phases and kinds are fixed enums; a new phase is a format change.
+
+Open questions:
+
 
 - Q1: Should resolved (done/cancelled) tickets be kept on the branch (current design) or moved to `archive/`?
 - Q2: Project identity is now the caller's concern (an opaque string). Should callers

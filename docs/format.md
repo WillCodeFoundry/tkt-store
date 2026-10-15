@@ -17,7 +17,9 @@ tickets/
   tkt-91c20b4e.json
 ```
 
-- `tkt-store.json` records the format version, `{"protocol": 1}`. `init` writes it into
+- `tkt-store.json` records the format version and the store's mode,
+  `{"mode": "remote", "protocol": 1}` (`mode` is `remote` or `local`, fixed for the
+  store's life; opening it in the other mode is refused). `init` writes it into
   the root commit; every snapshot checks it and fails (`StoreError`) if it is missing or
   newer than the client supports.
 - One file per ticket, `tickets/tkt-<hex>.json`; the id is both the filename stem and the

@@ -30,7 +30,8 @@ class Store(Protocol):
         Returns the current revision and all tickets. Reflects every commit that
         returned successfully before the call. May fetch first (remote-backed).
         Raises StoreError if the store's format version is missing or newer than
-        supported, or if a ticket file is corrupt (the whole snapshot fails: a partial
+        supported, if the store's recorded mode (remote-backed or local-only) is not the
+        mode it was opened in, or if a ticket file is corrupt (the whole snapshot fails: a partial
         view could mislead dependency checks and claim-next).
 
     commit(base, changes, record)

@@ -5,8 +5,8 @@ One process per clone is assumed (design.md §7); the local ref is only a cache 
 remote.
 
 snapshot():
-    [remote] remote.fetch -> remote head (the snapshot's revision; read from the fetch
-             result, never re-read from the local ref or FETCH_HEAD)
+    [remote] remote.fetch -> remote head (the snapshot's revision; read from the private
+             ref the fetch wrote, never from the local ref or FETCH_HEAD)
     [remote] remote.fast_forward_local(remote head)
     [local]  git rev-parse --verify <ref>    -> revision (None if unborn)
     git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError if
@@ -92,8 +92,9 @@ class GitStore:
         listing = self._git("ls-tree", "-r", "-z", revision, "--", f"{wire.TICKETS_DIR}/")
         paths, blobs = [], []
         for entry in _entries(listing):
-            if entry.kind == "blob" and wire.is_ticket_path(entry.name):
-                paths.append(entry.name)
+            path = entry.name.decode(errors="replace")  # undecodable: never a ticket path
+            if entry.kind == "blob" and wire.is_ticket_path(path):
+                paths.append(path)
                 blobs.append(entry.oid)
         tickets: dict[TicketId, Ticket] = {}
         for path, data in zip(paths, self._read_blobs(blobs), strict=True):
@@ -143,7 +144,7 @@ class GitStore:
         revision = self._head()
         if revision is None:
             return iter(())
-        out = self._git("log", "-z", "--format=%H%x00%B", revision).decode()
+        out = self._git("log", "-z", "--format=%H%x00%B", revision).decode(errors="replace")
         fields = out.split("\0")
 
         def entries() -> Iterator[HistoryEntry]:
@@ -179,65 +180,75 @@ class GitStore:
             raise StoreError(f"this is a {mode} store; it cannot be opened {how}")
 
     def _read_blobs(self, oids: list[str]) -> list[bytes]:
-        """Contents of `oids`, in order, from one `cat-file --batch`. Sizes are bytes."""
+        """Contents of `oids`, in order, from one `cat-file --batch`. Sizes are bytes.
+        Output that is not "<oid> blob <size>" then the content (e.g. "<oid> missing" in
+        a damaged repository) is a StoreError."""
         if not oids:
             return []
         out = self._git("cat-file", "--batch", stdin="".join(f"{o}\n" for o in oids).encode())
         contents, at = [], 0
-        for _ in oids:
-            header_end = out.index(b"\n", at)
-            size = int(out[at:header_end].split()[2])
+        for oid in oids:
+            header_end = out.find(b"\n", at)
+            header = out[at:header_end] if header_end >= 0 else out[at:]
+            fields = header.split()
+            if len(fields) != 3 or fields[1] != b"blob" or not fields[2].isdigit():
+                raise StoreError(f"cannot read blob {oid}: {header!r}")
+            size = int(fields[2])
             contents.append(out[header_end + 1 : header_end + 1 + size])
             at = header_end + 1 + size + 1  # content, then a newline
         return contents
 
     def _tree(self, base: Revision | None, changes: Sequence[Change]) -> str:
         """The new root tree: `base`'s tree with each changed ticket's file replaced.
-        Every other entry, known or not, is carried over untouched."""
+        Every other entry, known or not, is carried over untouched (names stay bytes, so
+        a name that is not UTF-8 survives too)."""
         root = {} if base is None else _by_name(self._git("ls-tree", "-z", f"{base}^{{tree}}"))
         if base is None:
             meta = self._hash(wire.encode_store_meta(self.mode))
-            root[wire.STORE_META_PATH] = _Entry(BLOB_MODE, "blob", meta, wire.STORE_META_PATH)
-        current = root.get(wire.TICKETS_DIR)
+            name = wire.STORE_META_PATH.encode()
+            root[name] = _Entry(BLOB_MODE, "blob", meta, name)
+        tickets_dir = wire.TICKETS_DIR.encode()
+        current = root.get(tickets_dir)
         if current is not None and current.kind != "tree":
             raise StoreError(f"{wire.TICKETS_DIR} at {base} is not a directory")
         tickets = {} if current is None else _by_name(self._git("ls-tree", "-z", current.oid))
         for change in changes:
-            name = wire.ticket_path(change.ticket.id).removeprefix(f"{wire.TICKETS_DIR}/")
+            name = wire.ticket_path(change.ticket.id).removeprefix(f"{wire.TICKETS_DIR}/").encode()
             oid = self._hash(wire.encode_ticket(change.ticket))
             tickets[name] = _Entry(BLOB_MODE, "blob", oid, name)
         if tickets:
             oid = self._mktree(tickets)
-            root[wire.TICKETS_DIR] = _Entry(TREE_MODE, "tree", oid, wire.TICKETS_DIR)
+            root[tickets_dir] = _Entry(TREE_MODE, "tree", oid, tickets_dir)
         return self._mktree(root)
 
     def _hash(self, data: bytes) -> str:
         return self._git("hash-object", "-w", "--stdin", stdin=data).decode().strip()
 
-    def _mktree(self, entries: dict[str, _Entry]) -> str:
+    def _mktree(self, entries: dict[bytes, _Entry]) -> str:
         listing = b"".join(e.line() for e in entries.values())
         return self._git("mktree", "-z", stdin=listing).decode().strip()
 
 
 class _Entry:
-    """One `ls-tree` / `mktree` line: "<mode> <type> <oid>\t<name>"."""
+    """One `ls-tree -z` / `mktree -z` record: "<mode> <type> <oid>\t<name>". The name is
+    kept as bytes: git does not require file names to be UTF-8."""
 
     __slots__ = ("kind", "mode", "name", "oid")
 
-    def __init__(self, mode: str, kind: str, oid: str, name: str) -> None:
+    def __init__(self, mode: str, kind: str, oid: str, name: bytes) -> None:
         self.mode, self.kind, self.oid, self.name = mode, kind, oid, name
 
     def line(self) -> bytes:
-        return f"{self.mode} {self.kind} {self.oid}\t{self.name}\0".encode()
+        return f"{self.mode} {self.kind} {self.oid}\t".encode() + self.name + b"\0"
 
 
 def _entries(listing: bytes) -> Iterator[_Entry]:
-    for raw in listing.decode().split("\0"):
+    for raw in listing.split(b"\0"):
         if raw:
-            meta, name = raw.split("\t", 1)
-            mode, kind, oid = meta.split()
+            meta, name = raw.split(b"\t", 1)
+            mode, kind, oid = meta.decode().split()
             yield _Entry(mode, kind, oid, name)
 
 
-def _by_name(listing: bytes) -> dict[str, _Entry]:
+def _by_name(listing: bytes) -> dict[bytes, _Entry]:
     return {e.name: e for e in _entries(listing)}

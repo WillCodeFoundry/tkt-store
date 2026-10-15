@@ -175,7 +175,9 @@ class TicketStore:
         it is renewed (Committed). A claim id is single-use: never reuse one whose claim
         has ended.
         """
-        return self._transact(ClaimOp(ticket_id, agent, claim_id or self._ids.claim_id(), ttl))
+        return self._transact(
+            ClaimOp(ticket_id, agent, self._ids.claim_id() if claim_id is None else claim_id, ttl)
+        )
 
     def claim_next(
         self,
@@ -190,7 +192,7 @@ class TicketStore:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
         and agent converges on the ticket it already holds — Unchanged naming it while the
         claim is live, Committed (renewed) if it lapsed — never a second ticket."""
-        claim_id = claim_id or self._ids.claim_id()
+        claim_id = self._ids.claim_id() if claim_id is None else claim_id
         return self._transact(
             ClaimNextOp(agent, claim_id, ttl, project=project, kind=kind, phase=phase)
         )

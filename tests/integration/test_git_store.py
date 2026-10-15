@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -161,17 +162,25 @@ def test_local_only_stale_base_is_conflict(local: Path) -> None:
     assert exc.value.actual == moved and head(local) == moved
 
 
-def test_fast_forward_local_tolerates_a_local_ref_ahead(clones: list[Path]) -> None:
-    """Local ref equal to, or a descendant of, the remote head → no-op, not StoreError.
-    (A local ref that is behind is fast-forwarded: a separate repair.)"""
-    store = GitStore.at(clones[0], remote="origin")
-    service(store).init()
-    remote_head = Revision(head(clones[0]))
-    sync.fast_forward_local(git_runner(clones[0]), REF, remote_head)  # equal
-    ahead = write_files(clones[0], {"NOTES.txt": b"unpushed"})
-    sync.fast_forward_local(git_runner(clones[0]), REF, remote_head)
-    assert head(clones[0]) == ahead
-    assert store.snapshot().revision == remote_head  # the remote head, not the cache
+def test_fast_forward_local_is_a_noop_when_equal(clones: list[Path]) -> None:
+    service(GitStore.at(clones[0], remote="origin")).init()
+    before = head(clones[0])
+    sync.fast_forward_local(git_runner(clones[0]), REF, Revision(before))
+    assert head(clones[0]) == before
+
+
+def test_local_ref_ahead_is_refused_before_anything_is_written(
+    clones: list[Path], bare_remote: Path
+) -> None:
+    """Commits on the local ref that the remote lacks (made outside tkt) → StoreError
+    on the next snapshot, so the op that would break the clone is never published."""
+    tickets = service(GitStore.at(clones[0], remote="origin"))
+    tickets.init()
+    remote_head = head(bare_remote)
+    write_files(clones[0], {"NOTES.txt": b"unpushed"})
+    with pytest.raises(StoreError, match="lacks"):
+        tickets.add("Expire tokens", ticket_id=T1)
+    assert head(bare_remote) == remote_head
 
 
 def test_fast_forward_local_moves_a_ref_that_is_behind(clones: list[Path]) -> None:
@@ -187,8 +196,63 @@ def test_fast_forward_local_rejects_divergence(clones: list[Path]) -> None:
     a.init()
     b.add("From b", ticket_id=T1)
     write_files(clones[0], {"NOTES.txt": b"diverged"})
-    with pytest.raises(StoreError, match="diverged"):
+    with pytest.raises(StoreError, match="lacks"):
         a.view(T1)
+
+
+def test_unreachable_remote_is_store_error(clones: list[Path]) -> None:
+    with pytest.raises(StoreError):
+        GitStore.at(clones[0], remote="no-such-remote").snapshot()
+
+
+def test_rejection_by_a_remote_hook_is_store_error_not_conflict(
+    clones: list[Path], bare_remote: Path
+) -> None:
+    """A hook or branch protection declining the push is not a lost race: StoreError,
+    never retried as a Conflict."""
+    tickets = service(GitStore.at(clones[0], remote="origin"))
+    tickets.init()
+    hook = bare_remote / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho protected >&2\nexit 1\n")
+    hook.chmod(0o755)
+    with pytest.raises(StoreError, match=r"\[remote rejected\].*protected") as exc:
+        tickets.add("Expire tokens", ticket_id=T1)
+    assert not isinstance(exc.value.__cause__, Conflict)
+
+
+def test_non_utf8_file_names_are_preserved(local: Path) -> None:
+    """git allows any bytes in a file name; tkt neither decodes nor drops them."""
+    name = b"notes-\xff.txt"
+    write_files(local, {name: b"latin"})
+    write_files(local, {b"tickets/" + name: b"also"})
+    tickets = service(GitStore.at(local, remote=None))
+    tickets.add("Second", ticket_id=T2)
+    assert [v.ticket.id for v in tickets.list()] == [T1, T2]
+    listing = subprocess.run(
+        ["git", "-C", str(local), "ls-tree", "-r", "-z", "--name-only", REF],
+        capture_output=True, check=True,
+    ).stdout.split(b"\0")  # fmt: skip
+    assert {name, b"tickets/" + name} <= set(listing)
+
+
+class CannedCatFile:
+    """A real runner whose `cat-file --batch` answers with canned output."""
+
+    def __init__(self, repo: Path, output: bytes) -> None:
+        self._run, self._output = git_runner(repo), output
+
+    def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
+        if args[:2] == ("cat-file", "--batch"):
+            return self._output
+        return self._run(*args, stdin=stdin)
+
+
+@pytest.mark.parametrize(
+    "output", [b"0123 missing\n", b"", b"0123 blob x\n", b"0123 tree 4\nxxxx\n"]
+)
+def test_unexpected_cat_file_output_is_store_error(output: bytes, local: Path) -> None:
+    with pytest.raises(StoreError, match="cannot read blob"):
+        GitStore(CannedCatFile(local, output), remote=None).snapshot()
 
 
 def test_remote_is_required_for_git_store() -> None:

@@ -78,7 +78,7 @@ The package is organised in layers, with dependencies pointing inward only
 | `domain/` | `ticket`, `status`, `operations`, `outcomes`, `rules`, `errors` | nothing but itself |
 | `application/` | `store`, `clock`, `ids` (ports), `transaction`, `service`, `history`, `errors` | `domain` |
 | `infrastructure/` | `git/{runner,wire,remote,repo}`, `memory`, `clock`, `ids` | `domain`, `application` |
-| interface | `cli` | `application` (and `domain` types) + the `open_store` composition root (`__init__`); never `infrastructure` |
+| interface | `cli` | `application` (and `domain` types) + the composition root (`__init__`: `open_store`, `new_id_source`); never `infrastructure` |
 | root | `open_store()` in `__init__` (composition root) | every layer |
 
 ## Development

@@ -138,3 +138,12 @@ def test_log_is_newest_first(memstore: MemStore) -> None:
     service.claim(T1, A, TTL, claim_id=C1)
     assert [e.record.op.value for e in service.log(T1)] == ["claim", "add"]
     assert len(service.log(limit=1)) == 1
+
+
+def test_an_empty_claim_id_is_refused_not_replaced(memstore: MemStore) -> None:
+    service = service_on(memstore)
+    for outcome in (
+        service.claim(T1, A, TTL, claim_id=ClaimId("")),
+        service.claim_next(A, TTL, claim_id=ClaimId("")),
+    ):
+        assert isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.INVALID

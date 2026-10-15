@@ -17,7 +17,7 @@ from tests.gitkit import new_repo
 from tests.unit.builders import NOW, TTL, A, B
 from tkt_store.application.errors import RetriesExhausted, StoreError
 from tkt_store.application.service import TicketStore
-from tkt_store.cli import emit_error, main, render
+from tkt_store.cli import emit_error, main, render_outcome
 from tkt_store.domain.operations import ClaimOp
 from tkt_store.domain.ticket import SKEW_GRACE, ClaimId, TicketId
 from tkt_store.infrastructure.clock import FakeClock
@@ -107,7 +107,7 @@ def test_tickets_list_has_the_documented_count(command: str, count: int, tmp_pat
     if command == "reap":
         clock.advance(TTL + SKEW_GRACE)
         outcome = service.reap()
-    value, code = render(outcome)
+    value, code = render_outcome(outcome)
     assert code == 0 and value["outcome"] == "committed" and len(value["tickets"]) == count
 
 

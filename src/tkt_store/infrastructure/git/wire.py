@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 from tkt_store.application.errors import StoreError
 from tkt_store.domain.operations import OpName
@@ -120,37 +120,7 @@ def _check_protocol(protocol: int) -> None:
 def encode_ticket(ticket: Ticket) -> bytes:
     """Canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline.
     `extra` keys are merged back at top level. Round-trips byte-identically."""
-    return _canonical(ticket_document(ticket))
-
-
-def ticket_document(ticket: Ticket) -> dict[str, Any]:
-    """The ticket file's content as a JSON-ready dict (also what the CLI prints)."""
-    claim = ticket.claim
-    fields: dict[str, Any] = {
-        "id": ticket.id,
-        "kind": ticket.kind.value,
-        "project": ticket.project,
-        "created": ticket.created,
-        "title": ticket.title,
-        "body": ticket.body,
-        "priority": ticket.priority,
-        "blocked_by": list(ticket.blocked_by),
-        "tags": list(ticket.tags),
-        "content_version": ticket.content_version,
-        "phase": ticket.phase.value,
-        "resolution": None if ticket.resolution is None else ticket.resolution.value,
-        "claim": None
-        if claim is None
-        else {
-            "agent": claim.agent,
-            "claim_id": claim.claim_id,
-            "lease_until": claim.lease_until,
-            "claimed_at": claim.claimed_at,
-        },
-        "ended_claim_ids": list(ticket.ended_claim_ids),
-        "updated": ticket.updated,
-    }
-    return {**ticket.extra, **fields}
+    return _canonical(ticket.to_dict())
 
 
 def decode_ticket(data: bytes) -> Ticket:

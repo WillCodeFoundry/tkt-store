@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import Final, Literal
+from typing import ClassVar, Final, Literal
 
 from tkt_store.domain.ticket import AgentId, ClaimId, Duration, Kind, Phase, ProjectId, TicketId
 
@@ -46,9 +46,12 @@ class InitOp:
     """Create the store ref with an empty tickets/ tree (the git store also writes
     tkt-store.json). A no-op if it exists."""
 
+    name: ClassVar[OpName] = OpName.INIT
+
 
 @dataclass(frozen=True)
 class AddOp:
+    name: ClassVar[OpName] = OpName.ADD
     ticket_id: TicketId  # minted by the caller; a re-run is a no-op (see decide_add)
     title: str
     body: str = ""
@@ -70,6 +73,8 @@ class EditOp:
     changed since then is refused STALE instead of silently overwritten.
     """
 
+    name: ClassVar[OpName] = OpName.EDIT
+
     ticket_id: TicketId
     expected_version: int
     title: str | UnsetType = UNSET
@@ -82,6 +87,7 @@ class EditOp:
 
 @dataclass(frozen=True)
 class ClaimOp:
+    name: ClassVar[OpName] = OpName.CLAIM
     ticket_id: TicketId
     agent: AgentId
     claim_id: ClaimId  # minted by the caller
@@ -91,6 +97,8 @@ class ClaimOp:
 @dataclass(frozen=True)
 class ClaimNextOp:
     """Atomically choose and claim the most urgent claimable ticket matching the filters."""
+
+    name: ClassVar[OpName] = OpName.CLAIM_NEXT
 
     agent: AgentId
     claim_id: ClaimId
@@ -102,6 +110,7 @@ class ClaimNextOp:
 
 @dataclass(frozen=True)
 class RenewOp:
+    name: ClassVar[OpName] = OpName.RENEW
     ticket_id: TicketId
     claim_id: ClaimId
     ttl: Duration
@@ -111,6 +120,8 @@ class RenewOp:
 class ReleaseOp:
     """Give up a claim (occupancy only; the phase is untouched). A handoff is MoveOp
     then ReleaseOp. Finishing is DoneOp/CancelOp (they set the resolution)."""
+
+    name: ClassVar[OpName] = OpName.RELEASE
 
     ticket_id: TicketId
     claim_id: ClaimId
@@ -122,6 +133,8 @@ class MoveOp:
     """Move the ticket to another phase (workflow only). Holder-only; the claim is kept,
     so a handoff (move, then release) never leaves the ticket unheld in the old phase."""
 
+    name: ClassVar[OpName] = OpName.MOVE
+
     ticket_id: TicketId
     claim_id: ClaimId
     to_phase: Phase
@@ -130,6 +143,8 @@ class MoveOp:
 @dataclass(frozen=True)
 class DoneOp:
     """Complete the ticket: resolution = DONE (terminal). Holder-only."""
+
+    name: ClassVar[OpName] = OpName.DONE
 
     ticket_id: TicketId
     claim_id: ClaimId
@@ -140,6 +155,8 @@ class CancelOp:
     """Abandon the ticket: resolution = CANCELLED (terminal).
     Requires no claim (an administrative act)."""
 
+    name: ClassVar[OpName] = OpName.CANCEL
+
     ticket_id: TicketId
     reason: str = ""
     agent: AgentId | None = None  # who acted, for the audit record (tkt-agent)
@@ -148,6 +165,8 @@ class CancelOp:
 @dataclass(frozen=True)
 class ReapOp:
     """Release every expired claim. Not scoped to one ticket."""
+
+    name: ClassVar[OpName] = OpName.REAP
 
 
 Op = (

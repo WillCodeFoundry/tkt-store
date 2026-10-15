@@ -81,14 +81,16 @@ infrastructure/  git/{runner · wire · remote · repo} · memory · clock · id
                    concrete adapters that implement the ports
 
 cli              the `tkt` command (an interface adapter)
-__init__         the composition root: `open_store()` wires infrastructure into application
+__init__         the composition root: `open_store()` wires infrastructure into application;
+                 `new_id_source()` gives callers that mint ids themselves (`tkt mint`) the
+                 production id source
 ```
 
 Dependency directions:
 
 ```text
 cli ──► application ──► domain
-cli ──► __init__ (open_store)
+cli ──► __init__ (open_store, new_id_source)
 infrastructure ──► application ──► domain
 __init__ ──► application + infrastructure     (the only cross-layer wiring)
 ```
@@ -104,8 +106,9 @@ imports and names imported from the package root):
 
 1. **Inward-only.** `domain` imports `domain`; `application` imports
    `domain`+`application`; `infrastructure` imports `domain`+`application`+itself;
-   `cli` imports `application` (and `domain` types) + the `open_store` composition
-   root (`__init__`); never `infrastructure`. Only the composition root
+   `cli` imports `application` (and `domain` types) + the composition root
+   (`__init__`: `open_store`, `new_id_source`); never `infrastructure`. The CLI prints
+   tickets with `Ticket.to_dict()`, the same plain data the git store serialises. Only the composition root
    (`__init__`, `__main__`) may import across every layer.
 2. **Pure domain.** No `domain` module touches IO, git, time or randomness.
 3. **One door to git.** Only modules under `infrastructure/git/` invoke `git`/subprocess.
@@ -259,8 +262,10 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 Remote-backed commit order: build objects on `base` → push `new:ref` with `remote.publish`
 (lost lease ⇒ `Conflict`, nothing published; any other rejection, e.g. a hook or branch
 protection, is a `StoreError`) → `update-ref ref new base` locally, best-effort. A snapshot
-fetches the ref into a private ref (`refs/tkt-store-remotes/<remote>/…`) and takes its
-revision from the fetch's porcelain output. The remote is authoritative; local refs are a cache. A local-only store has
+fetches the ref into a private ref (`refs/tkt-store-remotes/<remote>/…`) that only this
+code writes, and takes its revision from that ref. It then catches the local ref up by
+compare-and-swap; a local ref with commits the remote lacks (made outside `tkt`) is a
+`StoreError` before anything is written. The remote is authoritative; local refs are a cache. A local-only store has
 no push: there `update-ref ref new base` is the compare-and-swap, and a moved ref is a
 `Conflict`.
 

@@ -115,6 +115,15 @@ class Claim:
         lease_until."""
         return now >= self.lease_until + SKEW_GRACE
 
+    def to_dict(self) -> dict[str, Any]:
+        """The claim as plain data, as it appears in the ticket file (docs/format.md)."""
+        return {
+            "agent": self.agent,
+            "claim_id": self.claim_id,
+            "lease_until": self.lease_until,
+            "claimed_at": self.claimed_at,
+        }
+
 
 @dataclass(frozen=True, kw_only=True)
 class Ticket:
@@ -179,6 +188,29 @@ class Ticket:
         """True only when completed. A cancelled ticket is terminal but not done,
         so it does NOT satisfy a dependency (invariant 10)."""
         return self.resolution is Resolution.DONE
+
+    def to_dict(self) -> dict[str, Any]:
+        """The ticket as plain data, with `extra` keys back at top level. This IS the
+        on-branch ticket format (docs/format.md): a change here is a format change,
+        under the protocol-version rule in AGENTS.md. Interfaces print it too."""
+        return {
+            **self.extra,
+            "id": self.id,
+            "kind": self.kind.value,
+            "project": self.project,
+            "created": self.created,
+            "title": self.title,
+            "body": self.body,
+            "priority": self.priority,
+            "blocked_by": list(self.blocked_by),
+            "tags": list(self.tags),
+            "content_version": self.content_version,
+            "phase": self.phase.value,
+            "resolution": None if self.resolution is None else self.resolution.value,
+            "claim": None if self.claim is None else self.claim.to_dict(),
+            "ended_claim_ids": list(self.ended_claim_ids),
+            "updated": self.updated,
+        }
 
 
 @dataclass(frozen=True)

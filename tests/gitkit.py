@@ -66,13 +66,14 @@ def paths(repo: Path, ref: str = DEFAULT_REF) -> set[str]:
 
 def write_files(
     repo: Path,
-    files: Mapping[str, bytes | None],
+    files: Mapping[str, bytes | None] | Mapping[bytes, bytes | None],
     *,
     ref: str = DEFAULT_REF,
     message: str = "edited by hand\n",
 ) -> str:
     """Commit `files` on top of `ref` (None deletes a path) without touching any worktree,
-    as a person repairing the branch would. Moves `ref`; returns the new commit."""
+    as a person repairing the branch would. Paths may be bytes (any file name git allows).
+    Moves `ref`; returns the new commit."""
     index = repo / "tkt-test-index"
     env = {"GIT_INDEX_FILE": str(index)}
     parent = subprocess.run(
@@ -82,8 +83,9 @@ def write_files(
     ).stdout.strip()
     git(repo, "read-tree", *([parent] if parent else ["--empty"]), env=env)
     for path, data in files.items():
+        name = path.decode(errors="surrogateescape") if isinstance(path, bytes) else path
         if data is None:
-            git(repo, "update-index", "--force-remove", path, env=env)
+            git(repo, "update-index", "--force-remove", name, env=env)
             continue
         blob = (
             subprocess.run(
@@ -95,7 +97,7 @@ def write_files(
             .stdout.decode()
             .strip()
         )
-        git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}", env=env)
+        git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}", env=env)
     tree = git(repo, "write-tree", env=env).strip()
     index.unlink()
     commit = subprocess.run(

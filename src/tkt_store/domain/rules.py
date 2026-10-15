@@ -115,16 +115,19 @@ def validate_op(op: Op) -> Refusal | None:
     for ticket_id in _ticket_ids_of(op):
         if not TICKET_ID_RE.fullmatch(ticket_id):
             return _invalid(f"malformed ticket id {ticket_id!r}")
-    claim_id = getattr(op, "claim_id", None)
-    if claim_id is not None and not CLAIM_ID_RE.fullmatch(claim_id):
-        return _invalid(f"malformed claim id {claim_id!r} (need 32 lowercase hex characters)")
-    for name in ("agent", "reason", "title"):
-        value = getattr(op, name, None)
+    match op:
+        case ClaimOp() | ClaimNextOp() | RenewOp() | MoveOp() | ReleaseOp() | DoneOp():
+            if not CLAIM_ID_RE.fullmatch(op.claim_id):
+                return _invalid(
+                    f"malformed claim id {op.claim_id!r} (need 32 lowercase hex characters)"
+                )
+    for name, value in _texts_of(op).items():
         if isinstance(value, str) and CONTROL_CHARS_RE.search(value):
             return _invalid(f"{name} contains a newline or other control character")
-    ttl = getattr(op, "ttl", None)
-    if ttl is not None and not 0 < ttl <= MAX_TTL:
-        return _invalid(f"ttl must be between 1 and {MAX_TTL} seconds, got {ttl}")
+    match op:
+        case ClaimOp() | ClaimNextOp() | RenewOp():
+            if not 0 < op.ttl <= MAX_TTL:
+                return _invalid(f"ttl must be between 1 and {MAX_TTL} seconds, got {op.ttl}")
     if isinstance(op, EditOp) and op.expected_version < 1:
         return _invalid(f"expected_version must be >= 1, got {op.expected_version}")
     return None
@@ -135,7 +138,7 @@ def decide_init(snapshot: Snapshot, op: InitOp, now: Timestamp) -> Decision:
     adds tkt-store.json to the root commit itself; it is not a ticket Change.)"""
     if snapshot.revision is not None:
         return NoOp("store already initialised")
-    return Apply(changes=(), record=OpRecord(OpName.INIT, at=now, summary="init"))
+    return Apply(changes=(), record=OpRecord(op.name, at=now, summary="init"))
 
 
 def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
@@ -175,7 +178,7 @@ def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
         phase=op.phase,
         updated=now,
     )
-    return _apply(OpName.ADD, now, ticket, agent=op.agent)
+    return _apply(op.name, now, ticket, agent=op.agent)
 
 
 def decide_edit(snapshot: Snapshot, op: EditOp, now: Timestamp) -> Decision:
@@ -212,7 +215,7 @@ def decide_edit(snapshot: Snapshot, op: EditOp, now: Timestamp) -> Decision:
             f"the edit was based on {op.expected_version}; re-read and retry",
         )
     edited = replace(ticket, **changes, content_version=ticket.content_version + 1, updated=now)
-    return _apply(OpName.EDIT, now, edited, agent=op.agent)
+    return _apply(op.name, now, edited, agent=op.agent)
 
 
 def decide_claim(snapshot: Snapshot, op: ClaimOp, now: Timestamp) -> Decision:
@@ -236,7 +239,7 @@ def decide_claim(snapshot: Snapshot, op: ClaimOp, now: Timestamp) -> Decision:
         return _not_found(op.ticket_id)
     if ticket.is_terminal:
         return _terminal(ticket)
-    return _claim(snapshot, ticket, OpName.CLAIM, op.agent, op.claim_id, op.ttl, now)
+    return _claim(snapshot, ticket, op.name, op.agent, op.claim_id, op.ttl, now)
 
 
 def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> Decision:
@@ -252,7 +255,7 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
     NOTHING_CLAIMABLE if there is none."""
     for ticket in snapshot.tickets.values():
         if ticket.claim is not None and ticket.claim.claim_id == op.claim_id:
-            return _claim(snapshot, ticket, OpName.CLAIM_NEXT, op.agent, op.claim_id, op.ttl, now)
+            return _claim(snapshot, ticket, op.name, op.agent, op.claim_id, op.ttl, now)
     if ended := _ended_on(snapshot, op.claim_id):
         return _already_ended(op.claim_id, ended)
     candidates = [
@@ -266,7 +269,7 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
     if not candidates:
         return Refusal(RefusalCode.NOTHING_CLAIMABLE, "no claimable ticket matches the filters")
     chosen = min(candidates, key=sort_key_for_next)
-    return _claim(snapshot, chosen, OpName.CLAIM_NEXT, op.agent, op.claim_id, op.ttl, now)
+    return _claim(snapshot, chosen, op.name, op.agent, op.claim_id, op.ttl, now)
 
 
 def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
@@ -287,7 +290,7 @@ def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
             return _already_ended(op.claim_id, ticket.id)
     assert ticket.claim is not None
     renewed = replace(ticket, claim=replace(ticket.claim, lease_until=now + op.ttl), updated=now)
-    return _apply(OpName.RENEW, now, renewed, agent=ticket.claim.agent, claim_id=op.claim_id)
+    return _apply(op.name, now, renewed, agent=ticket.claim.agent, claim_id=op.claim_id)
 
 
 def decide_move(snapshot: Snapshot, op: MoveOp, now: Timestamp) -> Decision:
@@ -321,7 +324,7 @@ def decide_move(snapshot: Snapshot, op: MoveOp, now: Timestamp) -> Decision:
     assert ticket.claim is not None
     moved = replace(ticket, phase=op.to_phase, updated=now)
     return _apply(
-        OpName.MOVE, now, moved, agent=ticket.claim.agent, claim_id=op.claim_id, phase=op.to_phase
+        op.name, now, moved, agent=ticket.claim.agent, claim_id=op.claim_id, phase=op.to_phase
     )
 
 
@@ -346,7 +349,7 @@ def decide_release(snapshot: Snapshot, op: ReleaseOp, now: Timestamp) -> Decisio
     assert ticket.claim is not None
     released = _end_claim(ticket, now)
     return _apply(
-        OpName.RELEASE,
+        op.name,
         now,
         released,
         agent=ticket.claim.agent,
@@ -382,7 +385,7 @@ def decide_done(snapshot: Snapshot, op: DoneOp, now: Timestamp) -> Decision:
             return _already_ended(op.claim_id, ticket.id)
     assert ticket.claim is not None
     done = replace(_end_claim(ticket, now), resolution=Resolution.DONE)
-    return _apply(OpName.DONE, now, done, agent=ticket.claim.agent, claim_id=op.claim_id)
+    return _apply(op.name, now, done, agent=ticket.claim.agent, claim_id=op.claim_id)
 
 
 def decide_cancel(snapshot: Snapshot, op: CancelOp, now: Timestamp) -> Decision:
@@ -398,7 +401,7 @@ def decide_cancel(snapshot: Snapshot, op: CancelOp, now: Timestamp) -> Decision:
     if ticket.resolution is Resolution.DONE:
         return _terminal(ticket)
     cancelled = replace(_end_claim(ticket, now), resolution=Resolution.CANCELLED)
-    return _apply(OpName.CANCEL, now, cancelled, agent=op.agent, reason=op.reason)
+    return _apply(op.name, now, cancelled, agent=op.agent, reason=op.reason)
 
 
 def decide_reap(snapshot: Snapshot, op: ReapOp, now: Timestamp) -> Decision:
@@ -414,7 +417,7 @@ def decide_reap(snapshot: Snapshot, op: ReapOp, now: Timestamp) -> Decision:
     if not reaped:
         return NoOp("no claim is past the grace period")
     record = OpRecord(
-        OpName.REAP,
+        op.name,
         at=now,
         ticket_ids=tuple(ticket.id for ticket in reaped),
         summary=f"reap {len(reaped)} lapsed claim(s)",
@@ -448,13 +451,31 @@ def _already_ended(claim_id: ClaimId, where: TicketId) -> Refusal:
 
 def _ticket_ids_of(op: Op) -> tuple[TicketId, ...]:
     """Every ticket id an op names: its ticket, and any blockers it sets."""
-    ids: tuple[TicketId, ...] = ()
-    if (ticket_id := getattr(op, "ticket_id", None)) is not None:
-        ids += (ticket_id,)
-    blocked_by = getattr(op, "blocked_by", ())
-    if not isinstance(blocked_by, Unset):
-        ids += tuple(blocked_by)
-    return ids
+    match op:
+        case AddOp():
+            return (op.ticket_id, *op.blocked_by)
+        case EditOp():
+            blocked_by = () if isinstance(op.blocked_by, Unset) else op.blocked_by
+            return (op.ticket_id, *blocked_by)
+        case ClaimOp() | RenewOp() | MoveOp() | ReleaseOp() | DoneOp() | CancelOp():
+            return (op.ticket_id,)
+        case InitOp() | ClaimNextOp() | ReapOp():
+            return ()
+
+
+def _texts_of(op: Op) -> dict[str, object]:
+    """The free-text fields an op writes into a ticket or a commit trailer."""
+    match op:
+        case AddOp() | EditOp():
+            return {"agent": op.agent, "title": op.title}
+        case ClaimOp() | ClaimNextOp():
+            return {"agent": op.agent}
+        case CancelOp():
+            return {"agent": op.agent, "reason": op.reason}
+        case ReleaseOp():
+            return {"reason": op.reason}
+        case InitOp() | RenewOp() | MoveOp() | DoneOp() | ReapOp():
+            return {}
 
 
 def _content(ticket: Ticket) -> tuple[object, ...]:

@@ -15,7 +15,6 @@ the inner layers stay ignorant of git, the system clock and randomness.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import (
@@ -39,7 +38,7 @@ from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import Claim, Kind, Phase, Resolution, Revision, Ticket
 from tkt_store.infrastructure.clock import FakeClock, SystemClock
 from tkt_store.infrastructure.git.repo import GitStore
-from tkt_store.infrastructure.git.wire import DEFAULT_REF, ticket_document
+from tkt_store.infrastructure.git.wire import DEFAULT_REF
 from tkt_store.infrastructure.ids import RandomIds, SequentialIds
 from tkt_store.infrastructure.memory import MemStore
 
@@ -63,12 +62,6 @@ def open_store(
     """
     store = GitStore.at(repo, ref=ref, remote=remote)
     return TicketStore(store, clock or SystemClock(), ids or RandomIds())
-
-
-def ticket_json(ticket: Ticket) -> dict[str, Any]:
-    """A ticket in its on-branch form (docs/format.md) as a JSON-ready dict, for
-    interfaces that print tickets (the CLI may not import the git adapter itself)."""
-    return ticket_document(ticket)
 
 
 def new_id_source() -> IdSource:
@@ -110,7 +103,6 @@ __all__ = [
     "new_id_source",
     "open_store",
     "raise_for_refusal",
-    "ticket_json",
 ]
 
 __version__ = "0.0.0"

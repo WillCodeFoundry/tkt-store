@@ -11,8 +11,8 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = []  # stdlib only; requires the `git` binary at runtime
 
-[project.optional-dependencies]
-dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.6", "mypy>=1.10", "pre-commit>=3"]
+[dependency-groups]
+dev = ["pytest>=8", "hypothesis>=6", "ruff==0.17.0", "mypy>=1.10", "pre-commit>=3"]
 
 [project.scripts]
 tkt = "tkt_store.cli:main"

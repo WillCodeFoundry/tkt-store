@@ -24,7 +24,8 @@ class RandomIds:
 
 
 class SequentialIds:
-    """Deterministic ids for tests: tkt-0001, claim-0001, ..."""
+    """Deterministic ids for tests, counting in hex so they pass the rules' id
+    patterns: tickets f"tkt-{n:04x}" (tkt-0001, ...), claims f"{n:08x}" (00000001, ...)."""
 
     def __init__(self) -> None:
         self._n = 0

@@ -63,5 +63,6 @@ class GitStore:
         ticket_id: TicketId | None = None,
         limit: int | None = None,
     ) -> Iterator[HistoryEntry]:
-        """git log <ref> --format=%H%x00%ct%x00%B, decoded with wire.decode_message."""
+        """git log <ref> --format=%H%x00%B, decoded with wire.decode_message.
+        Times come from the tkt-time trailer (`record.at`), never git's commit date."""
         raise NotImplementedError

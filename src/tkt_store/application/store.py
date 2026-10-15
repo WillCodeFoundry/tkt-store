@@ -12,15 +12,14 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from tkt_store.domain.outcomes import Change, OpRecord
-from tkt_store.domain.ticket import Revision, Snapshot, TicketId, Timestamp
+from tkt_store.domain.ticket import Revision, Snapshot, TicketId
 
 
 @dataclass(frozen=True)
 class HistoryEntry:
-    """One applied op, recovered from the store's history."""
+    """One applied op, recovered from the store's history. Its time is `record.at`."""
 
     revision: Revision
-    at: Timestamp
     record: OpRecord
 
 
@@ -42,6 +41,7 @@ class Store(Protocol):
 
     history(ticket_id, limit)
         Newest first. Filtered to records naming `ticket_id` when given.
+        Commits without tkt trailers (foreign commits) yield no entry.
     """
 
     def snapshot(self) -> Snapshot: ...

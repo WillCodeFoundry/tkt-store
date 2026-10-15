@@ -1,4 +1,4 @@
-"""TicketStore: the facade the coordinator and the CLI use.
+"""TicketStore: the facade agents (directly or via the CLI) use.
 
 Mints ids BEFORE transacting (invariant 7), runs ops through the transaction
 loop, and returns its outcomes. Owns no rules of its own beyond that wiring. It
@@ -61,15 +61,32 @@ class TicketStore:
         blocked_by: Sequence[TicketId] = (),
         tags: Sequence[str] = (),
         stage: Stage = Stage.DEVELOPMENT,
+        ticket_id: TicketId | None = None,
     ) -> Outcome:
-        """Mints a ticket id, then transacts AddOp. Retries with a fresh id on DUPLICATE_ID."""
+        """Transacts AddOp.
+
+        `ticket_id` None: mint one from the IdSource; on DUPLICATE_ID retry with a
+        fresh id. Supplied: used verbatim (validated by the rules) and the
+        DUPLICATE_ID / NoOp outcome is returned without retrying, so a re-run converges.
+        """
         raise NotImplementedError
 
     def update(self, ticket_id: TicketId, **fields: object) -> Outcome:
         raise NotImplementedError
 
-    def claim(self, ticket_id: TicketId, agent: AgentId, ttl: Duration = DEFAULT_TTL) -> Outcome:
-        """Mints a claim id, then transacts ClaimOp. The claim id is in the resulting ticket."""
+    def claim(
+        self,
+        ticket_id: TicketId,
+        agent: AgentId,
+        ttl: Duration = DEFAULT_TTL,
+        *,
+        claim_id: ClaimId | None = None,
+    ) -> Outcome:
+        """Transacts ClaimOp. The claim id is in the resulting ticket.
+
+        `claim_id` None: mint one from the IdSource. Supplied: used verbatim
+        (validated by the rules), so re-running with the same id converges (NoOp).
+        """
         raise NotImplementedError
 
     def claim_next(
@@ -80,7 +97,10 @@ class TicketStore:
         project: ProjectId | None = None,
         kind: Kind | None = None,
         stage: Stage | None = None,
+        claim_id: ClaimId | None = None,
     ) -> Outcome:
+        """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
+        converges on the ticket it already holds."""
         raise NotImplementedError
 
     def renew(self, ticket_id: TicketId, claim_id: ClaimId, ttl: Duration = DEFAULT_TTL) -> Outcome:

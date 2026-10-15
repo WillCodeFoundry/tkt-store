@@ -40,13 +40,26 @@ COMMANDS = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Global options (--repo, --ref, --remote, --json) and one subparser per command."""
+    """Global options (--repo, --ref, --remote/--no-remote, --json) and one subparser
+    per command."""
     parser = argparse.ArgumentParser(
         prog="tkt", description="Ticket store for coordinating agents."
     )
-    parser.add_argument("--repo", help="store repository (default: $TKT_REPO or cwd)")
+    parser.add_argument(
+        "--repo", help="store repository (default: $TKT_REPO; usage error if neither is set)"
+    )
     parser.add_argument("--ref", help="store ref (default: refs/heads/tkt)")
-    parser.add_argument("--remote", help="remote name for a remote-backed store")
+    remote = parser.add_mutually_exclusive_group()
+    remote.add_argument(
+        "--remote", default="origin", help="shared remote; must be configured (default: origin)"
+    )
+    remote.add_argument(
+        "--no-remote",
+        dest="remote",
+        action="store_const",
+        const=None,
+        help="use a local-only store",
+    )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in COMMANDS:

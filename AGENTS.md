@@ -44,6 +44,12 @@ Exception: pre-1.0 format additions that no deployed store relies on may keep
 Use `uv` for everything: `uv sync` to set up, `uv add` / `uv add --dev` to change
 dependencies, `uv run <tool>` to run tools. Never use `pip` or `pip install`.
 
+`uv.lock` is tracked and CI installs from it exactly (`uv sync --locked`). Commit it
+whenever dependencies change; refresh versions deliberately with `uv lock --upgrade`.
+It pins only the development environment: consumers of the package resolve from
+`pyproject.toml`. A weekly CI job (`latest-deps`) tests against the newest allowed
+versions, ignoring the lockfile.
+
 ## Before committing
 
 Run these explicitly; they must pass (they are what CI runs):
@@ -55,7 +61,14 @@ uv run mypy
 uv run pytest -q
 ```
 
-The pre-commit hooks (installed with `uv run pre-commit install`) run a subset of
-these automatically on commit. They are a safety net, not the check: do not invoke
-pre-commit directly in place of the commands above. Never use `--no-verify`.
+Two hooks back this up; they are a safety net, not the check:
+
+- The pre-commit hooks (installed with `uv run pre-commit install`) run a subset of
+  these on every `git commit`. Do not invoke pre-commit directly in place of the
+  commands above.
+- For Claude Code, `.claude/hooks/pre-commit-checks.sh` blocks any `git commit` that
+  carries a `Co-Authored-By` trailer, uses `--no-verify` or `--no-gpg-sign`, or would
+  be unsigned, and runs the four commands above first.
+
+Commits are signed and carry no co-author trailers. Never use `--no-verify`.
 The ruff version is pinned in `pyproject.toml` and `.pre-commit-config.yaml`; change both together.

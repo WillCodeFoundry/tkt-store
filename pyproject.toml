@@ -37,4 +37,16 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 strict = true
 mypy_path = "src"
-packages = ["tkt_store"]
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# Test functions take fixtures as parameters; their bodies are still checked.
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# The shared fixtures stay fully typed.
+module = ["tests.conftest"]
+disallow_untyped_defs = true

@@ -46,11 +46,16 @@ dependencies, `uv run <tool>` to run tools. Never use `pip` or `pip install`.
 
 ## Before committing
 
-These must pass (they are what CI runs):
+Run these explicitly; they must pass (they are what CI runs):
 
 ```sh
-uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pytest -q
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy
+uv run pytest -q
 ```
 
-`uv run pre-commit run --all-files` runs the same tools as hooks. Never use `--no-verify`.
+The pre-commit hooks (installed with `uv run pre-commit install`) run a subset of
+these automatically on commit. They are a safety net, not the check: do not invoke
+pre-commit directly in place of the commands above. Never use `--no-verify`.
 The ruff version is pinned in `pyproject.toml` and `.pre-commit-config.yaml`; change both together.

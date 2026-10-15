@@ -55,27 +55,24 @@ class Kind(StrEnum):
     BUG = "bug"
 
 
-class Stage(StrEnum):
-    """Where a ticket sits in its lifecycle. A single stored field (ADR 0004).
+class Phase(StrEnum):
+    """Where a ticket is in the workflow: the phase it is being worked in.
 
-    The non-terminal values are the workflow vocabulary — the phases a ticket is
-    handed through. They carry no forced order: a holder may move a ticket to any
-    of them (forward, or back to `DEVELOPMENT` for rework). The two terminal
-    values are a one-way latch: a terminal ticket is finished and leaves the
-    workable pool for good.
+    No forced order: a holder may hand a ticket to any phase (forward, or back to
+    DEVELOPMENT for rework). Changed only by the holder's `release --to-phase`.
+    Whether the ticket is finished is a separate fact: `Resolution`.
     """
 
-    # workflow (non-terminal)
-    DEVELOPMENT = "development"  # the initial stage of a new ticket
+    DEVELOPMENT = "development"
     REVIEW = "review"
     QA = "qa"
-    # terminal
-    DONE = "done"  # completed by its holder
-    CANCELLED = "cancelled"  # abandoned (an administrative act)
 
 
-TERMINAL: frozenset[Stage] = frozenset({Stage.DONE, Stage.CANCELLED})
-"""The finished stages. `stage in TERMINAL` is the finality latch."""
+class Resolution(StrEnum):
+    """How a ticket finished. Set once; a resolved ticket is terminal (final)."""
+
+    DONE = "done"  # completed by its holder (`done`)
+    CANCELLED = "cancelled"  # abandoned (`cancel`, an administrative act)
 
 
 @dataclass(frozen=True)
@@ -109,48 +106,68 @@ class Claim:
         raise NotImplementedError
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Ticket:
-    """One unit of work. Mirrors tickets/<id>.json (docs/format.md)."""
+    """One unit of work. Mirrors tickets/<id>.json (docs/format.md).
 
+    Every field belongs to exactly one group, and each group changes one way
+    (docs/design.md, "Data model"):
+
+    - identity     id, kind, project, created  — set by `add`, never change
+    - content      title, body, priority, blocked_by, tags, content_version
+                   — changed only by `edit` (anyone), guarded by content_version
+    - workflow     phase, resolution — phase by the holder's handoff; resolution set
+                   once by `done` (holder) or `cancel` (anyone)
+    - occupancy    claim, ended_claim_id — changed by claim ops, done, cancel and reap;
+                   holder ops (renew/release/done) fenced by claim id
+    - bookkeeping  updated, extra — maintained by the system
+    """
+
+    # --- identity: set by add, never changes
     id: TicketId
-    title: str
-    created: Timestamp
-    updated: Timestamp
-    """Set to `now` by every op that writes this ticket."""
-    version: int = 1
-    """Content version for optimistic concurrency: 1 when added, incremented only by
-    `update` (the fields it can change). Claims, renewals, handoffs and other ops do not
-    touch it, so an active holder's renewals never make an editor's update STALE.
-    `update` must name the version it was based on."""
-    body: str = ""
     kind: Kind = Kind.TASK
     project: ProjectId | None = None
+    created: Timestamp
+
+    # --- content: changed only by edit, guarded by content_version
+    title: str
+    body: str = ""
     priority: int | None = None
     blocked_by: tuple[TicketId, ...] = ()
     tags: tuple[str, ...] = ()
+    content_version: int = 1
+    """1 when added, incremented only by `edit`. An edit must name the version it was
+    based on (STALE otherwise). Claims, renewals and handoffs never change it."""
+
+    # --- workflow: phase by the holder's handoff; resolution set once by done/cancel
+    phase: Phase = Phase.DEVELOPMENT
+    resolution: Resolution | None = None
+    """None while open; set once by done/cancel. Non-None means terminal (final)."""
+
+    # --- occupancy: claim ops, done, cancel, reap; holder ops fenced by claim id
     claim: Claim | None = None
-    stage: Stage = Stage.DEVELOPMENT
-    done_by: ClaimId | None = None
-    """The claim that completed the ticket; set only when stage is DONE. Keeps `done`
-    fenced after completion (a repeat is a NoOp only for this claim id)."""
-    last_claim_id: ClaimId | None = None
-    """The most recent claim that ended other than by `done`: released, reaped, taken
-    over, or cleared by cancel. Fences that id while recorded here (it cannot claim
-    again) and makes a release re-run converge."""
+    ended_claim_id: ClaimId | None = None
+    """The id of the most recent claim to end, however it ended: released, reaped,
+    taken over, cancelled, or done. Fences that id while recorded here (it cannot
+    claim again), makes release re-runs converge, and — with resolution DONE — keeps
+    `done` fenced after completion."""
+
+    # --- bookkeeping: maintained by the system
+    updated: Timestamp
+    """Set to `now` by every op that writes this ticket."""
     extra: Mapping[str, Any] = field(default_factory=dict)
     """Unknown keys from the file, preserved verbatim on write-back."""
 
     @property
     def is_terminal(self) -> bool:
-        """True once the ticket is done or cancelled (the finality latch)."""
-        return self.stage in TERMINAL
+        """True once the ticket is resolved (done or cancelled): the finality latch."""
+        return self.resolution is not None
 
     @property
     def is_done(self) -> bool:
         """True only when completed. A cancelled ticket is terminal but not done,
         so it does NOT satisfy a dependency (invariant 10)."""
-        return self.stage is Stage.DONE
+        return self.resolution is Resolution.DONE
 
 
 @dataclass(frozen=True)

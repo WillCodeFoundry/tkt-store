@@ -23,9 +23,9 @@ from tkt_store.domain.ticket import (
     ClaimId,
     Duration,
     Kind,
+    Phase,
     ProjectId,
     Snapshot,
-    Stage,
     Ticket,
     TicketId,
 )
@@ -65,7 +65,7 @@ class TicketStore:
         priority: int | None = None,
         blocked_by: Sequence[TicketId] = (),
         tags: Sequence[str] = (),
-        stage: Stage = Stage.DEVELOPMENT,
+        phase: Phase = Phase.DEVELOPMENT,
         ticket_id: TicketId | None = None,
         agent: AgentId | None = None,
     ) -> Outcome:
@@ -79,7 +79,7 @@ class TicketStore:
         """
         raise NotImplementedError
 
-    def update(
+    def edit(
         self,
         ticket_id: TicketId,
         expected_version: int,
@@ -91,8 +91,8 @@ class TicketStore:
         tags: Sequence[str] | UnsetType = UNSET,
         agent: AgentId | None = None,
     ) -> Outcome:
-        """Transacts UpdateOp. Omitted fields are unchanged; `priority=None` clears it.
-        `expected_version` is the ticket version the edit is based on (from `get`); if
+        """Transacts EditOp. Omitted fields are unchanged; `priority=None` clears it.
+        `expected_version` is the content_version the edit is based on (from `get`); if
         the ticket changed since, the outcome is Refused(STALE): re-read and retry.
         `agent`, when given, is recorded as the actor."""
         raise NotImplementedError
@@ -121,7 +121,7 @@ class TicketStore:
         *,
         project: ProjectId | None = None,
         kind: Kind | None = None,
-        stage: Stage | None = None,
+        phase: Phase | None = None,
         claim_id: ClaimId | None = None,
     ) -> Outcome:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
@@ -137,9 +137,9 @@ class TicketStore:
         claim_id: ClaimId,
         reason: str = "",
         *,
-        to_stage: Stage | None = None,
+        to_phase: Phase | None = None,
     ) -> Outcome:
-        """Release the claim; `to_stage` hands the ticket to another phase (non-terminal)."""
+        """Release the claim; `to_phase` hands the ticket on to that phase."""
         raise NotImplementedError
 
     def done(self, ticket_id: TicketId, claim_id: ClaimId) -> Outcome:
@@ -171,7 +171,7 @@ class TicketStore:
         self,
         *,
         status: Status | None = None,
-        stage: Stage | None = None,
+        phase: Phase | None = None,
         project: ProjectId | None = None,
         agent: AgentId | None = None,
         kind: Kind | None = None,

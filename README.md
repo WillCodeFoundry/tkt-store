@@ -30,23 +30,27 @@ of the store repository.
 
 ## Quickstart (target behaviour)
 
-Each agent runs these against its own clone of the store repository:
+The CLI is explicit by design (built for agents): global options on every call, every
+id supplied by the caller, TTLs in seconds, JSON out. Each agent runs it against its
+own clone of the store repository; a shell variable keeps the global options short:
 
 ```sh
-export TKT_REPO=~/work/tasks   # this agent's clone; origin is the shared remote
-tkt init                       # once per store; fails if origin is not configured
-tkt add "Expire reset tokens" --kind task --priority 2
-tkt claim tkt-7f3a91c2 --as coder-7 --ttl 30m      # prints a claim id
-tkt renew tkt-7f3a91c2 --claim-id c9f2… --ttl 30m
-tkt release tkt-7f3a91c2 --claim-id c9f2… --to-stage review   # hand off to the next phase
-tkt claim-next --as reviewer-2 --stage review  # a review agent pulls its phase
-tkt done  tkt-7f3a91c2 --claim-id d4a1…               # terminal: done
-tkt list --stage qa --json
-tkt reap                                        # release lapsed claims (any writer, on a schedule)
+T="tkt --repo /work/tasks --remote origin"
+
+$T init                                                   # once per store
+$T add --id tkt-7f3a91c2 --title "Expire reset tokens" --kind task --phase development --priority 2
+$T claim tkt-7f3a91c2 --as coder-7 --ttl 1800 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71
+$T renew tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --ttl 1800
+$T release tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --to-phase review
+$T claim-next --as reviewer-2 --ttl 1800 --phase review --claim-id 8a21c4f09e3b4d7fb6c5a1e2d3f40b9c
+$T done tkt-7f3a91c2 --claim-id 8a21c4f09e3b4d7fb6c5a1e2d3f40b9c
+$T list --phase review
+$T reap                                                   # any writer, on a schedule
 ```
 
-Claim ids are 32 hex characters; they are shortened here. Committed and unchanged
-outcomes report the affected tickets and ids, and failures print the ids to re-run with.
+Every command prints one JSON value. Committed and unchanged outcomes list the affected
+tickets; failures print the op with its ids. Re-running any command unchanged is safe.
+See `docs/cli.md`.
 
 ## Layout
 

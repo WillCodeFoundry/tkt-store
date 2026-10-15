@@ -6,7 +6,7 @@ pytestmark = pytest.mark.skip(reason="skeleton: model logic not implemented")
 
 
 def test_status_precedence() -> None:
-    """terminal stage > claimed (live) > blocked > expired > open."""
+    """resolution > claimed (live) > blocked > expired > open."""
 
 
 def test_blocked_with_lapsed_claim_reads_blocked() -> None:
@@ -28,7 +28,7 @@ def test_claimable_is_false_within_grace() -> None:
 def test_claimable_is_false_when_blocked() -> None: ...
 
 
-@pytest.mark.parametrize("state", ["terminal", "blocked", "live", "in_grace"])
+@pytest.mark.parametrize("state", ["resolved", "blocked", "live", "in_grace"])
 def test_why_not_claimable_gives_the_refusal(state: str) -> None:
     """TERMINAL, BLOCKED, ALREADY_CLAIMED (live and in-grace); None when claimable."""
 

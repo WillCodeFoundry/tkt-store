@@ -1,7 +1,7 @@
 """ONE contract suite, run against every Store implementation (store.py docstring).
 
-If MemStore and GitStore ever differ, a test here must fail. GitStore joins in step 3 of
-milestone 1; until then its parameter is skipped.
+If MemStore and GitStore ever differ, a test here must fail. GitStore runs both
+local-only and remote-backed (a clone of a bare remote).
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from tkt_store.domain.ticket import Revision, TicketId
 
 STORES = [
     "memstore",
-    pytest.param("gitstore", marks=pytest.mark.skip(reason="GitStore: milestone 1 step 3")),
+    pytest.param("gitstore", marks=pytest.mark.git),
+    pytest.param("remote_gitstore", marks=pytest.mark.git),
 ]
 
 
@@ -76,8 +77,3 @@ def test_history_newest_first_and_filterable_by_ticket(store: Store) -> None:
     assert [e.revision for e in store.history(T1)] == [first]
     assert [e.revision for e in store.history(limit=1)] == [second]
     assert all(e.record.at == NOW for e in store.history())
-
-
-@pytest.mark.skip(reason="git-only (MemStore has no files): milestone 1 step 3")
-def test_unknown_files_on_branch_are_preserved() -> None:
-    """Files outside tickets/ survive commits."""

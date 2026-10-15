@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from tests.gitkit import clone, new_repo
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.ids import SequentialIds
@@ -30,18 +30,23 @@ def memstore() -> MemStore:
 
 @pytest.fixture
 def gitstore(tmp_path: Path) -> GitStore:
-    """A local-only GitStore in a fresh repository, for the shared contract suite
-    (skeleton: the repository is not created yet)."""
-    return GitStore.at(tmp_path / "store", remote=None)
+    """A local-only GitStore in a fresh repository."""
+    return GitStore.at(new_repo(tmp_path / "store"), remote=None)
 
 
 @pytest.fixture
 def bare_remote(tmp_path: Path) -> Path:
-    """An empty bare repository acting as the shared remote (skeleton: not created yet)."""
-    return tmp_path / "remote.git"
+    """An empty bare repository acting as the shared remote."""
+    return new_repo(tmp_path / "remote.git", bare=True)
 
 
 @pytest.fixture
-def clones(tmp_path: Path, bare_remote: Path) -> Iterator[list[Path]]:
-    """Two independent clones of `bare_remote`, each usable by its own GitStore (skeleton)."""
-    yield [tmp_path / "clone-a", tmp_path / "clone-b"]
+def clones(tmp_path: Path, bare_remote: Path) -> list[Path]:
+    """Two independent clones of `bare_remote`, each usable by its own GitStore."""
+    return [clone(bare_remote, tmp_path / name) for name in ("clone-a", "clone-b")]
+
+
+@pytest.fixture
+def remote_gitstore(clones: list[Path]) -> GitStore:
+    """A remote-backed GitStore in a clone of `bare_remote`."""
+    return GitStore.at(clones[0], remote="origin")

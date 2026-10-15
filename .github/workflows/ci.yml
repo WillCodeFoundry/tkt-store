@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --group dev
       - run: uv run ruff format --check .
       - run: uv run ruff check .
 
@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --group dev
       - run: uv run mypy
 
   test:
@@ -47,5 +47,5 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --group dev
       - run: uv run pytest -q

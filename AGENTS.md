@@ -41,14 +41,15 @@ Exception: pre-1.0 format additions that no deployed store relies on may keep
 
 ## Tooling
 
-Use `uv` for everything: `uv sync` to set up, `uv add` / `uv add --dev` to change
+Use `uv` for everything: `uv sync --group dev` to set up (dev tools are an opt-in
+group; a plain `uv sync` installs none), `uv add` / `uv add --dev` to change
 dependencies, `uv run <tool>` to run tools. Never use `pip` or `pip install`.
 
 `uv.lock` is tracked and CI installs from it exactly (`uv sync --locked`). Commit it
 whenever dependencies change; refresh versions deliberately with `uv lock --upgrade`.
 It pins only the development environment: consumers of the package resolve from
-`pyproject.toml`. A weekly CI job (`latest-deps`) tests against the newest allowed
-versions, ignoring the lockfile.
+`pyproject.toml`. A small weekly CI job (`latest-deps`) runs the fast tests on every
+supported Python against the newest allowed versions, ignoring the lockfile.
 
 ## Before committing
 

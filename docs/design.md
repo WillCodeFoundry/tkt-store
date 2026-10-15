@@ -22,7 +22,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
-| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history), and an id in any ticket's `ended_claim_ids` can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
+| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/move/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history), and an id in any ticket's `ended_claim_ids` can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
 | **Phase** | *Stored* workflow position: which kind of work (or agent role) the ticket waits for. A fixed set named after swarm-forge's roles plus common human steps: `triage`, `specification`, `implementation`, `cleanup`, `architecture`, `hardening`, `qa`, `review`, `release`. No forced order. Moved only by the holder's `move`. |
 | **Resolution** | *Stored*, set once: `done` (by the holder) or `cancelled` (by anyone). A resolved ticket is terminal: never claimable or editable again. |
 | **Status** | *Derived*, never stored — the availability axis: `open`, `blocked`, `claimed`, `expired`, plus `done`/`cancelled` surfaced from the resolution. |
@@ -145,7 +145,7 @@ never a fresh read (lesson from balls' bl-cdec G1).
    table below). Fencing survives the end of a claim: every claim that ends (released,
    reaped, taken over, cancelled, done) is appended to the ticket's `ended_claim_ids`, a
    complete history, and an id recorded there on any ticket can never claim again
-   (`NOT_HOLDER`). A holder whose lease lapsed may still renew, release or
+   (`NOT_HOLDER`). A holder whose lease lapsed may still renew, move, release or
    complete until someone takes the claim over or reaps it.
 5. **Idempotence.** Repeating an op whose effect is already present yields `NoOp`, not an error
    (e.g. `done` on a ticket already done by the same claim, a re-run of a landed `move` or
@@ -172,7 +172,8 @@ never a fresh read (lesson from balls' bl-cdec G1).
    `done` is reached only by its holder; `cancel` is administrative. Phases carry no
    forced order (rework can move back).
 10. **Dependencies gate claims.** While any `blocked_by` entry is not yet `done`, a ticket
-    cannot be claimed — even if it carries a lapsed claim — and reads `blocked` unless it
+    cannot be newly claimed — even if it carries a lapsed claim (the holder's own re-run
+    still renews it, like `renew`) — and reads `blocked` unless it
     is live-claimed. A *cancelled* blocker
     does not satisfy a dependency. Blockers do not gate completion: `edit` may add a
     blocker to a claimed ticket without disturbing the claim, and the holder may still
@@ -307,7 +308,8 @@ inside what whole-ref compare-and-swap on a hosted remote is assumed to sustain 
 **Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
 `ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
 the next `claim` or `claim-next` takes it over; no supervisor or `reap` is required. A
-supervisor that releases a crashed agent's claim is an optional speed-up. The agent owns
+supervisor that knows the agent's claim id may release it early, as an optional
+speed-up (an ordinary `release`, not an administrative one). The agent owns
 its claim id (from `tkt mint claim-id`); a restarted agent re-running its claim with the
 same id and name gets the lapsed claim renewed.
 

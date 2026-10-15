@@ -116,9 +116,10 @@ class TicketStore:
         """Transacts ClaimOp. The claim id is in the resulting ticket.
 
         `claim_id` None: mint one from the IdSource. Supplied: used verbatim
-        (validated by the rules), so re-running with the same id and agent converges
-        (NoOp, even if the lease has lapsed). A claim id is single-use: never reuse one
-        whose claim has ended.
+        (validated by the rules), so re-running with the same id and agent converges:
+        NoOp (Unchanged) while the claim is live; if it lapsed and nobody took it over,
+        it is renewed (Committed). A claim id is single-use: never reuse one whose claim
+        has ended.
         """
         raise NotImplementedError
 
@@ -133,7 +134,8 @@ class TicketStore:
         claim_id: ClaimId | None = None,
     ) -> Outcome:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
-        and agent converges on the ticket it already holds (Unchanged names it)."""
+        and agent converges on the ticket it already holds — Unchanged naming it while the
+        claim is live, Committed (renewed) if it lapsed — never a second ticket."""
         raise NotImplementedError
 
     def renew(self, ticket_id: TicketId, claim_id: ClaimId, ttl: Duration = DEFAULT_TTL) -> Outcome:

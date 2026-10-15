@@ -129,7 +129,7 @@ class Ticket:
     - workflow     phase, resolution — phase by the holder's `move`; resolution set
                    once by `done` (holder) or `cancel` (anyone)
     - occupancy    claim, ended_claim_ids — changed by claim ops, done, cancel and reap;
-                   holder ops (renew/release/done) fenced by claim id
+                   holder ops (renew/move/release/done) fenced by claim id
     - bookkeeping  updated, extra — maintained by the system
     """
 

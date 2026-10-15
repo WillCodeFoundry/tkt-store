@@ -2,7 +2,7 @@
 
 PURE module. `decide(snapshot, op, now)` is the single entry point. It never
 writes, never reads the clock, never touches git — everything it needs is in
-its arguments. This is where invariants 1, 4, 5, 9, 10, 11 and 12 (docs/design.md §5)
+its arguments. This is where invariants 1, 4, 5, 8, 9, 10, 11 and 12 (docs/design.md §5)
 live. The result is a `Decision` from `domain.outcomes`.
 
 Every `Apply.record` carries `at=now`, the injected time (`OpRecord.at`), and the

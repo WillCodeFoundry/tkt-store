@@ -18,7 +18,7 @@ class TestClaim:
         """Live claim with a different claim_id → Refusal(ALREADY_CLAIMED)."""
 
     def test_same_claim_id_and_agent_is_noop(self) -> None:
-        """Current claim with the same claim_id and agent → NoOp naming the ticket."""
+        """Live current claim with the same claim_id and agent → NoOp naming the ticket."""
 
     def test_same_claim_id_and_agent_renews_a_lapsed_claim(self) -> None:
         """Lapsed (not taken over) claim with the same claim_id and agent → Apply:
@@ -183,11 +183,15 @@ class TestWorkflow:
 
 
 class TestValidation:
-    @pytest.mark.parametrize("ticket_id", ["tkt-XYZ", "tkt-../x", "x/tkt-1", "tkt-", "TKT-1"])
+    @pytest.mark.parametrize(
+        "ticket_id", ["tkt-XYZ", "tkt-../x", "x/tkt-1", "tkt-", "TKT-1", "tkt-1\n"]
+    )
     def test_bad_ticket_id_is_invalid(self, ticket_id: str) -> None:
         """As op.ticket_id or a blocked_by entry → Refusal(INVALID)."""
 
-    @pytest.mark.parametrize("claim_id", ["0", "abc", "A" * 32, "0" * 31, "0" * 33])
+    @pytest.mark.parametrize(
+        "claim_id", ["0", "abc", "A" * 32, "0" * 31, "0" * 33, "0" * 32 + "\n"]
+    )
     def test_bad_claim_id_is_invalid(self, claim_id: str) -> None:
         """claim_id not exactly 32 lowercase hex characters → Refusal(INVALID)."""
 
@@ -221,6 +225,9 @@ class TestClaimNext:
         """A lapsed claim within SKEW_GRACE is not a candidate (claimable is False)."""
 
     def test_filters_by_project_kind_and_phase(self) -> None: ...
+
+    def test_live_retry_is_noop_naming_the_ticket(self) -> None:
+        """Same claim_id and agent hold a live claim on some ticket → NoOp naming it."""
 
     def test_lapsed_retry_never_takes_a_second_ticket(self) -> None:
         """Same claim_id and agent hold a lapsed (not taken over) claim → renew it on that
@@ -275,7 +282,7 @@ class TestEdit:
         Refusal(STALE) — never last-writer-wins."""
 
     @pytest.mark.parametrize(
-        "op", ["claim", "claim-next", "renew", "release", "done", "cancel", "reap"]
+        "op", ["claim", "claim-next", "renew", "move", "release", "done", "cancel", "reap"]
     )
     def test_only_edit_changes_the_version(self, op: str) -> None:
         """Every op except add (sets 1) and edit (+1) leaves content_version unchanged, so a

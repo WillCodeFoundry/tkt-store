@@ -17,7 +17,7 @@ TICKETS_DIR = "tickets"
 DEFAULT_REF = "refs/heads/tkt-store"
 STORE_META_PATH = "tkt-store.json"
 """Root file recording the store's format version and mode:
-{"protocol": <int>, "mode": "remote" | "local"}. Written into the root commit by `init`;
+{"mode": "remote" | "local", "protocol": <int>}. Written into the root commit by `init`;
 checked on every snapshot."""
 
 TRAILER_PROTOCOL = "tkt-protocol"

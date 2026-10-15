@@ -49,7 +49,7 @@ class InitOp:
 
 @dataclass(frozen=True)
 class AddOp:
-    ticket_id: TicketId  # minted by the caller; a repeat with identical content is a no-op
+    ticket_id: TicketId  # minted by the caller; a re-run is a no-op (see decide_add)
     title: str
     body: str = ""
     kind: Kind = Kind.TASK

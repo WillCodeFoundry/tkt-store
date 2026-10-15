@@ -10,8 +10,8 @@ so "who holds which ticket" has exactly one answer.
 
 ## What it guarantees
 
-- **At most one recorded claim per ticket; stale holders are fenced.** Renew / release /
-  done must present the claim's `claim_id` (fencing survives completion). Leases are
+- **At most one recorded claim per ticket; stale holders are fenced.** Renew / move /
+  release / done must present the claim's `claim_id` (fencing survives completion). Leases are
   advisory: skewed clocks can make two agents briefly believe they hold a ticket, but
   only the recorded claim can change it.
 - **Atomic changes.** Each operation is one commit; a lost race is retried on fresh state, never a partial write.
@@ -30,7 +30,7 @@ of the store repository.
 
 ## Quickstart (target behaviour)
 
-The CLI is explicit by design (built for agents): store options on every call, every
+The CLI is explicit by design (built for agents): store options on every store command, every
 id supplied by the caller (generated with `tkt mint`), TTLs in seconds, JSON out. Each
 agent runs it against its own clone of the store repository; a shell variable keeps the
 store options short:

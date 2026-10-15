@@ -43,8 +43,8 @@ def test_local_only_stale_base_is_conflict() -> None:
 
 
 def test_fast_forward_local_tolerates_a_local_ref_ahead() -> None:
-    """The push landed but the local update failed (local behind, then repaired; or
-    already at/after the remote head): no-op, not StoreError."""
+    """Local ref equal to, or a descendant of, the remote head → no-op, not StoreError.
+    (A local ref that is behind is fast-forwarded: a separate repair.)"""
 
 
 def test_fast_forward_local_rejects_divergence() -> None:

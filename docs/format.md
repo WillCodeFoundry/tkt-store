@@ -1,8 +1,10 @@
 # On-branch format — tkt-protocol 1
 
 Pre-1.0, while no store is deployed, format changes keep protocol 1 when documented
-here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`),
-`ended_claim_ids`, `claim.claimed_at`, `content_version` and `tkt-store.json`.
+here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`;
+phases are the nine-value set below, without `development`), `ended_claim_ids`,
+`claim.claimed_at`, `content_version`, the `move` op with its `tkt-phase` trailer, and
+`tkt-store.json` with the store's `mode`.
 
 ## Branch layout
 

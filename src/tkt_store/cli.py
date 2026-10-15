@@ -172,19 +172,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = command(
         "release",
-        "give a claim back, optionally handing off to a phase",
-        lambda s, a: s.release(
-            TicketId(a.ticket_id), ClaimId(a.claim_id), a.reason, to_phase=a.to_phase
-        ),
+        "give a claim back (the phase is untouched)",
+        lambda s, a: s.release(TicketId(a.ticket_id), ClaimId(a.claim_id), a.reason),
     )
     ticket_id(c)
     c.add_argument("--claim-id", required=True)
-    c.add_argument("--to-phase", type=Phase, choices=list(Phase))
     c.add_argument("--reason", default="")
 
     command("reap", "release every claim lapsed past the grace", lambda s, a: s.reap())
 
-    # --- lifecycle
+    # --- workflow
+    c = command(
+        "move",
+        "move the ticket to another phase, keeping the claim (holder only)",
+        lambda s, a: s.move(TicketId(a.ticket_id), ClaimId(a.claim_id), a.to_phase),
+    )
+    ticket_id(c)
+    c.add_argument("--claim-id", required=True)
+    c.add_argument("--to-phase", required=True, type=Phase, choices=list(Phase))
+
     c = command(
         "done",
         "complete a ticket (holder only)",

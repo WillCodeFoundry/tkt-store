@@ -65,7 +65,7 @@ class TicketStore:
         priority: int | None = None,
         blocked_by: Sequence[TicketId] = (),
         tags: Sequence[str] = (),
-        phase: Phase = Phase.DEVELOPMENT,
+        phase: Phase = Phase.TRIAGE,
         ticket_id: TicketId | None = None,
         agent: AgentId | None = None,
     ) -> Outcome:
@@ -131,15 +131,13 @@ class TicketStore:
     def renew(self, ticket_id: TicketId, claim_id: ClaimId, ttl: Duration = DEFAULT_TTL) -> Outcome:
         raise NotImplementedError
 
-    def release(
-        self,
-        ticket_id: TicketId,
-        claim_id: ClaimId,
-        reason: str = "",
-        *,
-        to_phase: Phase | None = None,
-    ) -> Outcome:
-        """Release the claim; `to_phase` hands the ticket on to that phase."""
+    def move(self, ticket_id: TicketId, claim_id: ClaimId, to_phase: Phase) -> Outcome:
+        """Move the ticket to `to_phase`, keeping the claim (holder only). A handoff is
+        move, then release."""
+        raise NotImplementedError
+
+    def release(self, ticket_id: TicketId, claim_id: ClaimId, reason: str = "") -> Outcome:
+        """Release the claim (holder only); the phase is untouched."""
         raise NotImplementedError
 
     def done(self, ticket_id: TicketId, claim_id: ClaimId) -> Outcome:

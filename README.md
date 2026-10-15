@@ -38,10 +38,11 @@ own clone of the store repository; a shell variable keeps the global options sho
 T="tkt --repo /work/tasks --remote origin"
 
 $T init                                                   # once per store
-$T add --id tkt-7f3a91c2 --title "Expire reset tokens" --kind task --phase development --priority 2
+$T add --id tkt-7f3a91c2 --title "Expire reset tokens" --kind task --phase implementation --priority 2
 $T claim tkt-7f3a91c2 --as coder-7 --ttl 1800 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71
 $T renew tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --ttl 1800
-$T release tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --to-phase review
+$T move tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71 --to-phase review
+$T release tkt-7f3a91c2 --claim-id 3f9c0d2e8b1a47c6a5e4f30b2d9c8e71
 $T claim-next --as reviewer-2 --ttl 1800 --phase review --claim-id 8a21c4f09e3b4d7fb6c5a1e2d3f40b9c
 $T done tkt-7f3a91c2 --claim-id 8a21c4f09e3b4d7fb6c5a1e2d3f40b9c
 $T list --phase review

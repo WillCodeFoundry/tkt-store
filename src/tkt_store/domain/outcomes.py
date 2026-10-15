@@ -62,7 +62,7 @@ class OpRecord:
     `at` is the injected `now` the decision was made at (set by the rules), so the
     audit time is deterministic and needs no clock in the store. Clocks may skew
     across writers: `at` is informational and never grants exclusivity.
-    `phase` is the new phase on a release that hands off (`tkt-phase`).
+    `phase` is the new phase on a `move` (`tkt-phase`).
     """
 
     op: OpName

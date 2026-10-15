@@ -80,7 +80,8 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
         [*GLOBAL, "claim", "tkt-1", "--as", "a", "--ttl", "60"],  # missing --claim-id
         [*GLOBAL, "renew", "tkt-1", "--claim-id", CLAIM_ID, "--ttl", "30m"],  # ttl is seconds
         [*GLOBAL, "edit", "tkt-1", "--if-version", "1", "--priority", "2", "--clear-priority"],
-        [*GLOBAL, "release", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done"],
+        [*GLOBAL, "move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done"],  # not a phase
+        [*GLOBAL, "move", "tkt-1", "--claim-id", CLAIM_ID],  # --to-phase is required
     ],
 )
 def test_usage_errors_exit_2(argv: list[str]) -> None:
@@ -127,9 +128,11 @@ def test_edit_absent_flags_are_unset_and_clear_flags_clear() -> None:
     assert kwargs["priority"] is None and kwargs["tags"] == ()
 
 
-def test_release_hands_off_with_to_phase() -> None:
-    method, args, kwargs = _run(
-        ["release", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "review"]
-    )
-    assert method == "release" and args == ("tkt-1", CLAIM_ID, "")
-    assert kwargs == {"to_phase": "review"}
+def test_move_maps_to_ticket_store_move() -> None:
+    method, args, kwargs = _run(["move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "review"])
+    assert (method, args, kwargs) == ("move", ("tkt-1", CLAIM_ID, "review"), {})
+
+
+def test_release_takes_no_phase() -> None:
+    method, args, kwargs = _run(["release", "tkt-1", "--claim-id", CLAIM_ID])
+    assert (method, args, kwargs) == ("release", ("tkt-1", CLAIM_ID, ""), {})

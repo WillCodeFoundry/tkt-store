@@ -17,7 +17,8 @@ relies on manual takeover; that does not suit unattended fleets.
   on a schedule (cron, CI).
 - Each claim gets a `claim_id` (random, or supplied by the caller). `renew`,
   `release` and `done` must present it, and a completed ticket records it
-  (`ended_claim_id`, set however the claim ends), so fencing survives completion.
+  in `ended_claim_ids`, the full history of ended claims, so fencing survives
+  completion and any later claim cycles.
 
 ## Consequences
 

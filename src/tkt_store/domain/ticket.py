@@ -19,11 +19,13 @@ ClaimId = NewType("ClaimId", str)
 ProjectId = NewType("ProjectId", str)
 
 TICKET_PREFIX = "tkt-"
-TICKET_ID_RE = re.compile(rf"^{TICKET_PREFIX}[0-9a-f]+$")
-"""A ticket id, also its file name `tickets/<id>.json`: no '/', '.', or traversal."""
+TICKET_ID_RE = re.compile(rf"{TICKET_PREFIX}[0-9a-f]+")
+"""A ticket id, also its file name `tickets/<id>.json`: no '/', '.', or traversal.
+Always check with `fullmatch` (never `match` with `$`, which accepts a trailing newline)."""
 
-CLAIM_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-"""A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer."""
+CLAIM_ID_RE = re.compile(r"[0-9a-f]{32}")
+"""A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer.
+Always check with `fullmatch`."""
 
 Revision = NewType("Revision", str)
 """An opaque handle to one committed state of the store.
@@ -44,7 +46,7 @@ SKEW_GRACE: Duration = 60
 reaped). Absorbs clock skew between writers so a fast-clocked writer cannot take a
 claim its holder still considers live. A fixed v1 constant, not per-store."""
 
-MAX_TTL: Duration = 24 * 60 * 60
+MAX_TTL: Duration = 2 * 60 * 60
 """Upper bound on a lease TTL (claim, claim-next, renew). Without it a huge TTL would be
 a permanent lock that neither reap nor takeover can clear."""
 
@@ -56,16 +58,24 @@ class Kind(StrEnum):
 
 
 class Phase(StrEnum):
-    """Where a ticket is in the workflow: the phase it is being worked in.
+    """Where a ticket is in the workflow: which kind of work (or agent role) it waits
+    for. `claim-next --phase P` asks for the next ticket for role P.
 
-    No forced order: a holder may hand a ticket to any phase (forward, or back to
-    DEVELOPMENT for rework). Changed only by the holder's `release --to-phase`.
-    Whether the ticket is finished is a separate fact: `Resolution`.
+    A fixed set, named after the roles of swarm-forge's agent packs plus common human
+    steps. No forced order: the holder may move a ticket to any phase (forward, or back
+    for rework). Changed only by the holder's `move`. Whether the ticket is finished is
+    a separate fact: `Resolution`.
     """
 
-    DEVELOPMENT = "development"
-    REVIEW = "review"
-    QA = "qa"
+    TRIAGE = "triage"  # new or unclear; sort before anyone works on it
+    SPECIFICATION = "specification"  # specifier
+    IMPLEMENTATION = "implementation"  # coder
+    CLEANUP = "cleanup"  # cleaner / refactorer
+    ARCHITECTURE = "architecture"  # architect
+    HARDENING = "hardening"  # hardener
+    QA = "qa"  # QA
+    REVIEW = "review"  # human review or approval
+    RELEASE = "release"  # deploy, rollout
 
 
 class Resolution(StrEnum):
@@ -116,9 +126,9 @@ class Ticket:
     - identity     id, kind, project, created  — set by `add`, never change
     - content      title, body, priority, blocked_by, tags, content_version
                    — changed only by `edit` (anyone), guarded by content_version
-    - workflow     phase, resolution — phase by the holder's handoff; resolution set
+    - workflow     phase, resolution — phase by the holder's `move`; resolution set
                    once by `done` (holder) or `cancel` (anyone)
-    - occupancy    claim, ended_claim_id — changed by claim ops, done, cancel and reap;
+    - occupancy    claim, ended_claim_ids — changed by claim ops, done, cancel and reap;
                    holder ops (renew/release/done) fenced by claim id
     - bookkeeping  updated, extra — maintained by the system
     """
@@ -139,18 +149,19 @@ class Ticket:
     """1 when added, incremented only by `edit`. An edit must name the version it was
     based on (STALE otherwise). Claims, renewals and handoffs never change it."""
 
-    # --- workflow: phase by the holder's handoff; resolution set once by done/cancel
-    phase: Phase = Phase.DEVELOPMENT
+    # --- workflow: phase by the holder's move; resolution set once by done/cancel
+    phase: Phase = Phase.TRIAGE
     resolution: Resolution | None = None
     """None while open; set once by done/cancel. Non-None means terminal (final)."""
 
     # --- occupancy: claim ops, done, cancel, reap; holder ops fenced by claim id
     claim: Claim | None = None
-    ended_claim_id: ClaimId | None = None
-    """The id of the most recent claim to end, however it ended: released, reaped,
-    taken over, cancelled, or done. Fences that id while recorded here (it cannot
-    claim again), makes release re-runs converge, and — with resolution DONE — keeps
-    `done` fenced after completion."""
+    ended_claim_ids: tuple[ClaimId, ...] = ()
+    """Every claim that has ended on this ticket, oldest first, however it ended:
+    released, reaped, taken over, cancelled, or done. A complete record, so an ended id
+    is fenced for good (it can never claim again), re-runs of holder ops converge no
+    matter how many claims came since, and refusals can say "your claim already ended".
+    With resolution DONE, the last entry is the claim that completed the ticket."""
 
     # --- bookkeeping: maintained by the system
     updated: Timestamp

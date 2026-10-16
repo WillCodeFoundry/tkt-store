@@ -196,16 +196,42 @@ class TreeBytes:
         return self._run(*args, stdin=stdin)
 
 
-@design("junk entries in tickets/ are carried into every honest commit: each op does work ~N")
-def test_junk_entries_do_not_make_every_honest_commit_slower(
-    clone: Path, bare_remote: Path
-) -> None:
-    """Either the store refuses the junk, or an honest commit's work does not grow with it."""
-    push_junk_entries(bare_remote, 50_000)
+def honest_add_mktree_bytes(clone: Path) -> int:
+    """Bytes an honest `add` feeds to `git mktree`; the add must commit."""
     runner = TreeBytes(clone)
     tickets = TicketStore(GitStore(runner, remote="origin"), FakeClock(NOW), SequentialIds())
-    try:
-        tickets.add("Honest", ticket_id=T2)
-    except StoreError:
-        return
-    assert runner.mktree_bytes < 1_000_000
+    tickets.add("Honest", ticket_id=T2)
+    return runner.mktree_bytes
+
+
+@design("junk entries in tickets/ are carried into every honest commit: each op does work ~N")
+def test_junk_entries_are_not_carried_into_every_honest_commit(
+    clone: Path, bare_remote: Path
+) -> None:
+    """The honest add still commits (refusing the store would take it down for everyone),
+    and its work does not grow with the junk."""
+    push_junk_entries(bare_remote, 50_000)
+    assert honest_add_mktree_bytes(clone) < 1_000_000
+
+
+def push_valid_tickets(bare_remote: Path, count: int) -> None:
+    """Add `count` valid, open tickets on the remote in one commit, via git fast-import."""
+    head = plumbing(bare_remote, "rev-parse", DEFAULT_REF)
+    lines = [f"commit {DEFAULT_REF}", "committer spam <spam@invalid> 0 +0000", "data 4", "spam",
+             f"from {head}"]  # fmt: skip
+    for n in range(count):
+        ticket_id = f"tkt-f{n:06x}"
+        data = json.dumps(forged(ticket_id, title=f"Spam {n}"))
+        lines += [f"M 100644 inline {ticket_file(ticket_id)}", f"data {len(data.encode())}", data]
+    plumbing(bare_remote, "fast-import", "--quiet", stdin="\n".join(lines) + "\n")
+
+
+@design("every honest commit rewrites the whole tickets/ tree: spam tickets slow every op")
+def test_many_valid_tickets_do_not_make_every_honest_commit_rewrite_them(
+    clone: Path, bare_remote: Path
+) -> None:
+    """Git trees are flat, so a commit rewrites tickets/ whatever it holds: valid tickets
+    (pushed by hand, or `tkt add` spam) cost the same as junk. Fixing it means a different
+    layout (e.g. sharding tickets/), which is a format decision (design.md Q1)."""
+    push_valid_tickets(bare_remote, 20_000)
+    assert honest_add_mktree_bytes(clone) < 1_000_000

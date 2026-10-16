@@ -7,7 +7,7 @@ import pytest
 from tests.security import design
 from tests.unit.builders import C1, C2, NOW, T1, TTL, A, B, snap, tkt
 from tkt_store.domain.operations import ClaimOp, Op, ReapOp
-from tkt_store.domain.outcomes import Apply
+from tkt_store.domain.outcomes import Apply, NoOp, Refusal, RefusalCode
 from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import MAX_TTL, SKEW_GRACE, Claim
 
@@ -24,3 +24,19 @@ def test_a_forged_far_future_lease_does_not_lock_a_ticket(op: Op) -> None:
     the claim can be taken over or reaped, however far its lease_until claims to run."""
     later = NOW + MAX_TTL + SKEW_GRACE + 1
     assert isinstance(decide(snap(tkt(T1, claim=FORGED_LEASE)), op, later), Apply)
+
+
+RENEWED_AT = NOW + MAX_TTL + SKEW_GRACE + 1
+HONESTLY_RENEWED = Claim(agent=A, claim_id=C1, lease_until=RENEWED_AT + TTL, claimed_at=NOW)
+"""Claimed at NOW and renewed for longer than MAX_TTL: renew keeps claimed_at."""
+
+
+def test_guard_an_honestly_renewed_claim_is_never_taken_over() -> None:
+    """Not a finding: a guard for the fix above. A cap based on claimed_at would let anyone
+    take over a claim that has been renewed for more than MAX_TTL while its lease is live,
+    breaking invariant 1; only a cap relative to now passes both tests."""
+    now = RENEWED_AT + 1
+    snapshot = snap(tkt(T1, claim=HONESTLY_RENEWED))
+    claim = decide(snapshot, ClaimOp(T1, B, C2, TTL), now)
+    assert isinstance(claim, Refusal) and claim.code is RefusalCode.ALREADY_CLAIMED
+    assert isinstance(decide(snapshot, ReapOp(), now), NoOp)

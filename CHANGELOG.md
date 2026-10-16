@@ -30,6 +30,21 @@
   seconds) decided.
 - README: agents use only `tkt`, never git, on the store; the risks of path remotes
   (code execution in other agents) and `git daemon` (no authentication).
+- 0.2.0 stage 1 (ADR 0005): tkt never writes an invalid ticket. `validate_op` checks
+  every value an op writes and `decide` every ticket it would write, whole (`INVALID`;
+  `domain/fields.py`, `docs/format.md`):
+  - ids, tags and `--as` are lowercase slugs (ids 8 to 32, `tkt-` no longer required;
+    tags at most 20 of 50; agents at most 39); `project` is a lowercase `[owner/]repo`;
+  - title, body and reason refuse controls and a fixed list of invisible, reordering
+    and hidden-data characters (never normalised; title and reason one line without
+    outer whitespace), at most 256, 65,536 and 256 characters;
+  - priority 0 to 100; at most 20 blockers and 20 tags without duplicates;
+  - file budgets: `add`, and an `edit` that grows the file, up to 192 KiB; a claim up
+    to 255 KiB (`FULL`, a new refusal, beyond); every other op up to 256 KiB;
+    `claim-next` and `reap` skip tickets they cannot write.
+
+  A lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now reads
+  expired and may be taken over or reaped. git always gets `--` before the remote name.
 
 ## 0.1.0 — milestone 1
 

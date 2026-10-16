@@ -1,5 +1,5 @@
 """The rules (domain/rules.py decide) facing forged state that decodes fine, with a guard
-(an ordinary passing test) that the fix must keep: honest renewals are never taken over."""
+that the lease cap must keep: honest renewals are never taken over."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from tkt_store.domain.operations import ClaimOp, Op, ReapOp
 from tkt_store.domain.outcomes import Apply, NoOp, Refusal, RefusalCode
 from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import (
+    LEASE_CAP_MARGIN,
     MAX_TTL,
-    SKEW_GRACE,
     AgentId,
     Claim,
     ClaimId,
@@ -30,7 +30,7 @@ A = AgentId("coder-7")
 B = AgentId("reviewer-2")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
-T1 = TicketId("tkt-1")
+T1 = TicketId("tkt-0001")
 
 
 def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
@@ -45,28 +45,26 @@ FORGED_LEASE = Claim(agent=A, claim_id=C1, lease_until=NOW + 100 * MAX_TTL, clai
 """A lease no honest writer can produce: renew and claim cap it at now + MAX_TTL."""
 
 
-@pytest.mark.security_design(
-    "a forged lease far beyond MAX_TTL locks a ticket until someone cancels it"
-)
 @pytest.mark.parametrize(
     "op", [ClaimOp(T1, B, C2, TTL), ReapOp()], ids=["claim by another agent", "reap"]
 )
 def test_a_forged_far_future_lease_does_not_lock_a_ticket(op: Op) -> None:
-    """Past the longest lease an honest writer could have set (MAX_TTL plus the grace),
-    the claim can be taken over or reaped, however far its lease_until claims to run."""
-    later = NOW + MAX_TTL + SKEW_GRACE + 1
+    """Past the longest lease an honest writer could have set (MAX_TTL plus the cap's
+    clock margin), the claim can be taken over or reaped, however far its lease_until
+    claims to run."""
+    later = NOW + MAX_TTL + LEASE_CAP_MARGIN + 1
     assert isinstance(
         decide(Snapshot(Revision("r1"), {T1: tkt(T1, claim=FORGED_LEASE)}), op, later), Apply
     )
 
 
-RENEWED_AT = NOW + MAX_TTL + SKEW_GRACE + 1
+RENEWED_AT = NOW + MAX_TTL + LEASE_CAP_MARGIN + 1
 HONESTLY_RENEWED = Claim(agent=A, claim_id=C1, lease_until=RENEWED_AT + TTL, claimed_at=NOW)
 """Claimed at NOW and renewed for longer than MAX_TTL: renew keeps claimed_at."""
 
 
 def test_guard_an_honestly_renewed_claim_is_never_taken_over() -> None:
-    """Not a finding: a guard for the fix above. A cap based on claimed_at would let anyone
+    """A guard for the lease cap above. A cap based on claimed_at would let anyone
     take over a claim that has been renewed for more than MAX_TTL while its lease is live,
     breaking invariant 1; only a cap relative to now passes both tests."""
     now = RENEWED_AT + 1

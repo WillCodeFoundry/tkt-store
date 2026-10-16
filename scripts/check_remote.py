@@ -36,14 +36,14 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def push(repo: Path, remote: str, refspec: str, lease: str) -> tuple[bool, str]:
     """Push `refspec` with an explicit lease; (accepted, the remote's status or error)."""
-    out = git(repo, "push", "--porcelain", f"--force-with-lease={lease}", remote, refspec)
+    out = git(repo, "push", "--porcelain", f"--force-with-lease={lease}", "--", remote, refspec)
     status = [line.split("\t")[-1] for line in out.stdout.splitlines() if line[:1] in "!*+-="]
     detail = status[0] if status else (out.stderr.strip().splitlines() or ["?"])[-1]
     return out.returncode == 0, detail
 
 
 def remote_head(repo: Path, remote: str, ref: str) -> str | None:
-    out = git(repo, "ls-remote", remote, ref)
+    out = git(repo, "ls-remote", "--", remote, ref)
     if out.returncode != 0:
         sys.exit(f"cannot reach {remote}: {out.stderr.strip()}")
     return out.stdout.split()[0] if out.stdout.strip() else None

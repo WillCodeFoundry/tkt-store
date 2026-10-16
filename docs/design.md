@@ -70,7 +70,7 @@ names an outer one; outer layers depend on inner ones through small ports
 (protocols) that the inner layer owns.
 
 ```text
-domain/          ticket · status · operations · outcomes · rules · errors
+domain/          ticket · fields · status · operations · outcomes · rules · errors
                    pure values and decisions; imports nothing but itself
 
 application/     store (port) · clock (port) · ids (port)
@@ -203,10 +203,11 @@ never a fresh read (lesson from balls' bl-cdec G1).
     It counts content edits only (`add` sets 1, each `edit` adds 1), so claims
     and renewals never make an edit stale. Edits to different fields compose: an edit
     only writes the fields it names, and every retry re-decides on fresh state.
-12. **Validated input.** Ticket ids match `^tkt-[0-9a-f]+$` (they are file names), claim ids
-    are exactly 32 lowercase hex characters, `agent`/`reason`/`title` contain no control
-    characters (they are written into the commit message), TTLs are within bounds, and
-    an edit's `expected_version` is at least 1.
+12. **Validated input.** Every value an op writes follows the field rules
+    (`domain/fields.py`, `docs/format.md`): ticket ids (they are file names) and claim
+    ids, identifiers, free text without controls or invisible characters (it reaches
+    commit messages and other agents), sizes; TTLs are within bounds, and an edit's
+    `expected_version` is at least 1.
     Otherwise `INVALID`.
 
 ### Holder ops (`renew`, `move`, `release`, `done`)
@@ -238,7 +239,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 - Every claim end appends to `ended_claim_ids`: release, reap, takeover, cancel, done.
   The list is never truncated, so step 3 recognises an ended claim however many claims
   came after it. A ticket only accumulates a handful of claims in its life, so the list
-  stays small.
+  stays small; from 0.2.0 a ticket whose file would pass 255 KiB refuses new claims
+  (`FULL`) and can still be ended (§5, *Changes in 0.2.0*).
 - A re-run of a landed `move` or `release` (including after a push that landed but was
   retried, or after other claims came and went) is a NoOp at step 3. A fenced agent
   cannot move the phase: its `move` is refused unless the ticket is already there.
@@ -250,14 +252,16 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | op | refusals (in order) | NoOp | Apply |
 |---|---|---|---|
 | init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
-| add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
-| edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
-| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent (until 0.2.0) → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
-| claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
+| add | `NOT_INITIALISED`, `INVALID` (a field rule, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
+| edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (a field rule, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
+| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent (until 0.2.0) → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED`; from 0.2.0 `FULL` | this ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
+| claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only; from 0.2.0 an invalid or full candidate is skipped) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |
-| reap | — | no claim past the grace | every claim past the grace cleared, one record |
+| reap | — | no claim past the grace | every claim past the grace cleared, one record (from 0.2.0 an invalid ticket is left out) |
 
-`validate_op` (shape checks, `INVALID`) runs before all of these.
+`validate_op` (shape checks, `INVALID`) runs before all of these. From 0.2.0 every ticket
+an Apply would write is checked after them: `INVALID` if it breaks a field rule or its
+file budget, `FULL` for a claim on a full ticket (*Changes in 0.2.0*).
 
 ### Changes in 0.2.0 (ADR 0005, §8)
 
@@ -267,11 +271,11 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   hash alone (no agent comparison). Callers always supply claim ids (the CLI already
   does; the library stops minting them), since a minted id could not be read back.
 - **The holder is recorded, not declared.** No op takes an agent name. A claim records
-  `holder`: the claimer's git name, mapped to an identifier (accents folded: NFKD, then combining marks dropped; each run of
-  characters outside `[A-Za-z0-9]`, hyphens included, becomes one `-`; cut to 39; then
-  hyphens trimmed; refused if nothing is left). A re-run keeps the claim's `holder`;
-  `list --holder` maps its argument the same way and ignores case. Who did each op is
-  the commit's author.
+  `holder`: the claimer's git name, mapped to a slug with ASCII only (`A`–`Z`
+  lowercased; each run of characters outside `[a-z0-9]`, hyphens and non-ASCII letters
+  included, becomes one `-`; cut to 39; then hyphens trimmed; refused if nothing is
+  left). A re-run keeps the claim's `holder`; `list --holder` maps its argument the same
+  way and matches exactly. Who did each op is the commit's author.
 - **edit while held** needs the holder's claim id; anyone else is refused `NOT_HOLDER`.
   An unheld ticket may be edited by anyone, as before.
 - **revoke** (new, anyone, optional reason): `NOT_FOUND`; `TERMINAL` if resolved; NoOp
@@ -282,9 +286,25 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   taken, and the file is evidence.
 - **Blockers:** writes still refuse unknown or self blockers; on reading, a blocker that
   is missing or set aside counts as not done.
-- **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
-  takeable (and reads expired); honest leases never are, since the cap is relative to
-  now.
+- **Field rules** (`domain/fields.py`, `docs/format.md`): `validate_op` checks every
+  value an op writes, and `decide` every ticket it would write, whole (`INVALID`):
+  lowercase slugs for ids, tags and agents, `[owner/]repo` projects, free text without
+  controls or invisible characters (fixed ranges, no normalisation), size limits,
+  priority 0 to 100, at most 20 blockers and tags without duplicates.
+- **File budgets:** `add`, and an `edit` that grows the file, may fill 192 KiB of the
+  ticket file (`INVALID` beyond; an edit that does not grow it is never refused for
+  size), a claim 255 KiB (`FULL` beyond: the claim history fills the ticket), and every
+  other op (renew, move, release, done, cancel, reap) 256 KiB, so a full ticket can
+  still be finished or cancelled. `claim-next` skips a candidate it cannot write
+  (invalid or full) and `reap` leaves such a ticket out, so one ticket never stops them
+  for everyone.
+- **Leases:** a lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after
+  now is treated as takeable (and reads expired). Honest leases never are: the cap is
+  relative to now, and the margin keeps a writer whose clock runs up to 10 minutes fast
+  from having its own longest lease look forged. The skew tolerated between writers
+  stays `SKEW_GRACE` (60 s).
+- **git** always gets `--` before the remote name, so a name starting with `-` is never
+  read as an option.
 
 ## 6. Failure model
 
@@ -312,7 +332,7 @@ cache. From 0.2.0 each clone also caches resolved and invalid tickets by blob id
 file in its git directory, so a snapshot reads and checks only the other files
 (ADR 0006).
 
-Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
+Only `tkt-store.json` and `tickets/<id>.json` files are read; any other path is
 preserved and ignored.
 The store's format version lives in `tkt-store.json` at the tree root and is checked on
 every snapshot. The push states its
@@ -387,10 +407,10 @@ agent has its own git identity, which does not change while it runs.
 | Threat | Defence |
 |---|---|
 | Code execution in other agents | No shell anywhere (argument lists only); git always gets the remote name after `--`; no checkout. Deployment: never a path remote shared across agents that do not fully trust each other (README) |
-| Prompt injection through stored text | Strict field rules (identifier allowlists, a PRECIS-style rule for free text, size limits; lengths in code points after NFC); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
+| Prompt injection through stored text | Strict field rules (identifier allowlists; free text without controls or invisible characters, fixed ranges that never change with the Unicode version; size limits in code points); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
 | Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached as invalid, ADR 0006), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
 | Acting as another agent's holder | Tickets and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
-| Locking a ticket forever | A lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable |
+| Locking a ticket forever | A lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now is treated as takeable |
 
 **A partial view is acceptable.** Setting an invalid ticket aside means a snapshot may
 miss tickets. That is safe because a missing blocker counts as not done (nothing is
@@ -403,10 +423,11 @@ GIT_AUTHOR_IDENT`: the `GIT_AUTHOR_*` variables, then the clone's config, then g
 system), run with `user.useConfigOnly=true` so git never invents one from the OS account
 and host name; it refuses to write if none is configured. The commit author is the record of who
 did each op; `tkt log` shows its name and email, unverified. A claim also stores
-`holder`, the git name mapped to an identifier (accents folded: NFKD, then combining marks
-dropped; each run of characters outside `[A-Za-z0-9]` to one `-`; cut to 39; then
-hyphens trimmed from both ends; a name with no Latin
-letters or digits is refused), so `show` and `list` say who is working on what. `tkt clone` prints the identity and the holder name; every write reports them.
+`holder`, the git name mapped to a slug with ASCII only (`A`–`Z` lowercased; each run of
+characters outside `[a-z0-9]` to one `-`; cut to 39; then hyphens trimmed from both
+ends; a name with no ASCII letters or digits is refused), so `show` and `list` say who is
+working on what. `tkt clone` prints the identity and the holder name; every write
+reports them.
 Hashed claim ids still prove that the agent acting on a claim is the one that took it.
 
 **Not defended.** The agent that works a ticket reads its body, so prompt injection is

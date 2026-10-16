@@ -81,15 +81,15 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],  # no store opts
-        ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID, "--repo", "r"],
+        ["claim", "tkt-0001", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],  # no store opts
+        ["claim", "tkt-0001", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID, "--repo", "r"],
         ["reap", "--repo", "r"],  # --remote is required
         ["reap", "--remote", "origin"],  # --repo is required
-        ["claim", "tkt-1", "--as", "a", "--ttl", "60", *STORE],  # missing --claim-id
-        ["renew", "tkt-1", "--claim-id", CLAIM_ID, "--ttl", "30m", *STORE],  # seconds only
-        ["edit", "tkt-1", "--if-version", "1", "--priority", "2", "--clear-priority", *STORE],
-        ["move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done", *STORE],  # not a phase
-        ["move", "tkt-1", "--claim-id", CLAIM_ID, *STORE],  # --to-phase is required
+        ["claim", "tkt-0001", "--as", "a", "--ttl", "60", *STORE],  # missing --claim-id
+        ["renew", "tkt-0001", "--claim-id", CLAIM_ID, "--ttl", "30m", *STORE],  # seconds only
+        ["edit", "tkt-0001", "--if-version", "1", "--priority", "2", "--clear-priority", *STORE],
+        ["move", "tkt-0001", "--claim-id", CLAIM_ID, "--to-phase", "done", *STORE],  # not a phase
+        ["move", "tkt-0001", "--claim-id", CLAIM_ID, *STORE],  # --to-phase is required
         ["mint", "token"],  # not a mintable kind
         ["log", "--limit", "-1", *STORE],  # a count, >= 0
     ],
@@ -133,31 +133,46 @@ def _run(argv: list[str]) -> tuple[str, tuple[Any, ...], dict[str, Any]]:
 
 def test_claim_maps_to_ticket_store_claim() -> None:
     method, args, kwargs = _run(
-        ["claim", "tkt-1", "--as", "coder-7", "--ttl", "1800", "--claim-id", CLAIM_ID]
+        ["claim", "tkt-0001", "--as", "coder-7", "--ttl", "1800", "--claim-id", CLAIM_ID]
     )
-    assert (method, args, kwargs) == ("claim", ("tkt-1", "coder-7", 1800), {"claim_id": CLAIM_ID})
+    assert (method, args, kwargs) == (
+        "claim",
+        ("tkt-0001", "coder-7", 1800),
+        {"claim_id": CLAIM_ID},
+    )
 
 
 def test_edit_absent_flags_are_unset_and_clear_flags_clear() -> None:
     method, args, kwargs = _run(
-        ["edit", "tkt-1", "--if-version", "3", "--title", "New", "--clear-priority", "--clear-tags"]
+        [
+            "edit",
+            "tkt-0001",
+            "--if-version",
+            "3",
+            "--title",
+            "New",
+            "--clear-priority",
+            "--clear-tags",
+        ]
     )
-    assert method == "edit" and args == ("tkt-1", 3)
+    assert method == "edit" and args == ("tkt-0001", 3)
     assert kwargs["title"] == "New"
     assert kwargs["body"] is UNSET and kwargs["blocked_by"] is UNSET
     assert kwargs["priority"] is None and kwargs["tags"] == ()
 
 
 def test_move_maps_to_ticket_store_move() -> None:
-    method, args, kwargs = _run(["move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "review"])
-    assert (method, args, kwargs) == ("move", ("tkt-1", CLAIM_ID, "review"), {})
+    method, args, kwargs = _run(
+        ["move", "tkt-0001", "--claim-id", CLAIM_ID, "--to-phase", "review"]
+    )
+    assert (method, args, kwargs) == ("move", ("tkt-0001", CLAIM_ID, "review"), {})
 
 
 def test_release_takes_no_phase() -> None:
-    method, args, kwargs = _run(["release", "tkt-1", "--claim-id", CLAIM_ID])
-    assert (method, args, kwargs) == ("release", ("tkt-1", CLAIM_ID, ""), {})
+    method, args, kwargs = _run(["release", "tkt-0001", "--claim-id", CLAIM_ID])
+    assert (method, args, kwargs) == ("release", ("tkt-0001", CLAIM_ID, ""), {})
 
 
 def test_show_uses_one_snapshot() -> None:
-    method, args, _ = _run(["show", "tkt-1"])
-    assert (method, args) == ("view", ("tkt-1",))
+    method, args, _ = _run(["show", "tkt-0001"])
+    assert (method, args) == ("view", ("tkt-0001",))

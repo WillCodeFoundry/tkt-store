@@ -26,7 +26,7 @@ NOW = 1_000_000
 TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
-T1 = TicketId("tkt-1")
+T1 = TicketId("tkt-0001")
 
 pytestmark = pytest.mark.git
 

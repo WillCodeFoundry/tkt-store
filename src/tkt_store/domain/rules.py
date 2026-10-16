@@ -18,10 +18,11 @@ this ticket", and "held by another claim".
 
 from __future__ import annotations
 
-import re
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
+from tkt_store.domain import fields
 from tkt_store.domain.operations import (
     AddOp,
     CancelOp,
@@ -37,6 +38,7 @@ from tkt_store.domain.operations import (
     ReleaseOp,
     RenewOp,
     Unset,
+    UnsetType,
 )
 from tkt_store.domain.outcomes import (
     Apply,
@@ -49,9 +51,7 @@ from tkt_store.domain.outcomes import (
 )
 from tkt_store.domain.status import claimable, sort_key_for_next, why_not_claimable
 from tkt_store.domain.ticket import (
-    CLAIM_ID_RE,
     MAX_TTL,
-    TICKET_ID_RE,
     AgentId,
     Claim,
     ClaimId,
@@ -64,18 +64,55 @@ from tkt_store.domain.ticket import (
     Timestamp,
 )
 
-CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
-"""Refused in `agent`, `reason` and `title`: they are written into the commit
-message, so a newline could forge trailers or break the one-line subject."""
-
 
 def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
     """Dispatch to the rule for this op type. Exhaustive over `Op`.
 
-    `validate_op` runs first; its refusal (INVALID) wins over every other outcome.
+    `validate_op` runs first; its refusal (INVALID) wins over every other outcome. Then
+    every ticket an Apply would write must be writable (`_unwritable`), or the op is
+    refused instead, so tkt never writes an invalid ticket or a file it would refuse to
+    read.
     """
     if (invalid := validate_op(op)) is not None:
         return invalid
+    decision = _decide(snapshot, op, now)
+    if isinstance(decision, Apply):
+        for change in decision.changes:
+            if refusal := _unwritable(change.ticket, op, snapshot.get(change.ticket.id)):
+                return refusal
+    return decision
+
+
+def _unwritable(ticket: Ticket, op: Op, before: Ticket | None = None) -> Refusal | None:
+    """Why `op` may not write `ticket` (replacing `before`), if it may not: INVALID if a
+    field breaks its rule (`fields.ticket_problem`) or the file exceeds the op's budget:
+    `add` and an `edit` that grows the file up to fields.CONTENT_FILE_MAX (an edit that
+    does not grow it is never refused for size, however long the claim history), every
+    op but a claim up to fields.TICKET_FILE_MAX; FULL if a claim would grow it past
+    fields.CLAIM_FILE_MAX (the claim history fills it)."""
+    if problem := fields.ticket_problem(ticket):
+        return _invalid(f"{ticket.id}: {problem}")
+    size = len(ticket.encoded())
+    grows = before is None or size > len(before.encoded())
+    match op:
+        case AddOp() | EditOp():
+            if size > fields.CONTENT_FILE_MAX and grows:
+                kib = fields.CONTENT_FILE_MAX // 1024
+                return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
+        case ClaimOp() | ClaimNextOp():
+            if size > fields.CLAIM_FILE_MAX:
+                return Refusal(
+                    RefusalCode.FULL,
+                    f"{ticket.id} is full: its claim history fills the ticket file; "
+                    "cancel it and add a new ticket",
+                )
+    if size > fields.TICKET_FILE_MAX:
+        kib = fields.TICKET_FILE_MAX // 1024
+        return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
+    return None
+
+
+def _decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
     match op:
         case InitOp():
             return decide_init(snapshot, op, now)
@@ -104,26 +141,17 @@ def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
 def validate_op(op: Op) -> Refusal | None:
     """Refusal(INVALID) if any field of `op` is malformed on its own, else None.
 
-    - ticket ids (`ticket_id`, each `blocked_by` entry) must `fullmatch`
-      ticket.TICKET_ID_RE;
-    - `claim_id` must `fullmatch` ticket.CLAIM_ID_RE;
-    - `agent`, `reason` and `title` must not contain CONTROL_CHARS_RE;
+    - every value the op writes into a ticket or a commit trailer (ticket ids, claim id,
+      title, body, reason, agent, tags, project, priority, blocked_by) must pass its
+      `domain.fields` rule; an edit checks only the fields it sets;
     - `ttl` (claim, claim-next, renew) must satisfy 0 < ttl <= MAX_TTL;
     - `expected_version` (edit) must be >= 1.
     Shape checks only; anything that depends on the snapshot is each rule's concern.
+    Filters (claim-next's project, kind, phase) are not written, so not checked: one
+    that matches nothing finds nothing.
     """
-    for ticket_id in _ticket_ids_of(op):
-        if not TICKET_ID_RE.fullmatch(ticket_id):
-            return _invalid(f"malformed ticket id {ticket_id!r}")
-    match op:
-        case ClaimOp() | ClaimNextOp() | RenewOp() | MoveOp() | ReleaseOp() | DoneOp():
-            if not CLAIM_ID_RE.fullmatch(op.claim_id):
-                return _invalid(
-                    f"malformed claim id {op.claim_id!r} (need 32 lowercase hex characters)"
-                )
-    for name, value in _texts_of(op).items():
-        if isinstance(value, str) and CONTROL_CHARS_RE.search(value):
-            return _invalid(f"{name} contains a newline or other control character")
+    if problems := _field_problems(op):
+        return _invalid(problems[0])
     match op:
         case ClaimOp() | ClaimNextOp() | RenewOp():
             if not 0 < op.ttl <= MAX_TTL:
@@ -142,7 +170,7 @@ def decide_init(snapshot: Snapshot, op: InitOp, now: Timestamp) -> Decision:
 
 
 def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
-    """Refuse: NOT_INITIALISED, INVALID (empty title, unknown or self blocker).
+    """Refuse: NOT_INITIALISED, INVALID (unknown or self blocker).
     If the id already exists, decide whether this is a re-run of the same add (NoOp)
     or a different ticket reusing the id (DUPLICATE_ID). Workflow and occupancy are
     never compared — a handoff or claim since the add does not make a re-run fail:
@@ -155,7 +183,7 @@ def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
     content_version = 1. (A ticket cannot be created finished: AddOp has no resolution.)"""
     if snapshot.revision is None:
         return Refusal(RefusalCode.NOT_INITIALISED, "the store is not initialised (run init)")
-    if invalid := _invalid_content(snapshot, op.ticket_id, op.title, op.blocked_by):
+    if invalid := _invalid_blockers(snapshot, op.ticket_id, op.blocked_by):
         return invalid
     existing = snapshot.get(op.ticket_id)
     if existing is not None:
@@ -183,7 +211,7 @@ def decide_add(snapshot: Snapshot, op: AddOp, now: Timestamp) -> Decision:
 
 def decide_edit(snapshot: Snapshot, op: EditOp, now: Timestamp) -> Decision:
     """Content op. In this order:
-    NOT_FOUND; TERMINAL; INVALID (empty title, unknown or self blocker, dependency cycle);
+    NOT_FOUND; TERMINAL; INVALID (unknown or self blocker, dependency cycle);
     NoOp if every field the op sets already has that value (checked BEFORE the version, so
       a re-run of an edit that already landed converges);
     STALE if ticket.content_version != op.expected_version (edited since it was read).
@@ -200,9 +228,8 @@ def decide_edit(snapshot: Snapshot, op: EditOp, now: Timestamp) -> Decision:
         for name in ("title", "body", "priority", "blocked_by", "tags")
         if not isinstance(value := getattr(op, name), Unset)
     }
-    title = changes.get("title", ticket.title)
     blocked_by = changes.get("blocked_by", ticket.blocked_by)
-    if invalid := _invalid_content(snapshot, ticket.id, title, blocked_by):
+    if invalid := _invalid_blockers(snapshot, ticket.id, blocked_by):
         return invalid
     if "blocked_by" in changes and (cycle := _cycle_through(snapshot, ticket.id, blocked_by)):
         return _invalid(f"blocked_by would create a dependency cycle via {cycle}")
@@ -251,7 +278,9 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
     NOT_HOLDER if op.claim_id is in any ticket's ended_claim_ids;
     choose min(sort_key_for_next) among tickets for which `status.claimable` is true and
       that match the filters (project, kind, phase; a project filter matches that exact
-      value only, never a null project), then apply as decide_claim;
+      value only, never a null project), then apply as decide_claim; a candidate the
+      claim cannot be written to (an invalid or full ticket, `_unwritable`) is skipped,
+      so one bad ticket never stops claim-next for everyone;
     NOTHING_CLAIMABLE if there is none."""
     for ticket in snapshot.tickets.values():
         if ticket.claim is not None and ticket.claim.claim_id == op.claim_id:
@@ -266,10 +295,11 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
         and (op.phase is None or ticket.phase is op.phase)
         and claimable(snapshot, ticket, now)
     ]
-    if not candidates:
-        return Refusal(RefusalCode.NOTHING_CLAIMABLE, "no claimable ticket matches the filters")
-    chosen = min(candidates, key=sort_key_for_next)
-    return _claim(snapshot, chosen, op.name, op.agent, op.claim_id, op.ttl, now)
+    for candidate in sorted(candidates, key=sort_key_for_next):
+        decision = _claim(snapshot, candidate, op.name, op.agent, op.claim_id, op.ttl, now)
+        if not isinstance(decision, Apply) or not _unwritable(decision.changes[0].ticket, op):
+            return decision
+    return Refusal(RefusalCode.NOTHING_CLAIMABLE, "no claimable ticket matches the filters")
 
 
 def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
@@ -407,14 +437,19 @@ def decide_cancel(snapshot: Snapshot, op: CancelOp, now: Timestamp) -> Decision:
 def decide_reap(snapshot: Snapshot, op: ReapOp, now: Timestamp) -> Decision:
     """Occupancy op. Apply: claim = None, with the reaped claim's id appended to
     ended_claim_ids, on every ticket whose claim is takeable (`Claim.is_takeable`: past
-    lease_until + SKEW_GRACE), blocked or not; one record listing them all. NoOp: none
-    is past the grace period. Safe to run from any writer on a schedule (idempotent)."""
-    reaped = [
-        _end_claim(ticket, now)
+    lease_until + SKEW_GRACE, or beyond the cap), blocked or not; one record listing them
+    all. A ticket reap cannot write (`_unwritable`: an invalid ticket) is left out, so it
+    never stops the others being reaped. NoOp: none is past the grace period. Safe to run
+    from any writer on a schedule (idempotent)."""
+    takeable = [
+        ticket
         for ticket in sorted(snapshot.tickets.values(), key=lambda t: t.id)
         if ticket.claim is not None and ticket.claim.is_takeable(now)
     ]
+    reaped = [ended for ticket in takeable if not _unwritable(ended := _end_claim(ticket, now), op)]
     if not reaped:
+        if left_out := len(takeable):
+            return NoOp(f"no claim reaped: {left_out} lapsed claim(s) on invalid tickets")
         return NoOp("no claim is past the grace period")
     record = OpRecord(
         op.name,
@@ -449,45 +484,76 @@ def _already_ended(claim_id: ClaimId, where: TicketId) -> Refusal:
     return Refusal(RefusalCode.NOT_HOLDER, f"claim {claim_id} already ended on {where}")
 
 
-def _ticket_ids_of(op: Op) -> tuple[TicketId, ...]:
-    """Every ticket id an op names: its ticket, and any blockers it sets."""
+def _field_problems(op: Op) -> list[str]:
+    """The `domain.fields` problems of every value an op writes, in field order."""
     match op:
         case AddOp():
-            return (op.ticket_id, *op.blocked_by)
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.title_problem(op.title),
+                fields.body_problem(op.body),
+                fields.project_problem(op.project),
+                fields.priority_problem(op.priority),
+                fields.blockers_problem(op.blocked_by),
+                fields.tags_problem(op.tags),
+                fields.agent_problem(op.agent),
+            ]
         case EditOp():
-            blocked_by = () if isinstance(op.blocked_by, Unset) else op.blocked_by
-            return (op.ticket_id, *blocked_by)
-        case ClaimOp() | RenewOp() | MoveOp() | ReleaseOp() | DoneOp() | CancelOp():
-            return (op.ticket_id,)
-        case InitOp() | ClaimNextOp() | ReapOp():
-            return ()
-
-
-def _texts_of(op: Op) -> dict[str, object]:
-    """The free-text fields an op writes into a ticket or a commit trailer."""
-    match op:
-        case AddOp() | EditOp():
-            return {"agent": op.agent, "title": op.title}
-        case ClaimOp() | ClaimNextOp():
-            return {"agent": op.agent}
-        case CancelOp():
-            return {"agent": op.agent, "reason": op.reason}
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                _if_set(fields.title_problem, op.title),
+                _if_set(fields.body_problem, op.body),
+                _if_set(fields.priority_problem, op.priority),
+                _if_set(fields.blockers_problem, op.blocked_by),
+                _if_set(fields.tags_problem, op.tags),
+                fields.agent_problem(op.agent),
+            ]
+        case ClaimOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.claim_id_problem(op.claim_id),
+                fields.agent_problem(op.agent),
+            ]
+        case ClaimNextOp():
+            verdicts = [fields.claim_id_problem(op.claim_id), fields.agent_problem(op.agent)]
+        case RenewOp() | MoveOp() | DoneOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.claim_id_problem(op.claim_id),
+            ]
         case ReleaseOp():
-            return {"reason": op.reason}
-        case InitOp() | RenewOp() | MoveOp() | DoneOp() | ReapOp():
-            return {}
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.claim_id_problem(op.claim_id),
+                fields.reason_problem(op.reason),
+            ]
+        case CancelOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.reason_problem(op.reason),
+                fields.agent_problem(op.agent),
+            ]
+        case InitOp() | ReapOp():
+            verdicts = []
+    return [verdict for verdict in verdicts if verdict is not None]
+
+
+_V = TypeVar("_V")
+
+
+def _if_set(check: Callable[[_V], str | None], value: _V | UnsetType) -> str | None:
+    """`check(value)`, or None for a field the edit leaves unchanged."""
+    return None if isinstance(value, Unset) else check(value)
 
 
 def _content(ticket: Ticket) -> tuple[object, ...]:
     return (ticket.title, ticket.body, ticket.priority, ticket.blocked_by, ticket.tags)
 
 
-def _invalid_content(
-    snapshot: Snapshot, ticket_id: TicketId, title: str, blocked_by: tuple[TicketId, ...]
+def _invalid_blockers(
+    snapshot: Snapshot, ticket_id: TicketId, blocked_by: tuple[TicketId, ...]
 ) -> Refusal | None:
-    """Empty title, a ticket blocking itself, or an unknown blocker."""
-    if not title.strip():
-        return _invalid("title must not be empty")
+    """A ticket blocking itself, or an unknown blocker."""
     if ticket_id in blocked_by:
         return _invalid(f"{ticket_id} cannot block itself")
     if unknown := [b for b in blocked_by if snapshot.get(b) is None]:

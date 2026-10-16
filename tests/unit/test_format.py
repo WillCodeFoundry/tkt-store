@@ -27,8 +27,8 @@ NOW = 1_000_000
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 CLAIM = Claim(agent=A, claim_id=C2, lease_until=NOW + 600, claimed_at=NOW - 600)
 
 FULL = Ticket(
@@ -95,7 +95,7 @@ def test_new_fields_round_trip(field: str, ticket: Ticket) -> None:
     [
         b"not json",
         b"[]",
-        b'{"id": "tkt-1"}',
+        b'{"id": "tkt-0001"}',
         wire.encode_ticket(FULL).replace(b'"bug"', b'"epic"'),
         wire.encode_ticket(FULL).replace(b'"priority": 2', b'"priority": "2"'),
         wire.encode_ticket(FULL).replace(b'"priority": 2', b'"priority": true'),
@@ -142,10 +142,12 @@ RECORDS = [
         ticket_ids=(T1,),
         agent=A,
         claim_id=C1,
-        summary="move tkt-1: Expire tokens",
+        summary="move tkt-0001: Expire tokens",
         phase=Phase.REVIEW,
     ),
-    OpRecord(OpName.CANCEL, at=NOW, ticket_ids=(T1,), reason="duplicate: see tkt-2", summary="x"),
+    OpRecord(
+        OpName.CANCEL, at=NOW, ticket_ids=(T1,), reason="duplicate: see tkt-0002", summary="x"
+    ),
     OpRecord(OpName.REAP, at=NOW, ticket_ids=(T1, T2), summary="reap 2 lapsed claim(s)"),
 ]
 
@@ -159,26 +161,26 @@ def test_message_round_trip(record: OpRecord) -> None:
 
 def test_message_layout_matches_the_documented_example() -> None:
     record = OpRecord(
-        OpName.CLAIM, at=NOW, ticket_ids=(T1,), agent=A, claim_id=C1, summary="claim tkt-1: X"
+        OpName.CLAIM, at=NOW, ticket_ids=(T1,), agent=A, claim_id=C1, summary="claim tkt-0001: X"
     )
     assert wire.encode_message(record) == (
-        "claim tkt-1: X\n\n"
-        "tkt-protocol: 1\ntkt-op: claim\ntkt-time: 1000000\ntkt-id: tkt-1\n"
+        "claim tkt-0001: X\n\n"
+        "tkt-protocol: 1\ntkt-op: claim\ntkt-time: 1000000\ntkt-id: tkt-0001\n"
         f"tkt-agent: coder-7\ntkt-claim: {C1}\n"
     )
 
 
 def test_subject_is_one_line() -> None:
     """encode_message never emits a multi-line subject."""
-    record = OpRecord(OpName.ADD, at=NOW, ticket_ids=(T1,), summary="add tkt-1: a\n\nb\x1b")
+    record = OpRecord(OpName.ADD, at=NOW, ticket_ids=(T1,), summary="add tkt-0001: a\n\nb\x1b")
     subject, blank, *_ = wire.encode_message(record).split("\n")
-    assert subject == "add tkt-1: a b" and blank == ""
+    assert subject == "add tkt-0001: a b" and blank == ""
 
 
 def test_tkt_commit_without_time_is_rejected() -> None:
     """A tkt commit missing tkt-time → StoreError."""
     with pytest.raises(StoreError):
-        wire.decode_message("add tkt-1: X\n\ntkt-protocol: 1\ntkt-op: add\ntkt-id: tkt-1\n")
+        wire.decode_message("add tkt-0001: X\n\ntkt-protocol: 1\ntkt-op: add\ntkt-id: tkt-0001\n")
 
 
 def test_tkt_commit_without_id_is_rejected_except_init() -> None:
@@ -197,4 +199,4 @@ def test_foreign_commit_decodes_to_none(message: str) -> None:
 def test_future_protocol_version_is_rejected() -> None:
     """→ StoreError, never silently misread."""
     with pytest.raises(StoreError, match="upgrade"):
-        wire.decode_message("x\n\ntkt-protocol: 2\ntkt-op: add\ntkt-time: 1\ntkt-id: tkt-1\n")
+        wire.decode_message("x\n\ntkt-protocol: 2\ntkt-op: add\ntkt-time: 1\ntkt-id: tkt-0001\n")

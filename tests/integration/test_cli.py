@@ -105,8 +105,8 @@ def test_tickets_list_has_the_documented_count(
     outcome = service.init()
     if command != "init":
         for n in (1, 2):
-            service.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
-            outcome = service.claim(TicketId(f"tkt-{n}"), A, TTL, claim_id=ClaimId(f"{n}" * 32))
+            service.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n:04}"))
+            outcome = service.claim(TicketId(f"tkt-{n:04}"), A, TTL, claim_id=ClaimId(f"{n}" * 32))
     if command == "reap":
         clock.advance(TTL + SKEW_GRACE)
         outcome = service.reap()
@@ -122,7 +122,7 @@ def test_rerunning_the_same_command_is_unchanged(tkt: Tkt) -> None:
 
 
 def test_show_unknown_id_is_refused_not_found(tkt: Tkt) -> None:
-    code, out = tkt("show", "tkt-404")
+    code, out = tkt("show", "tkt-0404")
     assert (code, out["outcome"], out["code"]) == (1, "refused", "NOT_FOUND")
 
 

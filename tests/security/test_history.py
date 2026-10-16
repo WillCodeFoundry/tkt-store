@@ -12,8 +12,8 @@ from tkt_store.application.service import TicketStore
 from tkt_store.domain.operations import OpName
 from tkt_store.domain.ticket import AgentId, TicketId
 
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 
 pytestmark = pytest.mark.git
 
@@ -21,23 +21,17 @@ pytestmark = pytest.mark.git
 def malformed(phase: str) -> str:
     """A tkt commit message whose tkt-phase is not a phase: decode_message raises for it."""
     return (
-        "release tkt-1: x\n\ntkt-protocol: 1\ntkt-op: release\ntkt-time: 1\n"
-        f"tkt-id: tkt-1\ntkt-phase: {phase}\n"
+        "release tkt-0001: x\n\ntkt-protocol: 1\ntkt-op: release\ntkt-time: 1\n"
+        f"tkt-id: tkt-0001\ntkt-phase: {phase}\n"
     )
 
 
-@pytest.mark.security_bug(
-    "a U+2028 in --as forges a tkt-id trailer: log(victim) shows an op that never happened"
-)
 def test_an_agent_name_cannot_forge_history_for_another_ticket(tickets: TicketStore) -> None:
     tickets.add("Attacker's own ticket", ticket_id=T2)
-    tickets.cancel(T2, agent=AgentId("mallory\u2028tkt-id: tkt-1"))
+    tickets.cancel(T2, agent=AgentId("mallory\u2028tkt-id: tkt-0001"))
     assert [e.record.op for e in tickets.log(T1)] == [OpName.ADD]
 
 
-@pytest.mark.security_bug(
-    "a U+2028 in --reason writes a malformed trailer that breaks every later tkt log"
-)
 def test_a_reason_cannot_break_history(tickets: TicketStore) -> None:
     tickets.add("Attacker's own ticket", ticket_id=T2)
     tickets.cancel(T2, "bye\u2028tkt-phase: bogus")

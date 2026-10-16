@@ -17,7 +17,7 @@ from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.domain.ticket import TicketId
 
-T2 = TicketId("tkt-2")
+T2 = TicketId("tkt-0002")
 
 pytestmark = pytest.mark.git
 

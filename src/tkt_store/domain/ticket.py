@@ -7,6 +7,7 @@ Status is NOT here — it is derived in `domain.status`.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -19,9 +20,12 @@ ClaimId = NewType("ClaimId", str)
 ProjectId = NewType("ProjectId", str)
 
 TICKET_PREFIX = "tkt-"
-TICKET_ID_RE = re.compile(rf"{TICKET_PREFIX}[0-9a-f]+")
-"""A ticket id, also its file name `tickets/<id>.json`: no '/', '.', or traversal.
-Always check with `fullmatch` (never `match` with `$`, which accepts a trailing newline)."""
+"""The prefix of minted ids (`tkt-` + 8 hex digits); a caller's own id needs none."""
+TICKET_ID_RE = re.compile(r"(?=[a-z0-9-]{8,32}\Z)[a-z0-9]+(?:-[a-z0-9]+)*")
+"""A ticket id, also its file name `tickets/<id>.json`: 8 to 32 lowercase letters, digits
+and single hyphens, starting and ending with a letter or digit (e.g. `tkt-7f3a91c2`,
+`fix-login-redirect`); no '/', '.', or traversal. Always check with `fullmatch` (never
+`match` with `$`, which accepts a trailing newline)."""
 
 CLAIM_ID_RE = re.compile(r"[0-9a-f]{32}")
 """A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer.
@@ -49,6 +53,12 @@ claim its holder still considers live. A fixed v1 constant, not per-store."""
 MAX_TTL: Duration = 2 * 60 * 60
 """Upper bound on a lease TTL (claim, claim-next, renew). Without it a huge TTL would be
 a permanent lock that neither reap nor takeover can clear."""
+
+LEASE_CAP_MARGIN: Duration = 10 * 60
+"""How far a writer's clock may run ahead before its longest lease looks forged: a lease
+ending more than MAX_TTL + LEASE_CAP_MARGIN after now is beyond the cap
+(`Claim.is_beyond_cap`). Generous for clocks kept in time; a forged lease can lock a
+ticket for at most that long."""
 
 
 class Kind(StrEnum):
@@ -106,14 +116,23 @@ class Claim:
         return max(0, now - self.claimed_at)
 
     def is_live(self, now: Timestamp) -> bool:
-        """True while the lease has not expired (now < lease_until)."""
-        return now < self.lease_until
+        """True while the lease has not expired (now < lease_until) and is not beyond
+        the cap (`is_beyond_cap`)."""
+        return now < self.lease_until and not self.is_beyond_cap(now)
 
     def is_takeable(self, now: Timestamp) -> bool:
         """True once the claim may be acted on as expired — taken over or reaped:
-        now >= lease_until + SKEW_GRACE. Display (Status.EXPIRED) starts earlier, at
-        lease_until."""
-        return now >= self.lease_until + SKEW_GRACE
+        now >= lease_until + SKEW_GRACE, or a lease beyond the cap. Display
+        (Status.EXPIRED) starts earlier, at lease_until."""
+        return now >= self.lease_until + SKEW_GRACE or self.is_beyond_cap(now)
+
+    def is_beyond_cap(self, now: Timestamp) -> bool:
+        """A lease ending more than MAX_TTL + LEASE_CAP_MARGIN after now, which no honest
+        writer sets (claim and renew cap it at the writer's now + MAX_TTL, and clocks
+        agree within the margin). Such a claim reads expired and is takeable, so a forged
+        lease cannot lock a ticket. The cap is relative to now, never to claimed_at, so an
+        honestly renewed claim is never beyond it."""
+        return self.lease_until > now + MAX_TTL + LEASE_CAP_MARGIN
 
     def to_dict(self) -> dict[str, Any]:
         """The claim as plain data, as it appears in the ticket file (docs/format.md)."""
@@ -211,6 +230,16 @@ class Ticket:
             "ended_claim_ids": list(self.ended_claim_ids),
             "updated": self.updated,
         }
+
+    def encoded(self) -> bytes:
+        """The ticket file's bytes: `to_dict` in the canonical encoding."""
+        return canonical_json(self.to_dict())
+
+
+def canonical_json(value: object) -> bytes:
+    """The on-branch file encoding (docs/format.md): UTF-8 JSON, sorted keys, 2-space
+    indent, trailing newline. Stable diffs and byte-identical round trips."""
+    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
 
 
 @dataclass(frozen=True)

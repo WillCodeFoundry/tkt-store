@@ -22,7 +22,7 @@ tickets/
 - `tkt-store.json` records the format version, `{"protocol": 1}`; other keys are
   ignored. `init` writes it into the root commit; every snapshot checks it and fails
   (`StoreError`) if it is missing or newer than the client supports.
-- One file per ticket, `tickets/tkt-<hex>.json`; the id is both the filename stem and the
+- One file per ticket, `tickets/<id>.json`; the id is both the filename stem and the
   `id` field (a mismatch is an error).
 - Files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
   (stable diffs, byte-identical round trips).
@@ -54,7 +54,7 @@ tickets/
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | `tkt-` + lowercase hex (`^tkt-[0-9a-f]+$`), unique, never reused |
+| `id` | string | 8 to 32 lowercase letters, digits and single hyphens, starting and ending with a letter or digit (e.g. `tkt-7f3a91c2`, `fix-login-redirect`; minted ids are `tkt-` + 8 hex); unique, never reused |
 | `title` | string | required, 1 to 256 characters, one line; free text (*Field rules*) |
 | `body` | string | may be empty; at most 65,536 characters; free text that may hold newlines and tabs |
 | `kind` | `"story" \| "task" \| "bug"` | |
@@ -71,12 +71,14 @@ tickets/
 
 **Field rules.** Writes are refused (`INVALID`) when a value breaks the rules in the
 table, or when the ticket file it writes would exceed 256 KiB (a body near its limit, or
-a long claim history). Lengths count Unicode code points. Free text (`title`, `body`, `tkt-reason`)
-must be in Unicode NFC, must not start or end with whitespace, and must not contain
-control characters (category `Cc`; a body may hold newlines and tabs), format characters
-(`Cf`: bidi controls, zero-width characters, tag characters), private-use, surrogate or
-unassigned code points, or line and paragraph separators. Files are not yet checked
-against these rules when read; that comes with the rest of protocol 2 (ADR 0005).
+a long claim history). Lengths count code points. Free text (`title`, `body`,
+`tkt-reason`) must not contain controls (a body may hold newlines and tabs), surrogates,
+noncharacters, private-use characters, or the invisible, reordering and line-breaking
+characters listed in `domain/fields.py` (bidi controls, zero-width characters, line and
+paragraph separators, tag characters, fillers); everything else, including emoji and
+characters not yet assigned, is allowed. Nothing is normalised. Title and reason must
+not start or end with whitespace; a body may. Files are not yet checked against these
+rules when read; that comes with the rest of protocol 2 (ADR 0005).
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).

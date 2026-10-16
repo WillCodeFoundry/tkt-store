@@ -8,16 +8,17 @@ for an absent optional value (no project, no priority, no agent).
 
 Identifiers follow GitHub's rules, since the values usually are GitHub names: a holder
 (today the acting agent) is a username, a tag is a topic, a project is `[owner/]repo`.
-Free text (title, body, reason) follows a PRECIS-style rule (RFC 8264): NFC, and no
-control, format, private-use, surrogate or unassigned characters, nor line or
-paragraph separators, so nothing can hide text from a reader, drive a terminal or
-forge a trailer line. Lengths count code points.
+Free text (title, body, reason) must be Unicode Assignables (RFC 9839: no controls but
+newline and tab, no surrogates, no noncharacters) without private-use characters or a
+fixed list of invisible, reordering and line-breaking characters, so nothing can hide
+text from a reader, drive a terminal or forge a trailer line. Every refused character
+sits in a fixed range, so the rule never depends on the Python version or its Unicode
+data; nothing is normalised, and comparisons are exact. Lengths count code points.
 """
 
 from __future__ import annotations
 
 import re
-import unicodedata
 
 from tkt_store.domain.ticket import CLAIM_ID_RE, TICKET_ID_RE
 
@@ -45,26 +46,54 @@ _SEGMENT = rf"[A-Za-z0-9._-]{{1,{PROJECT_SEGMENT_MAX}}}"
 PROJECT_RE = re.compile(rf"(?:{_SEGMENT}/)?{_SEGMENT}")
 """`[owner/]repo`, each segment at most PROJECT_SEGMENT_MAX of `[A-Za-z0-9._-]`."""
 
-REFUSED_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp"})
-"""Control, format (bidi, zero-width, tag characters), private-use, surrogate and
-unassigned characters, and line and paragraph separators."""
+_REFUSED_RANGES = (
+    (0x0000, 0x001F),  # C0 controls (a body may hold newline and tab)
+    (0x007F, 0x009F),  # DEL and C1 controls (U+0085 is a line break)
+    (0x00AD, 0x00AD),  # soft hyphen: invisible
+    (0x034F, 0x034F),  # combining grapheme joiner: invisible
+    (0x061C, 0x061C),  # arabic letter mark: bidi
+    (0x115F, 0x1160),  # hangul fillers: render blank
+    (0x17B4, 0x17B5),  # khmer inherent vowels: invisible
+    (0x180E, 0x180E),  # mongolian vowel separator: invisible
+    (0x200B, 0x200F),  # zero-width characters, left/right-to-left marks
+    (0x2028, 0x202E),  # line and paragraph separators, bidi embeddings and overrides
+    (0x2060, 0x206F),  # word joiner, invisible operators, bidi isolates, deprecated formats
+    (0x3164, 0x3164),  # hangul filler
+    (0xD800, 0xDFFF),  # surrogates
+    (0xE000, 0xF8FF),  # private use
+    (0xFDD0, 0xFDEF),  # noncharacters
+    (0xFEFF, 0xFEFF),  # zero-width no-break space (byte order mark)
+    (0xFFA0, 0xFFA0),  # halfwidth hangul filler
+    (0xFFF9, 0xFFFB),  # interlinear annotation controls
+    (0x1D173, 0x1D17A),  # musical symbol formatting controls
+    (0xE0000, 0xE007F),  # tag characters: invisible to people, read by LLMs
+    (0xE0100, 0xE01EF),  # variation selectors supplement: can smuggle hidden data
+    (0xF0000, 0x10FFFF),  # private use planes 15 and 16
+    *((plane + 0xFFFE, plane + 0xFFFF) for plane in range(0, 0xF0000, 0x10000)),
+)
+"""Code points free text never holds. Fixed ranges only: they never change with the
+Unicode version. Visible spaces, emoji and their variation selector U+FE0F stay allowed."""
 
-BODY_CONTROLS = frozenset("\n\t")
-"""The only control characters free text may hold, and only in a body."""
+
+def _class(ranges: tuple[tuple[int, int], ...]) -> re.Pattern[str]:
+    return re.compile("[" + "".join(f"\\U{lo:08x}-\\U{hi:08x}" for lo, hi in ranges) + "]")
+
+
+_REFUSED = _class(_REFUSED_RANGES)
+_REFUSED_IN_BODY = _class(
+    ((0x0000, 0x0008), (0x000B, 0x001F), *_REFUSED_RANGES[1:])
+)  # newline (U+000A) and tab (U+0009) allowed
 
 
 def text_problem(field: str, value: str, *, max_len: int, multiline: bool = False) -> str | None:
-    """Free text: NFC, at most `max_len` code points, no refused character (newline and
-    tab allowed when `multiline`), no leading or trailing whitespace."""
-    if not unicodedata.is_normalized("NFC", value):
-        return f"{field} must be in Unicode NFC"
+    """Free text: at most `max_len` code points and no refused code point (newline and
+    tab allowed when `multiline`). Single-line text must not start or end with
+    whitespace; a body may (indented code, a trailing newline)."""
     if len(value) > max_len:
         return f"{field} is longer than {max_len} characters"
-    allowed = BODY_CONTROLS if multiline else frozenset()
-    for char in value:
-        if char not in allowed and unicodedata.category(char) in REFUSED_CATEGORIES:
-            return f"{field} contains U+{ord(char):04X}, a control or invisible character"
-    if value != value.strip():
+    if found := (_REFUSED_IN_BODY if multiline else _REFUSED).search(value):
+        return f"{field} contains U+{ord(found[0]):04X}, a control or invisible character"
+    if not multiline and value != value.strip():
         return f"{field} has leading or trailing whitespace"
     return None
 
@@ -85,7 +114,10 @@ def reason_problem(reason: str) -> str | None:
 
 def ticket_id_problem(ticket_id: str) -> str | None:
     if not TICKET_ID_RE.fullmatch(ticket_id):
-        return "ticket id must be tkt- followed by lowercase hex"
+        return (
+            "ticket id must be 8 to 32 lowercase letters, digits and single hyphens, "
+            "starting and ending with a letter or digit"
+        )
     return None
 
 
@@ -140,7 +172,7 @@ def blockers_problem(blocked_by: tuple[str, ...]) -> str | None:
         return f"at most {BLOCKERS_MAX} blockers"
     for position, blocker in enumerate(blocked_by, 1):
         if ticket_id_problem(blocker):
-            return f"blocker {position} must be tkt- followed by lowercase hex"
+            return f"blocker {position} is not a ticket id"
     if len(set(blocked_by)) != len(blocked_by):
         return "blocked_by lists a ticket twice"
     return None

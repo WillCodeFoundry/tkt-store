@@ -29,18 +29,26 @@ or commit signing could expose.
 **Everything read from the branch is treated as hostile and validated:**
 
 - One set of field checks, used on write (`validate_op`) and on read:
+  - ticket id: 8 to 32 lowercase letters, digits and single hyphens, starting and
+    ending with a letter or digit (`tkt-1234`; minted ids are `tkt-` + 8 hex);
   - `holder` (below): the GitHub username rule (letters, digits, single hyphens, no
     hyphen at either end, at most 39);
   - tags: the GitHub topic rule (lowercase letters, digits, hyphens; at most 20 tags of
     at most 50);
   - project: `[owner/]repo`, each segment `[A-Za-z0-9._-]` of at most 100;
-  - free text (title, body, reason): a PRECIS-style rule. NFC; no control characters
-    (`Cc`, except newline and tab in the body), format characters (`Cf`: bidi, zero-width,
-    tag characters), private-use, surrogate or unassigned characters, line or paragraph
-    separators. Title and reason are single-line, title is never blank; no leading or
-    trailing whitespace anywhere. Title at most 256, reason 256, body 65,536;
-  - priority 0–100; blockers at most 20, no duplicates, no self-block;
-  - lengths count Unicode code points after NFC.
+  - free text (title, body, reason): Unicode Assignables (RFC 9839: no controls but
+    newline and tab, in the body only; no surrogates or noncharacters), and no
+    private-use characters or characters from a fixed list of invisible, reordering and
+    line-breaking ones (bidi controls, zero-width characters, line and paragraph
+    separators, tag characters, fillers). Every refused character is in a fixed range,
+    so the rule is the same on every Python and Unicode version: nothing is normalised
+    and comparisons are exact. Title and reason are single-line, without leading or
+    trailing whitespace, and the title is never empty; a body may start and end with
+    whitespace (indented code, a trailing newline). Title at most 256, reason 256, body
+    65,536;
+  - priority 0–100; blockers at most 20, no duplicates, no self-block; tags no
+    duplicates;
+  - lengths count code points.
 - Writes still refuse unknown blockers; on read, a blocker that is missing or set aside
   counts as not done.
 - Whole-ticket and cross-ticket checks on read (e.g. no claim on a resolved ticket; a
@@ -53,7 +61,7 @@ or commit signing could expose.
   fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
   and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
   file is set aside is `DUPLICATE_ID`. A malformed commit is skipped and reported by
-  history. Only regular files at `tickets/tkt-<hex>.json` are read; other files are
+  history. Only regular files at `tickets/<id>.json` are read; other files are
   preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
   `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable (and reads expired).
@@ -102,6 +110,12 @@ anything.
 
 - **Validating pushes on the server** (`pre-receive`, `tkt verify`): the remote is
   unknown and may be a hosting service without custom hooks.
+- **PRECIS (RFC 8264) for free text, with NFC:** it refuses unassigned characters and
+  relies on Unicode properties, so agents on different Python versions (Unicode 14 to
+  16) would disagree, and once tickets are validated on read one would be set aside for
+  some agents and not others. NFC is not version-stable either for characters the
+  writer's Python does not know. No comparison needs it: a re-run repeats its input
+  exactly.
 - **Preserving unknown keys for forward compatibility:** a deployed format change bumps
   the protocol, which older clients already refuse; the keys were only an injection
   channel.

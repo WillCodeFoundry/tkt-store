@@ -25,8 +25,8 @@ from tkt_store.domain.ticket import AgentId, ClaimId, ProjectId, TicketId
 TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 
 LINE_BREAKS = {
     "U+2028 line separator": "\u2028",
@@ -72,7 +72,7 @@ def text_ops(value: str) -> dict[str, Op]:
         "agent (claim-next --as)": ClaimNextOp(agent, C1, TTL),
         "agent (cancel --as)": CancelOp(T1, agent=agent),
         "reason (release)": ReleaseOp(T1, C1, f"done{value}tkt-phase: review"),
-        "reason (cancel)": CancelOp(T1, f"dup{value}tkt-id: tkt-2"),
+        "reason (cancel)": CancelOp(T1, f"dup{value}tkt-id: tkt-0002"),
     }
 
 
@@ -139,7 +139,7 @@ def test_priority_is_bounded(priority: int) -> None:
 
 HUGE = 10_000_000
 BIG = 100_000
-MANY_BLOCKERS = tuple(TicketId(f"tkt-{n:x}") for n in range(10_000))
+MANY_BLOCKERS = tuple(TicketId(f"tkt-{n:04x}") for n in range(10_000))
 
 
 @pytest.mark.parametrize(

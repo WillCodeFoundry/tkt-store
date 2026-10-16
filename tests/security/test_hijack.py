@@ -14,7 +14,7 @@ from tkt_store.application.transaction import Refused
 from tkt_store.cli import main
 from tkt_store.domain.ticket import AgentId, ClaimId, Phase, TicketId
 
-T1 = TicketId("tkt-1")
+T1 = TicketId("tkt-0001")
 HOLDER = AgentId("coder-7")
 SECRET = ClaimId("5" * 32)
 """The holder's claim id: known only to the holder, which got it from `tkt mint`."""
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.git
 
 
 def visible_claim_values(clone: Path, capsys: pytest.CaptureFixture[str]) -> list[str]:
-    """Every string an impostor sees in the claim when it runs `tkt show tkt-1`."""
+    """Every string an impostor sees in the claim when it runs `tkt show tkt-0001`."""
     assert main(["show", T1, "--repo", str(clone), "--remote", "origin"]) == 0
     claim: dict[str, Any] = json.loads(capsys.readouterr().out)["ticket"]["claim"]
     return [value for value in claim.values() if isinstance(value, str)]

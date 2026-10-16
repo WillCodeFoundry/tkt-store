@@ -106,12 +106,13 @@ flags (`…`) may be given several times.
   is live, and renew it if it lapsed (nobody took it over), so a restarted agent gets a
   live claim back.
 - **Values** follow the field rules in `docs/format.md`, or the command is refused
-  `INVALID`: `--title` and `--reason` are one line (at most 256 characters), `--body` at
-  most 65,536, all three in Unicode NFC with no leading or trailing whitespace and no
-  control or invisible characters (a body may hold newlines and tabs); `--as` is like a
-  GitHub username; `--tag` like a GitHub topic (at most 20, no duplicates); `--project` is
-  `[owner/]repo`; `--priority` is 0 to 100; at most 20 `--blocked-by`. A write whose ticket file would
-  exceed 256 KiB is refused too.
+  `INVALID`: ids are 8 to 32 lowercase letters, digits and single hyphens; `--title`
+  and `--reason` are one line (at most 256 characters) without leading or trailing
+  whitespace, `--body` at most 65,536; none holds control or invisible characters (a
+  body may hold newlines and tabs); `--as` is like a GitHub username; `--tag` like a
+  GitHub topic (at most 20, no duplicates); `--project` is `[owner/]repo`; `--priority`
+  is 0 to 100; at most 20 `--blocked-by`. A write whose ticket file would exceed 256 KiB
+  is refused too.
 - **Actor.** `--as` on `add`, `edit` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
 

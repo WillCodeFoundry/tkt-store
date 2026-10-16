@@ -50,9 +50,9 @@ B = AgentId("reviewer-2")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
 C3 = ClaimId("3" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
-T3 = TicketId("tkt-3")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
+T3 = TicketId("tkt-0003")
 LAPSED = NOW - 1  # a lease_until in the past, still within the grace
 TAKEABLE = NOW - SKEW_GRACE  # lease_until + SKEW_GRACE == NOW
 
@@ -383,7 +383,7 @@ class TestWorkflow:
 
 class TestValidation:
     @pytest.mark.parametrize(
-        "ticket_id", ["tkt-XYZ", "tkt-../x", "x/tkt-1", "tkt-", "TKT-1", "tkt-1\n"]
+        "ticket_id", ["tkt-XYZ", "tkt-../x", "x/tkt-0001", "tkt-", "TKT-1", "tkt-0001\n"]
     )
     def test_bad_ticket_id_is_invalid(self, ticket_id: str) -> None:
         bad = TicketId(ticket_id)

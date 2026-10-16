@@ -20,9 +20,12 @@ ClaimId = NewType("ClaimId", str)
 ProjectId = NewType("ProjectId", str)
 
 TICKET_PREFIX = "tkt-"
-TICKET_ID_RE = re.compile(rf"{TICKET_PREFIX}[0-9a-f]+")
-"""A ticket id, also its file name `tickets/<id>.json`: no '/', '.', or traversal.
-Always check with `fullmatch` (never `match` with `$`, which accepts a trailing newline)."""
+"""The prefix of minted ids (`tkt-` + 8 hex digits); a caller's own id needs none."""
+TICKET_ID_RE = re.compile(r"(?=[a-z0-9-]{8,32}\Z)[a-z0-9]+(?:-[a-z0-9]+)*")
+"""A ticket id, also its file name `tickets/<id>.json`: 8 to 32 lowercase letters, digits
+and single hyphens, starting and ending with a letter or digit (e.g. `tkt-7f3a91c2`,
+`fix-login-redirect`); no '/', '.', or traversal. Always check with `fullmatch` (never
+`match` with `$`, which accepts a trailing newline)."""
 
 CLAIM_ID_RE = re.compile(r"[0-9a-f]{32}")
 """A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer.

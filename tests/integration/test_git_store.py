@@ -32,8 +32,8 @@ NOW = 1_000_000
 TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 
 REF = wire.DEFAULT_REF
 
@@ -135,7 +135,7 @@ def test_stray_files_are_ignored_and_preserved(local: Path, bare_remote: Path) -
     stray = {
         "tickets/README.md": b"# notes\n",
         "tickets/foo.json": b"not a ticket",
-        "tickets/sub/tkt-9.json": b"nested",
+        "tickets/sub/tkt-0009.json": b"nested",
         "NOTES.txt": b"root file\n",
     }
     write_files(bare_remote, stray)
@@ -167,7 +167,7 @@ def test_filename_must_match_id(local: Path, bare_remote: Path) -> None:
 
 
 def test_corrupt_ticket_fails_the_whole_snapshot(local: Path, bare_remote: Path) -> None:
-    write_files(bare_remote, {wire.ticket_path(T2): b'{"id": "tkt-2"'})
+    write_files(bare_remote, {wire.ticket_path(T2): b'{"id": "tkt-0002"'})
     with pytest.raises(StoreError, match=wire.ticket_path(T2)):
         opened(local).snapshot()
 
@@ -275,7 +275,7 @@ def test_non_ascii_title_round_trips(local: Path) -> None:
     """cat-file --batch sizes are bytes: a non-ASCII title is decoded correctly."""
     tickets = service(opened(local))
     tickets.add("Ünïcödé — 日本語 ✓", ticket_id=T2)
-    tickets.add("After", ticket_id=TicketId("tkt-3"))
+    tickets.add("After", ticket_id=TicketId("tkt-0003"))
     view = tickets.view(T2)
     assert view is not None and view.ticket.title == "Ünïcödé — 日本語 ✓"
     assert [v.ticket.title for v in tickets.list()][-1] == "After"
@@ -314,7 +314,7 @@ def test_a_cached_store_sees_the_same_tickets_as_a_fresh_one(
 ) -> None:
     cached = TicketStore(opened(local), FakeClock(NOW), SequentialIds())
     for n in range(3, 6):
-        cached.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
+        cached.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n:04}"))
     cached.claim(T1, A, TTL, claim_id=C1)
     write_files(bare_remote, {wire.ticket_path(T2): wire.encode_ticket(tkt(T2, title="By hand"))})
     fresh = opened(local).snapshot()
@@ -330,7 +330,7 @@ def test_every_commit_runs_gc_auto(local: Path) -> None:
     runner = HookedRunner(local)
     tickets = TicketStore(GitStore(runner, remote="origin"), FakeClock(NOW), SequentialIds())
     for n in range(2, 5):
-        tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
+        tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n:04}"))
     tickets.view(T1)  # reads never run it
     assert runner.count("gc") == 3
 

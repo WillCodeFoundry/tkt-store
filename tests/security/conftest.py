@@ -56,10 +56,10 @@ def _store_on(clone: Path) -> TicketStore:
 
 @pytest.fixture
 def honest_clone(clones: list[Path]) -> Path:
-    """An honest agent's clone of an initialised store holding tkt-1 ("Expire tokens")."""
+    """An honest agent's clone of an initialised store holding tkt-0001 ("Expire tokens")."""
     store = _store_on(clones[0])
     store.init()
-    store.add("Expire tokens", ticket_id=TicketId("tkt-1"))
+    store.add("Expire tokens", ticket_id=TicketId("tkt-0001"))
     return clones[0]
 
 

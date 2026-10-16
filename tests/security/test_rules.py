@@ -30,7 +30,7 @@ A = AgentId("coder-7")
 B = AgentId("reviewer-2")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
-T1 = TicketId("tkt-1")
+T1 = TicketId("tkt-0001")
 
 
 def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:

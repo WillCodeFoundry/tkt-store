@@ -18,8 +18,8 @@ from tkt_store.domain.outcomes import OpRecord, WriteTicket
 from tkt_store.domain.ticket import Phase, Revision, Ticket, TicketId
 
 NOW = 1_000_000
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 
 
 def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:

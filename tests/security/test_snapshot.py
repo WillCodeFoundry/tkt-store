@@ -18,13 +18,13 @@ from tkt_store.infrastructure.git.repo import GitStore
 
 NOW = 1_000_000
 C1 = ClaimId("1" * 32)
-T1 = TicketId("tkt-1")
+T1 = TicketId("tkt-0001")
 
 pytestmark = pytest.mark.git
 
-T9 = TicketId("tkt-9")
+T9 = TicketId("tkt-0009")
 T9_FILE = wire.ticket_path(T9)
-TA = TicketId("tkt-a")
+TA = TicketId("tkt-000a")
 
 
 def forged(ticket_id: TicketId, **fields: Any) -> dict[str, Any]:

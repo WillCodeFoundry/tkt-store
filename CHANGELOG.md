@@ -31,12 +31,13 @@
 - README: agents use only `tkt`, never git, on the store; the risks of path remotes
   (code execution in other agents) and `git daemon` (no authentication).
 - 0.2.0 stage 1 (ADR 0005): writes are refused (`INVALID`) unless every value follows
-  the field rules (`domain/fields.py`, `docs/format.md`): `--as` like a GitHub username,
-  tags like GitHub topics (at most 20), `project` as `[owner/]repo`, PRECIS-style title,
-  body and reason (NFC; no control, invisible or unassigned characters; no leading or
-  trailing whitespace) with limits of 256, 65,536 and 256 characters, priority 0 to
-  100, at most 20 blockers and 20 tags without duplicates, and no ticket file over
-  256 KiB. A lease ending more than `MAX_TTL` +
+  the field rules (`domain/fields.py`, `docs/format.md`): ticket ids of 8 to 32
+  lowercase letters, digits and single hyphens (`tkt-` no longer required), `--as` like
+  a GitHub username, tags like GitHub topics (at most 20), `project` as `[owner/]repo`;
+  title, body and reason without controls or invisible characters (fixed ranges, never
+  normalised; title and reason one line without outer whitespace) and at most 256,
+  65,536 and 256 characters; priority 0 to 100; at most 20 blockers and 20 tags without
+  duplicates; no ticket file over 256 KiB. A lease ending more than `MAX_TTL` +
   `SKEW_GRACE` after now reads expired and may be taken over or reaped. git always gets
   `--` before the remote name.
 

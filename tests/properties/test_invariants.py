@@ -31,11 +31,11 @@ B = AgentId("reviewer-2")
 
 pytestmark = pytest.mark.slow
 
-TICKETS = [TicketId(f"tkt-{c}") for c in "abc"]
+TICKETS = [TicketId(f"tkt-000{c}") for c in "abc"]
 CLAIM_IDS = [ClaimId(f"{n:032x}") for n in range(1, 7)]
 HOLDER_OPS = {OpName.RENEW, OpName.MOVE, OpName.RELEASE, OpName.DONE}
 CLAIM_OPS = {OpName.CLAIM, OpName.CLAIM_NEXT}
-BLOCKED, BLOCKERS = TICKETS[2], (TICKETS[0],)  # tkt-c waits for tkt-a
+BLOCKED, BLOCKERS = TICKETS[2], (TICKETS[0],)  # tkt-000c waits for tkt-000a
 
 ticket = st.sampled_from(TICKETS)
 agent = st.sampled_from([A, B])

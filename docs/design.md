@@ -283,8 +283,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 - **Blockers:** writes still refuse unknown or self blockers; on reading, a blocker that
   is missing or set aside counts as not done.
 - **Field rules** (`domain/fields.py`, `docs/format.md`): every value an op writes is
-  checked by `validate_op` (`INVALID`): identifiers like GitHub names, PRECIS-style free
-  text, size limits, priority 0 to 100, at most 20 blockers and tags without
+  checked by `validate_op` (`INVALID`): ids and identifiers like GitHub names, free text
+  without controls or invisible characters (fixed ranges, no normalisation), size limits, priority 0 to 100, at most 20 blockers and tags without
   duplicates; and `decide` refuses an Apply whose ticket file would exceed 256 KiB.
 - **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
   takeable (and reads expired); honest leases never are, since the cap is relative to
@@ -318,7 +318,7 @@ cache. From 0.2.0 each clone also caches resolved and invalid tickets by blob id
 file in its git directory, so a snapshot reads and checks only the other files
 (ADR 0006).
 
-Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
+Only `tkt-store.json` and `tickets/<id>.json` files are read; any other path is
 preserved and ignored.
 The store's format version lives in `tkt-store.json` at the tree root and is checked on
 every snapshot. The push states its
@@ -393,7 +393,7 @@ agent has its own git identity, which does not change while it runs.
 | Threat | Defence |
 |---|---|
 | Code execution in other agents | No shell anywhere (argument lists only); git always gets the remote name after `--`; no checkout. Deployment: never a path remote shared across agents that do not fully trust each other (README) |
-| Prompt injection through stored text | Strict field rules (identifier allowlists, a PRECIS-style rule for free text, size limits; lengths in code points after NFC); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
+| Prompt injection through stored text | Strict field rules (identifier allowlists; free text without controls or invisible characters, fixed ranges that never change with the Unicode version; size limits in code points); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
 | Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached as invalid, ADR 0006), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
 | Acting as another agent's holder | Tickets and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
 | Locking a ticket forever | A lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable |

@@ -9,15 +9,19 @@ import pytest
 
 from tkt_store.domain import fields
 
-ACCEPTED_TEXT = [
-    "Fix tests",
-    "Caf\u00e9 \u65e5\u672c \u2713",
-    "a" * fields.TITLE_MAX,
-    "quotes ' \" and $(not a shell)",
-]
+ACCEPTED_TEXT = {
+    "plain": "Fix tests",
+    "non-Latin": "Caf\u00e9 \u65e5\u672c \u2713",
+    "at the limit": "a" * fields.TITLE_MAX,
+    "shell characters": "quotes ' \" and $(not a shell)",
+    "decomposed (never normalised)": "Cafe\u0301",
+    "emoji with variation selector": "ship it \u2705\ufe0f \U0001f680",
+    "no-break space inside": "a\u00a0b",
+    "unassigned today (allowed: the rule never depends on Unicode data)": "x \U0002fffd y",
+}
 
 
-@pytest.mark.parametrize("title", ACCEPTED_TEXT)
+@pytest.mark.parametrize("title", ACCEPTED_TEXT.values(), ids=ACCEPTED_TEXT)
 def test_titles_accepted(title: str) -> None:
     assert fields.title_problem(title) is None
 
@@ -29,9 +33,12 @@ TITLES_REFUSED = {
     "too long": "a" * (fields.TITLE_MAX + 1),
     "newline": "two\nlines",
     "tab": "tab\there",
-    "NFD (e + combining acute)": "Cafe\u0301",
     "private use": "private \ue000 use",
-    "unassigned": "unassigned \U000e0080",
+    "private use plane 16": "private \U00100000 use",
+    "noncharacter": "non \ufdd0 char",
+    "plane noncharacter": "non \U0001fffe char",
+    "soft hyphen": "in\u00advisible",
+    "variation selector supplement": "a\U000e0101b",
 }
 
 
@@ -40,17 +47,19 @@ def test_titles_refused(title: str) -> None:
     assert fields.title_problem(title) is not None
 
 
-def test_body_may_be_empty_and_hold_newlines_and_tabs() -> None:
+def test_body_may_be_empty_and_hold_newlines_tabs_and_outer_whitespace() -> None:
     assert fields.body_problem("") is None
     assert fields.body_problem("Steps:\n\t1. run\n\t2. check") is None
+    assert fields.body_problem("    indented code\nends with a newline\n") is None
     assert fields.body_problem("b" * fields.BODY_MAX) is None
 
 
 BODIES_REFUSED = {
     "too long": "b" * (fields.BODY_MAX + 1),
-    "trailing newline": "ends with a newline\n",
     "line separator": "a\u2028b",
     "carriage return": "cr\rlf",
+    "other C0 control": "bell\u0007",
+    "zero-width joiner": "a\u200db",
 }
 
 
@@ -117,18 +126,40 @@ def test_priority_range() -> None:
 
 
 def test_blockers() -> None:
-    blockers = tuple(f"tkt-{n:x}" for n in range(fields.BLOCKERS_MAX + 1))
+    blockers = tuple(f"tkt-{n:04x}" for n in range(fields.BLOCKERS_MAX + 1))
     assert fields.blockers_problem(blockers[:-1]) is None
     assert fields.blockers_problem(blockers) is not None
-    assert fields.blockers_problem(("tkt-1", "tkt-1")) is not None
-    assert fields.blockers_problem(("tkt-1", "tkt-x")) == (
-        "blocker 2 must be tkt- followed by lowercase hex"
-    )
+    assert fields.blockers_problem(("tkt-0001", "tkt-0001")) is not None
+    assert fields.blockers_problem(("tkt-0001", "tkt-x")) == "blocker 2 is not a ticket id"
 
 
-def test_ids() -> None:
-    assert fields.ticket_id_problem("tkt-7f3a91c2") is None
-    assert fields.ticket_id_problem("tkt-1\n") is not None
+@pytest.mark.parametrize(
+    "ticket_id", ["tkt-7f3a91c2", "tkt-1234", "fix-login-redirect", "0" * 32, "a1b2c3d4"]
+)
+def test_ticket_ids_accepted(ticket_id: str) -> None:
+    assert fields.ticket_id_problem(ticket_id) is None
+
+
+TICKET_IDS_REFUSED = {
+    "7 characters": "abc1234",
+    "33 characters": "a" * 33,
+    "uppercase": "TKT-1234",
+    "leading hyphen": "-tkt1234",
+    "trailing hyphen": "tkt-1234-",
+    "double hyphen": "tkt--1234",
+    "underscore": "tkt_1234",
+    "dot": "tkt.1234",
+    "slash": "tkt/1234",
+    "trailing newline": "tkt-1234\n",
+}
+
+
+@pytest.mark.parametrize("ticket_id", TICKET_IDS_REFUSED.values(), ids=TICKET_IDS_REFUSED)
+def test_ticket_ids_refused(ticket_id: str) -> None:
+    assert fields.ticket_id_problem(ticket_id) is not None
+
+
+def test_claim_ids() -> None:
     assert fields.claim_id_problem("c" * 32) is None
     assert fields.claim_id_problem("C" * 32) is not None
 

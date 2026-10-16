@@ -18,11 +18,11 @@ from tkt_store.infrastructure.git import wire
 
 TTL = 1800
 A = AgentId("coder-7")
-T1 = TicketId("tkt-1")
+T1 = TicketId("tkt-0001")
 
 pytestmark = pytest.mark.git
 
-T9 = TicketId("tkt-9")
+T9 = TicketId("tkt-0009")
 T9_FILE = wire.ticket_path(T9)
 
 
@@ -105,8 +105,8 @@ def test_hidden_characters_never_reach_log_output_raw(
     honest_clone: Path, bare_remote: Path, capsys: pytest.CaptureFixture[str], trailer: str
 ) -> None:
     message = (
-        "cancel tkt-1: x\n\ntkt-protocol: 1\ntkt-op: cancel\ntkt-time: 1\n"
-        f"tkt-id: tkt-1\n{trailer}: {ONE_LINE_PAYLOAD}\n"
+        "cancel tkt-0001: x\n\ntkt-protocol: 1\ntkt-op: cancel\ntkt-time: 1\n"
+        f"tkt-id: tkt-0001\n{trailer}: {ONE_LINE_PAYLOAD}\n"
     )
     write_files(bare_remote, {"NOTES.txt": b"x"}, message=message)
     _code, out = run(honest_clone, capsys, "log")

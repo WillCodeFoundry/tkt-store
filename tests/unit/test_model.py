@@ -33,8 +33,8 @@ A = AgentId("coder-7")
 B = AgentId("reviewer-2")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 LAPSED = NOW - 1  # a lease_until in the past, still within the grace
 
 
@@ -135,7 +135,7 @@ def test_claim_age_is_since_claimed_at() -> None:
 
 
 def test_unknown_dependency_counts_as_not_done() -> None:
-    ticket = tkt(blocked_by=(TicketId("tkt-99"),))
+    ticket = tkt(blocked_by=(TicketId("tkt-0099"),))
     assert derive_status(snap(ticket), ticket, NOW) is Status.BLOCKED
 
 
@@ -154,10 +154,10 @@ def test_done_blocker_unblocks() -> None:
 def test_sort_key_puts_none_priority_last() -> None:
     ordered = sorted(
         [
-            tkt(TicketId("tkt-a"), priority=None),
-            tkt(TicketId("tkt-b"), priority=5),
-            tkt(TicketId("tkt-c"), priority=-1),
+            tkt(TicketId("tkt-000a"), priority=None),
+            tkt(TicketId("tkt-000b"), priority=5),
+            tkt(TicketId("tkt-000c"), priority=-1),
         ],
         key=sort_key_for_next,
     )
-    assert [t.id for t in ordered] == ["tkt-c", "tkt-b", "tkt-a"]
+    assert [t.id for t in ordered] == ["tkt-000c", "tkt-000b", "tkt-000a"]

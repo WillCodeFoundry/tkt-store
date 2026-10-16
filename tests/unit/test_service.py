@@ -23,8 +23,8 @@ NOW = 1_000_000
 TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
-T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
+T1 = TicketId("tkt-0001")
+T2 = TicketId("tkt-0002")
 
 
 class ScriptedIds(SequentialIds):
@@ -87,10 +87,10 @@ def test_add_with_supplied_id_never_retries(memstore: MemStore) -> None:
 
 
 def test_failures_carry_the_last_ids_tried(memstore: MemStore) -> None:
-    service = service_on(CountingStore(memstore, conflict=True), ScriptedIds("tkt-aa"))
+    service = service_on(CountingStore(memstore, conflict=True), ScriptedIds("tkt-00aa"))
     with pytest.raises(RetriesExhausted) as exc:
         service.add("New")
-    assert isinstance(exc.value.op, AddOp) and exc.value.op.ticket_id == "tkt-aa"
+    assert isinstance(exc.value.op, AddOp) and exc.value.op.ticket_id == "tkt-00aa"
     with pytest.raises(RetriesExhausted) as exc:
         service.claim(T1, A, TTL)
     assert isinstance(exc.value.op, ClaimOp) and len(exc.value.op.claim_id) == 32

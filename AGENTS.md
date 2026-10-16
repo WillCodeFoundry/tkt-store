@@ -18,8 +18,8 @@ Dependencies point **inward only**: `domain` ← `application` ← `infrastructu
 - `infrastructure/*` implements the ports. Only modules under `infrastructure/git/`
   run `git`; only `infrastructure/clock.py` reads time; only `infrastructure/ids.py`
   creates random values.
-- `cli` imports `application` (and `domain` types) + the `open_store` composition root
-  (`__init__`); never `infrastructure`.
+- `cli` imports `application` (and `domain` types) + the composition root (`__init__`:
+  `open_store`, `new_id_source`); never `infrastructure`.
 - The transaction loop depends on the `Store` port, never on a concrete store.
 - Choosing concrete implementations happens in exactly one place: `tkt_store.open_store`
   (in `__init__`).

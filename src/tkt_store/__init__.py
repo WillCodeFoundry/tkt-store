@@ -36,10 +36,11 @@ from tkt_store.domain.errors import TktError
 from tkt_store.domain.outcomes import Refusal, RefusalCode
 from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import Claim, Kind, Phase, Resolution, Revision, Ticket
-from tkt_store.infrastructure.clock import FakeClock, SystemClock
+from tkt_store.infrastructure.backoff import JitteredBackoff
+from tkt_store.infrastructure.clock import FakeClock, SystemClock, monotonic, sleep
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
-from tkt_store.infrastructure.ids import RandomIds, SequentialIds
+from tkt_store.infrastructure.ids import RandomIds, SequentialIds, jitter
 from tkt_store.infrastructure.memory import MemStore
 
 
@@ -52,7 +53,7 @@ def open_store(
     ids: IdSource | None = None,
 ) -> TicketStore:
     """Open a ticket store with the production wiring: a GitStore at `repo`, the
-    system clock, and random ids.
+    system clock, random ids, and jittered exponential backoff between lost races.
 
     `remote` defaults to "origin" (the CLI has no default: it requires --remote or
     --no-remote); pass None to choose a local-only
@@ -61,7 +62,8 @@ def open_store(
     composition root — the one place that names concrete adapters.
     """
     store = GitStore.at(repo, ref=ref, remote=remote)
-    return TicketStore(store, clock or SystemClock(), ids or RandomIds())
+    backoff = JitteredBackoff(sleep=sleep, jitter=jitter, monotonic=monotonic)
+    return TicketStore(store, clock or SystemClock(), ids or RandomIds(), backoff=backoff)
 
 
 def new_id_source() -> IdSource:

@@ -7,26 +7,95 @@ directly. One process per clone is assumed (design.md §7).
 
 from __future__ import annotations
 
+import re
+
+from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.domain.ticket import Revision
-from tkt_store.infrastructure.git.runner import GitRunner
+from tkt_store.infrastructure.git.runner import GitError, GitRunner
+
+NO_SUCH_REF = 2
+"""`git ls-remote --exit-code` status when the remote has no matching ref."""
+
+
+def fetched_ref(remote: str, ref: str) -> str:
+    """The private ref a fetch writes the remote head to. Only this module writes it, so
+    it holds exactly what tkt's last fetch brought in. (git may also update the matching
+    remote-tracking branch, e.g. refs/remotes/origin/tkt-store, as on any fetch.)"""
+    return f"refs/tkt-store-remotes/{remote}/{ref.removeprefix('refs/')}"
 
 
 def fetch(git: GitRunner, remote: str, ref: str) -> Revision | None:
     """Fetch `ref` from `remote`; return the remote head (None if the ref does not exist).
-    The returned revision is the snapshot's revision: read it from the fetch result, not
-    from FETCH_HEAD or the local ref."""
-    raise NotImplementedError
+    The returned revision is the snapshot's revision. It is read from the private ref
+    the fetch just wrote, never from FETCH_HEAD or the local ref: only this module writes
+    the private ref, and one process per clone is assumed (design.md §7), so it holds
+    exactly what this fetch brought in."""
+    try:
+        git("fetch", "--no-tags", "--no-write-fetch-head", remote,
+            f"+{ref}:{fetched_ref(remote, ref)}")  # fmt: skip
+    except GitError:
+        if not _remote_lacks(git, remote, ref):
+            raise
+        return None
+    head = local_head(git, fetched_ref(remote, ref))
+    if head is None:
+        raise StoreError(f"git fetch {remote} {ref} succeeded but wrote no head")
+    return head
+
+
+def _remote_lacks(git: GitRunner, remote: str, ref: str) -> bool:
+    """After a failed fetch: True only if the remote is reachable and has no `ref`."""
+    try:
+        git("ls-remote", "--exit-code", remote, ref)
+    except GitError as error:
+        return error.returncode == NO_SUCH_REF
+    return False
+
+
+def local_head(git: GitRunner, ref: str) -> Revision | None:
+    """The commit `ref` points to in this repository, or None if it does not exist."""
+    try:
+        return Revision(
+            git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").decode().strip()
+        )
+    except GitError as error:
+        if error.returncode == 1:
+            return None
+        raise
+
+
+def is_ancestor(git: GitRunner, ancestor: Revision, descendant: Revision) -> bool:
+    try:
+        git("merge-base", "--is-ancestor", ancestor, descendant)
+    except GitError as error:
+        if error.returncode == 1:
+            return False
+        raise
+    return True
 
 
 def fast_forward_local(git: GitRunner, ref: str, remote_head: Revision) -> None:
     """Bring the local ref (a cache of the remote) up to `remote_head`.
 
-    - local equal to, or a descendant of, `remote_head` -> no-op;
-    - local behind (crash between push and local update, or other writers' commits)
-      -> move it with a compare-and-swap `update-ref <ref> <remote_head> <observed-local>`;
-    - diverged -> StoreError.
+    - local equal to `remote_head` -> no-op;
+    - local missing or behind (crash between push and local update, or other writers'
+      commits) -> move it with a compare-and-swap
+      `update-ref <ref> <remote_head> <observed-local>`;
+    - anything else (diverged, or ahead with commits the remote lacks) -> StoreError,
+      before anything is written. A local ref that is ahead can only come from commits
+      made outside tkt; tolerating it would let the next commit publish while its local
+      update silently failed, and the clone would break one op later.
     """
-    raise NotImplementedError
+    local = local_head(git, ref)
+    if local == remote_head:
+        return
+    if local is not None and not is_ancestor(git, local, remote_head):
+        raise StoreError(
+            f"local {ref} ({local}) has commits the remote head ({remote_head}) lacks; "
+            f"the remote is authoritative: reset it with "
+            f"`git update-ref {ref} {remote_head}`"
+        )
+    git("update-ref", ref, remote_head, local or "")
 
 
 def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision | None) -> None:
@@ -35,4 +104,34 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     it lands only if the remote ref is still `base`. Never a plain force-push.
     A rejected lease or non-fast-forward raises Conflict (nothing published). Any other
     failure is a StoreError, which may hide a push that landed."""
-    raise NotImplementedError
+    try:
+        git(
+            "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
+            remote, f"{new}:{ref}",
+        )  # fmt: skip
+    except GitError as error:
+        status = [line for line in error.stdout.decode().splitlines() if line.startswith("!")]
+        if any(_lost_race(line) for line in status):
+            raise Conflict(base, None) from error
+        if status:  # declined for another reason: say why (git's status, the remote's words)
+            reasons = "; ".join(line.split("\t")[-1] for line in status)
+            raise StoreError(f"push to {remote} {reasons}: {error.stderr.strip()}") from error
+        raise
+
+
+LOST_RACE = re.compile(
+    r"\t\[rejected\]"  # the client-side lease check: "[rejected] (stale info)"
+    r"|\(incorrect old value provided\)"  # git's receive-pack (e.g. a bare remote)
+    r"|\(cannot lock ref '[^']*': is at [0-9a-f]+ but expected [0-9a-f]+\)"  # GitHub
+)
+"""Porcelain push status that proves nothing was published because the ref moved:
+the client-side lease check ("!\t<src>:<dst>\t[rejected] (stale info)"), or the remote's
+own compare-and-swap losing a concurrent update. That last one is worded by the server:
+"[remote rejected] (incorrect old value provided)" from git itself, "[remote rejected]
+(cannot lock ref '<ref>': is at <oid> but expected <oid>)" from GitHub (observed in the
+ADR 0001 benchmark). Any other "[remote rejected]" (a hook, branch protection, a lock
+that could not be taken) stays a StoreError: re-running the op converges."""
+
+
+def _lost_race(line: str) -> bool:
+    return LOST_RACE.search(line) is not None

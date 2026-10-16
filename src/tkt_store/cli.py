@@ -9,15 +9,21 @@ prints a bare value; usage errors are argparse's plain text (exit 2). It holds n
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
 from collections.abc import Callable, Sequence
-from enum import IntEnum
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any
 
 from tkt_store import new_id_source, open_store
-from tkt_store.application.service import TicketStore
+from tkt_store.application.errors import RetriesExhausted
+from tkt_store.application.service import TicketStore, TicketView
+from tkt_store.application.store import HistoryEntry
+from tkt_store.application.transaction import Committed, Outcome, Refused, Unchanged
 from tkt_store.domain.errors import TktError
-from tkt_store.domain.operations import UNSET
+from tkt_store.domain.operations import UNSET, Op
+from tkt_store.domain.outcomes import Refusal, RefusalCode
 from tkt_store.domain.status import Status
 from tkt_store.domain.ticket import AgentId, ClaimId, Kind, Phase, ProjectId, TicketId
 
@@ -30,7 +36,8 @@ class ExitCode(IntEnum):
     STORE_ERROR = 4
 
 
-Run = Callable[[TicketStore, argparse.Namespace], object]
+Run = Callable[[TicketStore, argparse.Namespace], Any]
+Render = Callable[[Any], "tuple[Any, ExitCode]"]
 
 
 def _unset_if_none(value: Any) -> Any:
@@ -43,6 +50,14 @@ def _list_change(values: Sequence[str] | None, clear: bool) -> Any:
     if clear:
         return ()
     return UNSET if values is None else tuple(values)
+
+
+def _count(text: str) -> int:
+    """argparse type for --limit: an integer >= 0 (a usage error otherwise)."""
+    value = int(text)
+    if value < 0:
+        raise ValueError(text)
+    return value
 
 
 def _ids(values: Sequence[str] | None) -> tuple[TicketId, ...]:
@@ -70,9 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
     remote.add_argument("--no-remote", action="store_true", help="local-only store")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    def command(name: str, help: str, run: Run) -> argparse.ArgumentParser:
+    def command(
+        name: str, help: str, run: Run, render: Render | None = None
+    ) -> argparse.ArgumentParser:
+        """`render` turns what `run` returns into (JSON value, exit code); by default
+        the run returns an Outcome."""
         cmd = sub.add_parser(name, help=help, parents=[store_options])
-        cmd.set_defaults(run=run)
+        cmd.set_defaults(run=run, render=render or render_outcome)
         return cmd
 
     # --- local
@@ -241,6 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
             agent=None if a.agent is None else AgentId(a.agent),
             kind=a.kind,
         ),
+        render_views,
     )
     c.add_argument("--status", type=Status, choices=list(Status))
     c.add_argument("--phase", type=Phase, choices=list(Phase))
@@ -251,7 +271,8 @@ def build_parser() -> argparse.ArgumentParser:
     c = command(
         "show",
         "one ticket with its derived status",
-        lambda s, a: s.view(TicketId(a.ticket_id)),
+        lambda s, a: _found(s.view(TicketId(a.ticket_id)), a.ticket_id),
+        render_show,
     )
     ticket_id(c)
 
@@ -259,49 +280,131 @@ def build_parser() -> argparse.ArgumentParser:
         "log",
         "history from commit trailers",
         lambda s, a: s.log(None if a.ticket_id is None else TicketId(a.ticket_id), limit=a.limit),
+        render_log,
     )
     c.add_argument("ticket_id", metavar="ID", nargs="?")
-    c.add_argument("--limit", type=int)
+    c.add_argument("--limit", type=_count)
 
     return parser
 
 
-def emit(result: object) -> int:
-    """Print `result` as one JSON value on stdout and return its exit code.
+def _found(view: TicketView | None, ticket_id: str) -> TicketView | Refused:
+    """`show` of an unknown id is a refusal (NOT_FOUND), printed and exited like one."""
+    if view is None:
+        return Refused(Refusal(RefusalCode.NOT_FOUND, f"no ticket {ticket_id}"))
+    return view
 
-    Outcomes: Committed -> {"outcome": "committed", "revision", "tickets"} (0);
+
+def _value(value: Any) -> Any:
+    """Enums as their value, tuples as lists; everything else is already JSON."""
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, tuple):
+        return [_value(v) for v in value]
+    return value
+
+
+def op_json(op: Op) -> dict[str, Any]:
+    """{"op": name, <field>: value, ...}; edit fields left UNSET are omitted."""
+    fields = {f.name: getattr(op, f.name) for f in dataclasses.fields(op)}
+    return {"op": op.name.value} | {
+        name: _value(value) for name, value in fields.items() if value is not UNSET
+    }
+
+
+def view_json(view: TicketView) -> dict[str, Any]:
+    return {"ticket": view.ticket.to_dict(), "status": view.status.value}
+
+
+def entry_json(entry: HistoryEntry) -> dict[str, Any]:
+    record = entry.record
+    return {
+        "revision": entry.revision,
+        "at": record.at,
+        "op": record.op.value,
+        "ticket_ids": list(record.ticket_ids),
+        "agent": record.agent,
+        "claim_id": record.claim_id,
+        "phase": _value(record.phase),
+        "reason": record.reason,
+    }
+
+
+def render_outcome(outcome: Outcome) -> tuple[Any, ExitCode]:
+    """Committed -> {"outcome": "committed", "revision", "tickets"} (0);
     Unchanged -> {"outcome": "unchanged", "reason", "tickets"} (0);
     Refused -> {"outcome": "refused", "code", "message"} (1).
-    Reads: show -> {"ticket", "status"} (a TicketView), or a refused NOT_FOUND object (1)
-    when the ticket does not exist; list -> a JSON array of {"ticket", "status"}; log ->
-    a JSON array of history entries. Results are complete before anything is printed,
-    so output is never partial: a failure prints only the error object.
-    Tickets are rendered as their on-branch JSON (docs/format.md).
-    """
-    raise NotImplementedError
+    Tickets are rendered as their on-branch JSON (docs/format.md)."""
+    match outcome:
+        case Committed(revision=revision, tickets=tickets):
+            committed = {"outcome": "committed", "revision": revision}
+            return committed | {"tickets": [t.to_dict() for t in tickets]}, ExitCode.OK
+        case Unchanged(reason=reason, tickets=tickets):
+            unchanged = {"outcome": "unchanged", "reason": reason}
+            return unchanged | {"tickets": [t.to_dict() for t in tickets]}, ExitCode.OK
+        case Refused(refusal=refusal):
+            refused = {"outcome": "refused", "code": refusal.code.value}
+            return refused | {"message": refusal.message}, ExitCode.REFUSED
+
+
+def render_show(found: TicketView | Refused) -> tuple[Any, ExitCode]:
+    """{"ticket", "status"}, or a refused NOT_FOUND object (1) for an unknown id."""
+    if isinstance(found, Refused):
+        return render_outcome(found)
+    return view_json(found), ExitCode.OK
+
+
+def render_views(views: Sequence[TicketView]) -> tuple[Any, ExitCode]:
+    """`list`: a JSON array of {"ticket", "status"}."""
+    return [view_json(v) for v in views], ExitCode.OK
+
+
+def render_log(entries: Sequence[HistoryEntry]) -> tuple[Any, ExitCode]:
+    """`log`: a JSON array of history entries."""
+    return [entry_json(e) for e in entries], ExitCode.OK
+
+
+def _print(value: Any) -> None:
+    print(json.dumps(value, ensure_ascii=False))
+
+
+def emit(result: Any, render: Render = render_outcome) -> int:
+    """Print `result` as one JSON value on stdout (via the command's `render`) and
+    return its exit code. Results are complete before anything is printed, so output
+    is never partial: a failure prints only the error object."""
+    value, code = render(result)
+    _print(value)
+    return code
 
 
 def emit_error(error: TktError) -> int:
     """Print {"outcome": "error", "exit", "message", "op"} and return the exit code:
     RetriesExhausted -> 3, any other failure (StoreError, ...) -> 4. `op` is the op with
     the ids it was last tried with, when the error carries one."""
-    raise NotImplementedError
+    code = (
+        ExitCode.RETRIES_EXHAUSTED if isinstance(error, RetriesExhausted) else ExitCode.STORE_ERROR
+    )
+    op = getattr(error, "op", None)
+    _print(
+        {
+            "outcome": "error",
+            "exit": int(code),
+            "message": str(error),
+            "op": None if op is None else op_json(op),
+        }
+    )
+    return code
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)  # usage errors: plain text on stderr, exit 2
     if hasattr(args, "local"):
-        try:
-            print(args.local(args))
-        except NotImplementedError:
-            parser.exit(ExitCode.STORE_ERROR, "tkt: not implemented yet (skeleton)\n")
+        print(args.local(args))
         return ExitCode.OK
+    store = open_store(Path(args.repo), remote=None if args.no_remote else args.remote)
     try:
-        store = open_store(Path(args.repo), remote=None if args.no_remote else args.remote)
-        try:
-            return emit(args.run(store, args))
-        except TktError as error:
-            return emit_error(error)
-    except NotImplementedError:
-        parser.exit(ExitCode.STORE_ERROR, "tkt: not implemented yet (skeleton)\n")
+        result = args.run(store, args)  # complete before anything is printed
+    except TktError as error:
+        return emit_error(error)
+    return emit(result, args.render)

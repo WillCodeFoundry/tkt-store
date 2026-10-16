@@ -81,14 +81,16 @@ infrastructure/  git/{runner · wire · remote · repo} · memory · clock · id
                    concrete adapters that implement the ports
 
 cli              the `tkt` command (an interface adapter)
-__init__         the composition root: `open_store()` wires infrastructure into application
+__init__         the composition root: `open_store()` wires infrastructure into application;
+                 `new_id_source()` gives callers that mint ids themselves (`tkt mint`) the
+                 production id source
 ```
 
 Dependency directions:
 
 ```text
 cli ──► application ──► domain
-cli ──► __init__ (open_store)
+cli ──► __init__ (open_store, new_id_source)
 infrastructure ──► application ──► domain
 __init__ ──► application + infrastructure     (the only cross-layer wiring)
 ```
@@ -104,30 +106,47 @@ imports and names imported from the package root):
 
 1. **Inward-only.** `domain` imports `domain`; `application` imports
    `domain`+`application`; `infrastructure` imports `domain`+`application`+itself;
-   `cli` imports `application` (and `domain` types) + the `open_store` composition
-   root (`__init__`); never `infrastructure`. Only the composition root
+   `cli` imports `application` (and `domain` types) + the composition root
+   (`__init__`: `open_store`, `new_id_source`); never `infrastructure`. The CLI prints
+   tickets with `Ticket.to_dict()`, the same plain data the git store serialises. Only the composition root
    (`__init__`, `__main__`) may import across every layer.
 2. **Pure domain.** No `domain` module touches IO, git, time or randomness.
 3. **One door to git.** Only modules under `infrastructure/git/` invoke `git`/subprocess.
 4. **Time and randomness are injected.** Only `infrastructure/clock.py` reads the
-   system clock; only `infrastructure/ids.py` creates random values.
+   system clock (and sleeps); only `infrastructure/ids.py` creates random values
+   (ids, and backoff jitter).
 
 The transaction loop depends on the `Store` port, never on a concrete store, so
 it is agnostic to git vs in-memory by construction.
 
 ## 4. The transaction
 
-Every mutation goes through `application.transaction.transact(store, op, clock)`:
+Every mutation goes through `application.transaction.transact(store, op, clock, *, backoff)`:
 
 ```text
+0. wait_after_loss = backoff.begin()        # an attempt starts (it is timed)
 1. snap  = store.snapshot()                 # revision + tickets
 2. dec   = rules.decide(snap, op, now)      # pure; dec.record.at = now
 3. if dec is Refusal → return Refused       # nothing written
    if dec is NoOp    → return Unchanged     # idempotent repeat
 4. try store.commit(snap.revision, dec.changes, dec.record)
        → return Committed(revision, record, tickets)
-   except Conflict → goto 1 (bounded attempts), rules re-run on fresh state
+   except Conflict → wait_after_loss(attempt), goto 0 (bounded attempts), rules
+                     re-run on fresh state
 ```
+
+**Backoff.** Between lost races the loop waits through the `Backoff` port: the
+production `JitteredBackoff` (`infrastructure/backoff.py`, wired by `open_store`) waits a
+uniform random time ("full jitter") from a window counted in *slots*, where a slot is
+how long the attempt that lost took: 1, 2, 4, … slots, capped at 60 s. Attempts take
+seconds against GitHub and milliseconds against a local ref, so the same policy fits
+both without tuning, and contending writers spread out instead of colliding again.
+The cap bounds the total: at most 9 waits of 60 s (9 minutes) plus the 10 attempts
+themselves, however slow; with ~3.5 s attempts, about 6 minutes at worst and 3 on
+average. That fits the 10 minutes (plus the 60 s grace) a renewal at two-thirds of a
+30-minute lease leaves, so the cap should not exceed 60 s. The backoff keeps no state
+between attempts. Without a backoff the loop retries at once (tests). Measured effect:
+ADR 0001.
 
 The **expected old value** in step 4 is the base the decision was computed from,
 never a fresh read (lesson from balls' bl-cdec G1).
@@ -244,11 +263,11 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 
 | Failure | Outcome | Recovery |
 |---|---|---|
-| Lost race (ref moved) | `Conflict` inside the transaction loop → retry with fresh snapshot | Automatic, bounded (10 attempts) |
+| Lost race (ref moved) | `Conflict` inside the transaction loop → jittered backoff, retry with fresh snapshot | Automatic, bounded (10 attempts) |
 | Retries exhausted | `RetriesExhausted(op)` | Caller re-runs `op` with the same ids (idempotent) |
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |
-| Remote moved since the snapshot | Push rejected as non-fast-forward → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
+| Remote moved since the snapshot | Push rejected: the lease is stale (`[rejected]`), or the remote's own compare-and-swap lost a concurrent push (`[remote rejected] (incorrect old value provided)`) → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
 | Push landed, local update failed | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
 | Store opened in the other mode (`--no-remote` on a remote-backed store, or vice versa) | `StoreError` on every snapshot; nothing written | Use the mode recorded in `tkt-store.json` |
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |
@@ -257,8 +276,12 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Corrupt ticket file, or format version missing/newer | `StoreError` on every snapshot (no partial views) | Fix the file with an ordinary git commit (deliberately bypassing `tkt`), or upgrade the client |
 
 Remote-backed commit order: build objects on `base` → push `new:ref` with `remote.publish`
-(non-fast-forward ⇒ `Conflict`, nothing published) → `update-ref ref new base` locally,
-best-effort. The remote is authoritative; local refs are a cache. A local-only store has
+(lost lease ⇒ `Conflict`, nothing published; any other rejection, e.g. a hook or branch
+protection, is a `StoreError`) → `update-ref ref new base` locally, best-effort. A snapshot
+fetches the ref into a private ref (`refs/tkt-store-remotes/<remote>/…`) that only this
+code writes, and takes its revision from that ref. It then catches the local ref up by
+compare-and-swap; a local ref with commits the remote lacks (made outside `tkt`) is a
+`StoreError` before anything is written. The remote is authoritative; local refs are a cache. A local-only store has
 no push: there `update-ref ref new base` is the compare-and-swap, and a moved ref is a
 `Conflict`.
 
@@ -300,10 +323,11 @@ acted on only after `SKEW_GRACE`; a TTL should comfortably exceed
 `renew interval + SKEW_GRACE + expected skew`, and may not exceed `MAX_TTL` (2 h).
 Fencing is authoritative.
 
-**Scale.** Designed for about 10 agents working in parallel. With 30-minute leases
-renewed every ~10 minutes, renewals (the bulk of writes) are about 0.02 per second, well
-inside what whole-ref compare-and-swap on a hosted remote is assumed to sustain (ADR
-0001; to be measured in the first milestone).
+**Scale.** Designed for about 10 agents working in parallel on tasks of tens of minutes.
+Every write is a push, and GitHub recommends at most 6 pushes per minute per repository:
+that is the store's budget. With 30-minute leases renewed every ~20 minutes and about 5
+pushes per ticket, 10 agents on 20-minute tasks push about 3 times a minute; many short
+tasks do not fit. Measured throughput, contention and the options beyond: ADR 0001.
 
 **Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
 `ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
@@ -341,9 +365,8 @@ Open questions:
   normalised remote URL (renames)? Out of scope for the store itself.
 - Q3: Should `claim_next` (pick highest-priority claimable) be an op (atomic choice) — current design — or a read + claim?
 - Q4: Lease units: integer seconds since epoch (current) vs ISO timestamps in files.
-- Deferred: jittered backoff between conflict retries (via a future `Clock.sleep` and a
-  randomness port in `infrastructure/ids.py`, never `IdSource`); today retries are
-  bounded at 10 and fetch/push round trips spread writers.
 - Deferred: an administrative release that frees a dead holder's ticket without
   cancelling it, before `MAX_TTL` plus the grace.
 - Deferred: `claim-next` choosing randomly among the top candidates to spread contention.
+  On one ref any two concurrent writes conflict, whichever ticket they touch, so this
+  only pays off with one ref per ticket (ADR 0001).

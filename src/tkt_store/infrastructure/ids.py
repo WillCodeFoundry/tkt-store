@@ -1,4 +1,5 @@
-"""Concrete id sources. The ONLY module allowed to create random values.
+"""Concrete id sources, and backoff jitter. The ONLY module allowed to create random
+values.
 
 Both satisfy the `application.ids.IdSource` port structurally. Ids are minted by
 the caller BEFORE a transaction (invariant 7), so retries reuse them.
@@ -6,7 +7,9 @@ the caller BEFORE a transaction (invariant 7), so retries reuse them.
 
 from __future__ import annotations
 
-from tkt_store.domain.ticket import TICKET_PREFIX, ClaimId, TicketId  # noqa: F401  (ticket ids)
+import secrets
+
+from tkt_store.domain.ticket import TICKET_PREFIX, ClaimId, TicketId
 
 
 class RandomIds:
@@ -15,11 +18,16 @@ class RandomIds:
     re-mints a fresh id."""
 
     def ticket_id(self) -> TicketId:
-        raise NotImplementedError
+        return TicketId(TICKET_PREFIX + secrets.token_hex(4))
 
     def claim_id(self) -> ClaimId:
         """128 bits, hex."""
-        raise NotImplementedError
+        return ClaimId(secrets.token_hex(16))
+
+
+def jitter() -> float:
+    """A uniform random fraction in [0, 1), for backoff (not an id, but random)."""
+    return secrets.randbits(53) / (1 << 53)
 
 
 class SequentialIds:
@@ -30,7 +38,9 @@ class SequentialIds:
         self._n = 0
 
     def ticket_id(self) -> TicketId:
-        raise NotImplementedError
+        self._n += 1
+        return TicketId(f"{TICKET_PREFIX}{self._n:04x}")
 
     def claim_id(self) -> ClaimId:
-        raise NotImplementedError
+        self._n += 1
+        return ClaimId(f"{self._n:032x}")

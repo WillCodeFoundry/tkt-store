@@ -7,9 +7,23 @@ production runner shells out with `git -C <repo> ...`.
 
 from __future__ import annotations
 
-import subprocess  # noqa: F401  (used by the production runner, below)
+import os
+import subprocess
 from pathlib import Path
 from typing import Protocol
+
+from tkt_store.application.errors import StoreError
+
+
+class GitError(StoreError):
+    """A git command exited non-zero. Carries what callers need to recognise a known
+    failure (e.g. `ls-remote --exit-code` 2 = no such ref, a rejected push)."""
+
+    def __init__(self, args: tuple[str, ...], returncode: int, stdout: bytes, stderr: str) -> None:
+        super().__init__(f"git {' '.join(args)} failed ({returncode}): {stderr.strip()}")
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 class GitRunner(Protocol):
@@ -17,12 +31,32 @@ class GitRunner(Protocol):
 
     Bytes, not text: `git cat-file --batch` reports object sizes in bytes, so decoding
     first would misparse any non-ASCII content. Callers decode what they know is text.
-    Raises StoreError on a non-zero exit, except where a caller handles a known code.
+    Raises GitError (a StoreError) on a non-zero exit; callers handle known codes.
     """
 
     def __call__(self, *args: str, stdin: bytes | None = None) -> bytes: ...
 
 
 def git_runner(repo: Path) -> GitRunner:
-    """The production GitRunner: `git -C <repo> ...`, raising StoreError on a non-zero exit."""
-    raise NotImplementedError
+    """The production GitRunner: `git -C <repo> ...`, never prompting for credentials,
+    raising GitError on a non-zero exit and StoreError if git is not installed.
+    Output is untranslated (LC_ALL=C) so callers can recognise known failures."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
+
+    def run(*args: str, stdin: bytes | None = None) -> bytes:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                input=stdin,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+        except FileNotFoundError as error:
+            raise StoreError("the git binary is not installed") from error
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            raise GitError(args, result.returncode, result.stdout, stderr)
+        return result.stdout
+
+    return run

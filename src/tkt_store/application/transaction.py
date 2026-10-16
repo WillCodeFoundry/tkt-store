@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from tkt_store.application.backoff import Backoff
 from tkt_store.application.clock import Clock
+from tkt_store.application.errors import Conflict, RetriesExhausted, StoreError
 from tkt_store.application.store import Store
 from tkt_store.domain.operations import Op
-from tkt_store.domain.outcomes import OpRecord, Refusal
+from tkt_store.domain.outcomes import NoOp, OpRecord, Refusal
+from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import Revision, Ticket
 
 DEFAULT_MAX_ATTEMPTS = 10
@@ -53,6 +56,7 @@ def transact(
     clock: Clock,
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    backoff: Backoff | None = None,
 ) -> Outcome:
     """Snapshot -> decide -> commit against the snapshot's revision; on Conflict, start over.
 
@@ -61,8 +65,33 @@ def transact(
     - Refusal and NoOp return immediately; nothing is written. A NoOp's
       `ticket_ids` are resolved against the snapshot into `Unchanged.tickets`.
     - Committed.tickets are the tickets written by the Apply.
+    - Each attempt starts with `backoff.begin()`; after a Conflict, the wait it returned
+      is called with the attempt number before the next attempt (never after the last;
+      no backoff means retry at once).
     - After `max_attempts` conflicts, raise RetriesExhausted(op).
     - A StoreError from the store is re-raised as StoreError(message, op=op) from the
       original, so the caller has the ids to re-run with.
     """
-    raise NotImplementedError
+    for attempt in range(1, max_attempts + 1):
+        wait_after_loss = None if backoff is None else backoff.begin()
+        try:
+            snapshot = store.snapshot()
+        except StoreError as error:
+            raise StoreError(str(error), op=op) from error
+        decision = decide(snapshot, op, clock.now())
+        if isinstance(decision, Refusal):
+            return Refused(decision)
+        if isinstance(decision, NoOp):
+            tickets = tuple(t for i in decision.ticket_ids if (t := snapshot.get(i)) is not None)
+            return Unchanged(decision.reason, tickets)
+        try:
+            revision = store.commit(snapshot.revision, decision.changes, decision.record)
+        except Conflict:
+            if wait_after_loss is not None and attempt < max_attempts:
+                wait_after_loss(attempt)
+            continue
+        except StoreError as error:
+            raise StoreError(str(error), op=op) from error
+        written = tuple(change.ticket for change in decision.changes)
+        return Committed(revision, decision.record, written)
+    raise RetriesExhausted(op)

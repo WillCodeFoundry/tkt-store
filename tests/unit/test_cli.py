@@ -90,6 +90,7 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
         ["move", "tkt-1", "--claim-id", CLAIM_ID, "--to-phase", "done", *STORE],  # not a phase
         ["move", "tkt-1", "--claim-id", CLAIM_ID, *STORE],  # --to-phase is required
         ["mint", "token"],  # not a mintable kind
+        ["log", "--limit", "-1", *STORE],  # a count, >= 0
     ],
 )
 def test_usage_errors_exit_2(argv: list[str]) -> None:

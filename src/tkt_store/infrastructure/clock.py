@@ -15,6 +15,16 @@ class SystemClock:
         return int(time.time())
 
 
+def monotonic() -> float:
+    """Seconds on a clock that never jumps (to time attempts, for backoff)."""
+    return time.monotonic()
+
+
+def sleep(seconds: float) -> None:
+    """Block for `seconds` (the transaction loop's backoff, via JitteredBackoff)."""
+    time.sleep(seconds)
+
+
 class FakeClock:
     """A deterministic clock for tests and simulations."""
 
@@ -25,7 +35,7 @@ class FakeClock:
         return self._now
 
     def advance(self, seconds: int) -> None:
-        raise NotImplementedError
+        self._now += seconds
 
     def set(self, value: Timestamp) -> None:
-        raise NotImplementedError
+        self._now = value

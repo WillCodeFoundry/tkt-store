@@ -80,8 +80,10 @@ flags (`…`) may be given several times.
   single-use and names one claim on one ticket; after its claim ends it is refused
   (`NOT_HOLDER`) for good: every ticket records its full claim history (`ended_claim_ids`).
 - **TTL** is an integer number of seconds, `0 < ttl <= 7200` (2 h); 1800 (30 min) is a
-  sensible default, renewed every ~10 min. It should exceed
-  the renew interval plus the 60 s skew grace plus the expected clock skew.
+  sensible default. Renew at about two-thirds of the lease (every ~20 min for 30 min):
+  every renewal is a push, and the host's push rate is the store's budget (ADR 0001).
+  The TTL must exceed the renew interval plus the 60 s skew grace plus the expected clock
+  skew, with room for a renewal that has to retry.
 - **Expiry.** A claim reads `expired` from its `lease_until`, but can be taken over or
   reaped only 60 s later. A ticket that is both blocked and expired reads `blocked`;
   `reap` still releases its claim. `reap` is idempotent; any writer may run it on a

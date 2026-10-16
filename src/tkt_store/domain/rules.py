@@ -657,9 +657,11 @@ def _claim(
             return Refusal(
                 RefusalCode.ALREADY_CLAIMED, f"this claim on {ticket.id} belongs to {current.agent}"
             )
-        renewed = current.renewed(now + ttl)
-        if current.is_live(now) or renewed == current:
+        if current.is_live(now):
             return NoOp(f"{ticket.id} is already held by this claim", (ticket.id,))
+        renewed = current.renewed(now + ttl)
+        if renewed == current:  # this clock is too far behind the claimer's to extend it
+            return NoOp(f"the lapsed lease on {ticket.id} could not be extended", (ticket.id,))
         return _apply(
             op_name, now, ticket, (WriteClaim(renewed, current),), agent=agent, claim_hash=hashed
         )

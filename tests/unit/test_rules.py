@@ -30,6 +30,7 @@ from tkt_store.domain.operations import (
 from tkt_store.domain.outcomes import Apply, Decision, NoOp, Refusal, RefusalCode, WriteClaim
 from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import (
+    LEASE_CAP_MARGIN,
     MAX_TTL,
     SKEW_GRACE,
     AgentId,
@@ -212,6 +213,14 @@ class TestClocks:
         """Clamped to claimed_at by a slow clock, the name would not change: no commit."""
         future = Claim(T1, claim_hash(C1), A, NOW + TTL + 30, NOW + TTL + 30)
         noop(decide(snap(tkt(), future), RenewOp(T1, C1, TTL), NOW))
+
+    def test_a_re_run_that_cannot_extend_a_lapsed_lease_says_so(self) -> None:
+        """Only a claim stamped beyond the lease cap reads lapsed with claimed_at past
+        now + ttl: the clamp leaves its name as it is, so nothing is written."""
+        far = NOW + MAX_TTL + LEASE_CAP_MARGIN + 100
+        forged = Claim(T1, claim_hash(C1), A, far, far)
+        reason = noop(decide(snap(tkt(), forged), ClaimOp(T1, A, C1, TTL), NOW)).reason
+        assert "could not be extended" in reason
 
     def test_a_renewal_is_never_before_the_claim(self) -> None:
         future = Claim(T1, claim_hash(C1), A, NOW + TTL + 30, NOW + TTL + 600)

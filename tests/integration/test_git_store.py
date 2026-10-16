@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.gitkit import HookedRunner, git, head, paths, show, write_files
+from tests.gitkit import HookedRunner, git, head, write_files
 from tkt_store import open_store
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.application.service import TicketStore
@@ -38,6 +38,16 @@ T2 = TicketId("tkt-2")
 REF = wire.DEFAULT_REF
 
 pytestmark = pytest.mark.git
+
+
+def show(repo: Path, path: str, ref: str = REF) -> bytes:
+    """The content of `path` at `ref`, as bytes."""
+    return git(repo, "show", f"{ref}:{path}", raw=True)
+
+
+def paths(repo: Path, ref: str = REF) -> set[str]:
+    """Every file path at `ref`."""
+    return set(git(repo, "ls-tree", "-r", "--name-only", ref).split())
 
 
 def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:

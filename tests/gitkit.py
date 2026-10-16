@@ -1,9 +1,10 @@
 """Real-git machinery for tests, the one helper module shared across suites.
 
-`git()` runs git for setup and inspection; `new_repo`/`clone` make repositories with local
-config; `write_files` commits by hand, as a person or an agent bypassing tkt would; and
-`HookedRunner` is a GitRunner that records every call and can interleave, fail or crash
-commands on purpose (injected, not patched)."""
+`git()` runs git for setup and inspection, and `head()` reads a branch's commit;
+`new_repo`/`clone` make repositories with local config; `write_files` commits by hand,
+as a person or an agent bypassing tkt would; and `HookedRunner` is a GitRunner that
+records every call and can interleave, fail or crash commands on purpose (injected, not
+patched)."""
 
 from __future__ import annotations
 
@@ -82,14 +83,6 @@ def clone(remote: Path, path: Path) -> Path:
 
 def head(repo: Path, ref: str = DEFAULT_REF) -> str:
     return git(repo, "rev-parse", ref).strip()
-
-
-def show(repo: Path, path: str, ref: str = DEFAULT_REF) -> bytes:
-    return git(repo, "show", f"{ref}:{path}", raw=True)
-
-
-def paths(repo: Path, ref: str = DEFAULT_REF) -> set[str]:
-    return set(git(repo, "ls-tree", "-r", "--name-only", ref).split())
 
 
 FileContent = bytes | Mapping[str, Any] | None

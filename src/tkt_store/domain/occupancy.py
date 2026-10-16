@@ -52,78 +52,80 @@ def assemble(
     `not_folders` the ids whose `claims/<id>` is not a folder: its ticket is held by a
     set-aside claim (nothing in it can be read, so nothing can be known free), or, with
     no ticket, the id is set aside."""
-    aside: dict[ClaimFile, str] = {}
+    files = list(claim_files)  # a store lists each path once: no duplicates
+    aside: dict[int, str] = {}  # index in `files` -> why; indices, as hashing claims is slow
     holding: dict[TicketId, str] = dict.fromkeys(not_folders, NOT_A_FOLDER)
 
-    def put_aside(claim: ClaimFile, why: str, *, holds: bool) -> None:
-        aside.setdefault(claim, why)
-        if holds and isinstance(claim, Claim):
+    def put_aside(index: int, why: str, *, holds: bool) -> None:
+        aside.setdefault(index, why)
+        if holds and isinstance(claim := files[index], Claim):
             holding.setdefault(claim.ticket_id, why)
 
-    files = list(dict.fromkeys(claim_files))
-    for claim in files:  # step 1
+    for index, claim in enumerate(files):  # step 1
         end = claim.lease_until if isinstance(claim, Claim) else claim.ended_at
         if claim.claimed_at > end:
-            put_aside(claim, "a claim's times are out of order", holds=True)
+            put_aside(index, "a claim's times are out of order", holds=True)
 
-    by_hash: dict[ClaimHash, list[ClaimFile]] = defaultdict(list)
-    for claim in files:
-        if claim not in aside:
-            by_hash[claim.hash].append(claim)
-    for same in by_hash.values():  # step 2
-        if len({claim.ticket_id for claim in same}) > 1:
-            for claim in same:
-                put_aside(claim, "a claim hash is in more than one folder", holds=True)
-        elif len([c for c in same if isinstance(c, EndedClaim)]) > 1:
-            for claim in same:
-                put_aside(claim, "a claim has ended more than once", holds=False)
-        elif any(isinstance(c, EndedClaim) for c in same):
-            for claim in same:
-                if isinstance(claim, Claim):
-                    put_aside(claim, "a claim is both open and ended", holds=False)
+    first: dict[ClaimHash, int] = {}
+    repeated: dict[ClaimHash, list[int]] = {}
+    for index, claim in enumerate(files):
+        if index not in aside and (seen := first.setdefault(claim.hash, index)) != index:
+            repeated.setdefault(claim.hash, [seen]).append(index)
+    for same in repeated.values():  # step 2: only hashes found more than once
+        if len({files[index].ticket_id for index in same}) > 1:
+            for index in same:
+                put_aside(index, "a claim hash is in more than one folder", holds=True)
+        elif sum(isinstance(files[index], EndedClaim) for index in same) > 1:
+            for index in same:
+                put_aside(index, "a claim has ended more than once", holds=False)
+        elif any(isinstance(files[index], EndedClaim) for index in same):
+            for index in same:
+                if isinstance(files[index], Claim):
+                    put_aside(index, "a claim is both open and ended", holds=False)
 
-    by_folder: dict[TicketId, list[ClaimFile]] = defaultdict(list)
-    for claim in files:
-        by_folder[claim.ticket_id].append(claim)
+    by_folder: dict[TicketId, list[int]] = defaultdict(list)
+    for index, claim in enumerate(files):
+        by_folder[claim.ticket_id].append(index)
     set_aside = dict(set_aside)
     for ticket_id in holding:
         if ticket_id not in tickets:
             set_aside.setdefault(ticket_id, NOT_A_FOLDER)
     fenced: dict[ClaimHash, str] = {}
     for ticket_id, folder in by_folder.items():  # step 3
-        valid = [claim for claim in folder if claim not in aside]
+        valid = [index for index in folder if index not in aside]
         ticket = tickets.get(ticket_id)
         if ticket_id in set_aside:
-            for claim in valid:
-                fenced.setdefault(claim.hash, "its ticket is set aside")
+            for index in valid:
+                fenced.setdefault(files[index].hash, "its ticket is set aside")
             continue
         if ticket is None:
             set_aside[ticket_id] = "claims without a ticket"
-            for claim in folder:
-                put_aside(claim, "claims without a ticket", holds=False)
+            for index in folder:
+                put_aside(index, "claims without a ticket", holds=False)
             continue
-        opens = [claim for claim in valid if isinstance(claim, Claim)]
+        opens = [index for index in valid if isinstance(files[index], Claim)]
         if ticket.is_terminal:
-            for claim in opens:
-                put_aside(claim, "an open claim on a resolved ticket", holds=False)
+            for index in opens:
+                put_aside(index, "an open claim on a resolved ticket", holds=False)
             holding.pop(ticket_id, None)
         elif len(opens) > 1:
-            for claim in opens:
-                put_aside(claim, "more than one open claim", holds=True)
+            for index in opens:
+                put_aside(index, "more than one open claim", holds=True)
 
-    for claim, why in aside.items():
-        fenced.setdefault(claim.hash, why)
+    for index, why in aside.items():
+        fenced.setdefault(files[index].hash, why)
     claims: dict[TicketId, Claim] = {}
     ended: dict[ClaimHash, EndedClaim] = {}
-    for claim in files:
-        if claim in aside or claim.ticket_id in set_aside:
+    for index, claim in enumerate(files):
+        if index in aside or claim.ticket_id in set_aside:
             continue
         if isinstance(claim, Claim):
             claims[claim.ticket_id] = claim
         else:
             ended[claim.hash] = claim
-    for claim_hash in [*(claim.hash for claim in claims.values()), *ended]:
-        fenced.pop(claim_hash, None)  # a valid file wins: the rules follow it
+    if fenced:
+        for claim_hash in [*(claim.hash for claim in claims.values()), *ended]:
+            fenced.pop(claim_hash, None)  # a valid file wins: the rules follow it
     held = {
         ticket_id: why
         for ticket_id, why in holding.items()

@@ -66,7 +66,9 @@ git 2.29 or later.
 
 **One clone per process.** Give every process that runs `tkt` its own clone of the store
 repository, and never let two processes use the same clone, for example by mounting one
-clone into several containers.
+clone into several containers. Each clone keeps a cache of what it has already read in
+`.git/tkt-store/cache.json`; deleting it is always safe (the next command reads the store
+in full once).
 
 **Agents use only `tkt`, never git, on the store.** `tkt` validates what it writes (and,
 from 0.2.0, everything it reads), never checks out files (so no checkout hooks, filters

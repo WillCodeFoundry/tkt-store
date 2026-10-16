@@ -57,6 +57,13 @@
   malformed commits. Output: each ticket comes with its open claim
   (`{"ticket", "claim"}`), and `log` entries carry `claim_hash`. Stage 1's file budgets
   and `FULL` are gone.
+- 0.2.0 stage 2b (ADR 0006): each clone keeps a cache in `.git/tkt-store/cache.json`
+  of what never changes again (valid resolved tickets, the verdicts on invalid ticket
+  files, resolved tickets' claim file names), keyed by git object id, so an op reads and
+  checks only what may have changed. `claims/` is listed without recursing and unknown
+  folders are read in one batch. At 20,000 tickets a CLI op takes about 1.1 s instead
+  of 2.4 s. The cache is JSON, written atomically, versioned, and ignored when it cannot
+  be trusted; deleting it is always safe.
 - Claims to become records of their own in 0.2.0 (ADR 0007): empty files under
   `claims/<id>/` whose names hold the claim's whole state (hash, open or how it ended,
   holder, times), so fencing survives a ticket being set aside, nothing in a claim is

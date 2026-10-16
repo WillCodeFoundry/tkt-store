@@ -89,7 +89,7 @@ commit stays.
   calls per op. A `done` or `cancel` commit rewrites `tickets/`, one archive shard
   (about 1/256 of that archive) and its 256-entry directory, a few claim index shards
   and theirs, `archive/` and the root; other commits do not touch the archive.
-- The archive grows by one ticket file and one index file per claim ever ended; nothing
+- The archive grows by one ticket file and one index file per claim ended on a resolved ticket; nothing
   reads it whole except `list --status done|cancelled`.
 - `list --status done` costs in proportion to that archive; it is a deliberate query.
 - Spam *open* tickets still cost every commit (they sit in `tickets/`), and so do junk

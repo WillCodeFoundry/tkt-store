@@ -52,9 +52,9 @@ or commit signing could expose.
 - An invalid ticket is set aside and reported; it never fails the whole store. A partial
   view is safe: a set-aside blocker counts as not done, and the worst case is
   `claim-next` choosing a less urgent ticket. `add` of an id whose file is set aside is
-  `DUPLICATE_ID`. A malformed commit is skipped and reported by
-  history. Only regular files at `tickets/tkt-<hex>.json` (and, by path, the archive of
-  ADR 0006) are read; other files are preserved, as before.
+  `DUPLICATE_ID`. A malformed commit is skipped and reported by history. Only regular
+  files at `tickets/tkt-<hex>.json` (and, by path, the archive of ADR 0006) are read;
+  other files are preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
   `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable (and reads expired).
 

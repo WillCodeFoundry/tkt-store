@@ -443,3 +443,5 @@ Decided questions:
 - Q3: `claim-next` stays an op (an atomic choice), not a read plus a claim.
 - Q4: leases and times stay integer seconds since the epoch.
 - Dropped: `claim-next` choosing randomly among the top candidates to spread contention.
+  On one ref any two concurrent writes conflict, whichever ticket they touch, so this
+  only pays off with one ref per ticket (ADR 0001).

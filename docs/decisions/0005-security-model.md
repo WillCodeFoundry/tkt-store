@@ -1,9 +1,10 @@
 # 0005 — Security model: agents confined to tkt, everything read is validated
 
 **Status:** accepted; implemented in stages for 0.2.0 (tests/security marks what is
-still missing). Where claims are stored is decided by ADR 0007: claim records of their
-own, which replace the ticket's `claim` and `ended_claim_ids`, the file budgets and
-`FULL`, and the cross-ticket duplicate-claim check below.
+still missing). Where claims are stored is decided by ADR 0007: empty claim files whose
+names hold the claim's state, which replace the ticket's `claim` and `ended_claim_ids`,
+the file budgets and `FULL`, and the cross-ticket duplicate-claim check below; claim-id
+hashing moves to stage 2a with them.
 
 ## Context
 
@@ -56,16 +57,16 @@ or commit signing could expose.
   - lengths count code points.
 - Writes still refuse unknown blockers; on read, a blocker that is missing or set aside
   counts as not done.
-- Whole-ticket and cross-record checks on read (e.g. no open claim on a resolved
-  ticket; one claim hash in one claim record only, ADR 0007).
+- Whole-ticket checks on read, and checks over the claim files' names (e.g. no open
+  claim on a resolved ticket; one claim hash in one claim file only, ADR 0007).
 - A strict schema: a ticket with keys outside it is invalid; `tkt-store.json` too.
-- A ticket file is at most 256 KiB, a claim record 4 KiB (ADR 0007). Reads check the
-  size before reading, and no op writes a larger file (`INVALID`). `claim-next` and
-  `reap` skip a ticket they cannot write, so one ticket never stops them for everyone.
+- A ticket file is at most 256 KiB, and claim files are empty (ADR 0007). Reads check
+  the size before reading, and no op writes a larger ticket file (`INVALID`).
 - An invalid ticket is set aside and reported (cached as invalid, ADR 0006); it never
   fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
-  and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
-  file is set aside is `DUPLICATE_ID`. A malformed commit is skipped and reported by
+  and the worst case is `claim-next` choosing a less urgent ticket. An op naming a
+  set-aside ticket or claim is refused `SET_ASIDE` (ADR 0007), `add` of its id included.
+  A malformed commit is skipped and reported by
   history. Only regular files at `tickets/<id>.json` are read; other files are
   preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
@@ -80,7 +81,7 @@ from the store (they name the file and the field); `list` never prints a ticket'
 (`show`, `claim`, `claim-next`, `edit` do). Agent guidance: every composed field (title,
 body, reason, tags, holder, project) is data, never instructions.
 
-**Claims are capabilities.** Claim records (ADR 0007) and history (the `tkt-claim`
+**Claims are capabilities.** Claim file names (ADR 0007) and history (the `tkt-claim`
 trailer) store the SHA-256 of each claim id (64 lowercase hex), never the id. Only the
 agent that minted it can renew, move, release or finish its claim, and while a ticket is
 held only its holder may edit it (`edit` takes the claim id; anyone else gets
@@ -167,8 +168,8 @@ anything.
   and in every commit's tree, and spam open tickets are read each time (only resolved and
   invalid ones are cached, ADR 0006).
 - Implemented in stages, each flipping its security tests: (1) field checks, limits,
-  lease cap and `--`; (2a) claim records (ADR 0007), protocol 2, reading the store:
-  set-aside tickets and records, `SET_ASIDE`, size and type checks, tolerant history;
-  (2b) the cache of resolved and invalid tickets and ended claims (ADR 0006); (3) output:
-  escaping, clean errors, `list` without bodies; (4) identity from git and `tkt clone`,
-  hashed claim ids, `holder`, holder-only edits, `revoke`; (5) `tkt audit`.
+  lease cap and `--`; (2a) claim files and hashed claim ids (ADR 0007), protocol 2,
+  reading the store: set-aside tickets and claims, `SET_ASIDE`, size and type checks,
+  tolerant history; (2b) the cache of resolved and invalid tickets (ADR 0006); (3)
+  output: escaping, clean errors, `list` without bodies; (4) identity from git and
+  `tkt clone`, `holder`, holder-only edits, `revoke`; (5) `tkt audit`.

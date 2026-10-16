@@ -1,4 +1,4 @@
-# 0007 — Claims are records of their own
+# 0007 — Claims are records of their own, held in file names
 
 **Status:** accepted; to be implemented for 0.2.0 (protocol 2) in stage 2a, before the
 read-side validation of ADR 0005 builds on it
@@ -23,112 +23,155 @@ validation of ADR 0005 showed four problems with that:
    one validity: a bad claim field sets the whole ticket aside, and a bad title hides
    the claim.
 
+A first draft moved claims into JSON records under `claims/<id>/`. Review showed that
+any record with content brings the problem back one level down: a forged, unreadable
+open record has a claim whose hash and lease are unknown, so it fences nothing, can't
+be reaped or ended, and locks its ticket. Unix lock files point the other way: the
+file's existence and name are the lock, and content is only ever a hint.
+
 ## Decision
 
-**Layout.** Occupancy moves out of the ticket file into one folder per ticket:
+**Layout.** Occupancy moves out of the ticket file into one folder per ticket, and a
+claim's whole state is its file name. Claim files are empty; nothing in them is ever
+read.
 
 ```text
-tickets/<id>.json              content, workflow, resolution; no occupancy
-claims/<id>/open.json          the ticket's open claim, if it has one
-claims/<id>/<claim-hash>.json  one record per claim that has ended on the ticket
+tickets/<id>.json                                                  content, workflow, resolution
+claims/<id>/<hash>.open.<holder>.<claimed_at>.<lease_until>        the open claim
+claims/<id>/<hash>.<ended_by>.<holder>.<claimed_at>.<ended_at>     each ended claim
 ```
 
-`<claim-hash>` is the claim id as stored: its SHA-256 from stage 4 (ADR 0005, 64 hex),
-the claim id itself until then. The fixed `open.json` slot makes "at most one open
-claim per ticket" structural: there is one path for it, even in a forged push.
+- `<hash>`: the SHA-256 of the claim id, 64 lowercase hex (ADR 0005). Hashing lands with
+  claim records in stage 2a rather than stage 4, so names are final from the start.
+- `<holder>`: a slug of at most 39 (the acting agent until stage 4 records `holder`).
+- `<claimed_at>`, `<lease_until>`, `<ended_at>`: unix seconds, decimal, no leading zero.
+- `<ended_by>`: `released`, `done`, `cancelled`, `reaped`, `taken-over` or `revoked`.
 
-**Records.** Canonical JSON with a strict schema and the field rules of ADR 0005, like
-tickets:
+None of the parts can hold a `.`, so a name splits unambiguously. A name is about 150
+characters, within every filesystem's 255.
 
-- open: `ticket`, `claim_id`, `holder` (`agent` until stage 4), `claimed_at`,
-  `lease_until`;
-- ended: the same, plus `ended_at` and `ended_by`, one of `released`, `done`,
-  `cancelled`, `reaped`, `taken-over`, `revoked`.
+**A claim file is valid** when it is an empty regular file (mode `100644`, size 0, both
+known from the listing) whose name matches that pattern. Anything else under `claims/`
+is an unknown file: preserved, never interpreted, and no part of its name is used, not
+even a hash. Renaming a genuine claim file to garbage therefore has the effect of
+deleting it, which a forger with push access can do in any design.
 
-The ticket loses `claim` and `ended_claim_ids`. Its `updated` and `content_version`
-change only with content, workflow or resolution; claim times are in the records.
+**The ticket** loses `claim` and `ended_claim_ids`. Its `updated` and
+`content_version` change only with content, workflow or resolution; claim activity no
+longer shows in the ticket.
 
-**Ops.** Each op is still one commit. Ending a claim moves `open.json` to
-`<claim-hash>.json` with its end recorded, in the same commit:
+**Ops.** Each op is still one commit, and a change of claim state is a rename (one
+entry removed and one added, in the same tree):
 
 | Op | Writes |
 |---|---|
-| `claim`, `claim-next` | `open.json`; a takeover first ends the old claim as `taken-over` |
-| `renew` | `open.json` (`lease_until`) |
-| `release` | ends the claim as `released` |
-| `done` | the ticket (`resolution`), and ends the claim as `done` |
-| `cancel` | the ticket (`resolution`), and ends any open claim as `cancelled` |
-| `reap` | ends each takeable claim as `reaped` |
-| `revoke` (stage 4) | ends the claim as `revoked` |
-| `add`, `edit`, `move` | the ticket only (`move` and, from stage 4, a held `edit` check `open.json`) |
+| `claim`, `claim-next` | adds the `open` file; a takeover first renames the old one to `taken-over` |
+| `renew` | renames the `open` file with the new `lease_until` |
+| `release` | renames the `open` file to `released` |
+| `done` | the ticket (`resolution`), and renames the `open` file to `done` |
+| `cancel` | the ticket (`resolution`), and renames any valid `open` file to `cancelled` |
+| `reap` | renames each takeable `open` file to `reaped` |
+| `revoke` (stage 4) | renames the `open` file to `revoked` |
+| `add`, `edit`, `move` | the ticket only (`move`, and from stage 4 a held `edit`, check the `open` file) |
 
-**Rules.** Every outcome in design.md §5 stays; only where a rule looks changes. The
-snapshot carries the tickets and, per ticket, its open claim and ended records:
+**Rules.** Every outcome in design.md §5 stays; only where a rule looks changes, and
+it looks only at names:
 
-- "this ticket's current claim" is its `open.json`;
-- "an ended claim on this ticket" is an ended record in its folder;
-- "an id recorded on any ticket" is a record with that hash in any folder: open on
+- "this ticket's current claim" is its `open` file;
+- "an ended claim on this ticket" is an ended file in its folder;
+- "an id recorded on any ticket" is a valid file with that hash in any folder: open on
   another ticket is `ALREADY_CLAIMED`, ended is `NOT_HOLDER`;
-- a re-run of `done` is a NoOp when the claim's record says `ended_by: done`
-  (replacing "the last of `ended_claim_ids`");
-- `claim` and `claim-next` look the claim id up first, so a re-run always finds its own
-  claim, whatever state its ticket is in.
+- a re-run of `done` is a NoOp when the claim's file says `done` (replacing "the last
+  of `ended_claim_ids`"); a revoked claim's refusals say so from its name;
+- `claim` and `claim-next` look the claim's hash up first, so a re-run always finds its
+  own claim, whatever state its ticket is in.
 
-**Reading.** Claim records are validated on their own, like ticket files (ADR 0005):
-only regular files, a size cap of 4 KiB checked before reading, the strict schema, the
-field rules, and their place: `ticket` names the folder, and an ended record's file
-name is its `claim_id`. An invalid record is set aside by itself; the ticket stays
-valid. Then:
+**Reading.** The snapshot lists `tickets/` and `claims/` and reads only ticket files;
+claim state comes from the listing alone. On top of each name's own pattern, these
+checks run on the listing, the same for every reader. A claim they set aside still
+fences its hash:
 
-- **File names fence.** The listing of `claims/` gives every recorded claim hash
-  without reading a file, so fencing never uses the content of an invalid file: an
-  ended record whose name is a well-formed claim hash fences that hash even if its
-  content is set aside. A set-aside `open.json` fences nothing (its hash is in its
-  content), but its ticket counts as held by an unknown claim: it cannot be claimed or
-  reaped until an operator repairs it.
-- **One hash, one record.** A hash found in more than one record (two folders, or an
-  open claim and an ended record) has all of those records set aside; the hash stays
-  fenced.
-- **A claim on a set-aside or missing ticket** keeps fencing its hash and can't be acted
-  on.
+| Forged state | Verdict |
+|---|---|
+| `claimed_at` after `lease_until`, or after `ended_at` | the claim is set aside |
+| a lease beyond the cap (stage 1) | reads expired, takeable |
+| two `open` files in one folder | both set aside; the ticket is held by a set-aside claim |
+| an `open` and an ended file with the same hash | the ended one wins: only the `open` one is set aside |
+| the same hash in two folders | every file with it is set aside |
+| an `open` file on a resolved ticket | the resolution wins: the claim is set aside |
+| a folder with no ticket file | its claims are set aside; `add` of that id is refused |
 
-**`SET_ASIDE`** is a new refusal for any op that names a set-aside ticket (`add` of its
-id included, instead of `DUPLICATE_ID`) or a claim that is set aside or whose ticket is
-set aside. It says which check failed, never the value, and that an operator must
-repair the file. So a holder whose ticket was set aside is told so, and is never given
-a second ticket.
+A ticket held by a set-aside claim cannot be claimed (`claim-next` passes over it) and
+is left out by `reap`, but it is never locked for good: `cancel` still resolves it.
+`show` reports it as held by a set-aside claim. Claims on a set-aside ticket keep
+fencing and can't be acted on.
+
+**`SET_ASIDE`** is a new refusal. It never echoes a value; it names the check that
+failed and says an operator must repair the store. In order, after `validate_op`'s
+`INVALID` and `NOT_INITIALISED`:
+
+1. the op names a set-aside ticket, as its ticket or as a blocker, or `add` names an id
+   whose ticket is set aside or whose claims folder exists without a ticket:
+   `SET_ASIDE` (for `add`, instead of `DUPLICATE_ID`; the library treats it like
+   `DUPLICATE_ID` when it mints a fresh id);
+2. `claim` or `claim-next` with a hash whose file is set aside, or lies on a set-aside
+   ticket: `SET_ASIDE`, never a new claim;
+3. a holder op (`renew`, `move`, `release`, `done`) whose hash's file is set aside:
+   `SET_ASIDE`;
+4. otherwise the rules of design.md §5, which see only valid claims and valid tickets:
+   a landed re-run of `release`, `move` or `done` still converges from the names.
 
 **File sizes.** A ticket file no longer grows with claims, so stage 1's budgets go:
 every op may write a ticket file of up to 256 KiB, and `FULL` is removed.
 
 **History** is unchanged: commits keep their trailers (`tkt-claim` and the rest), and
-`tkt log` still tells every op in order.
+`tkt log` still tells every op in order, with any reason given.
+
+**What is not separated.** Only state that grows, that must outlive its ticket's
+validity, or whose invariant a layout makes structural gets its own files; today that
+is claims alone. Phase and resolution stay in the ticket: one value each, overwritten,
+of no use while the ticket is set aside, and a split would add files and cross-file
+checks with no gain in concurrency, since every op is a compare-and-swap on the whole
+store.
 
 ## Alternatives rejected
 
 - **Claims inside the ticket, as before:** the four problems above. Reading claim ids
   from a ticket that failed validation was rejected too: nothing read from an invalid
   file is used.
-- **`claims/<claim-hash>.json`, one flat folder:** "one claim id, one ticket" would be
-  structural instead, but "one open claim per ticket" would need a check across every
-  record, and a ticket's claims would no longer be together for rules, history and
-  repairs.
-- **A folder per ticket without the `open.json` slot:** two open claims on one ticket
-  could be pushed by hand and would need a check of their own.
-- **Ordering ended records by name** (a sequence number): order comes from
-  `claimed_at` and `ended_at`, and the one rule that used order now reads `ended_by`.
-  The full order of ops is `tkt log`.
+- **JSON claim records** (`claims/<id>/open.json` and `<hash>.json`, with the state in
+  content): a forged, unreadable open record has an unknown hash and lease, so it
+  fences nothing, can't be reaped or ended, and its holder can be given a second
+  ticket. It also needs a schema, a size cap, a cache and content checks of its own.
+- **State in names, the rest in content** (`<hash>.open.json` with the lease inside):
+  better, but the same unreadable-lease case remains for the open claim.
+- **Folders by state** (`claims/open/` and `claims/ended/`): reads less per op with
+  content, but names-only claims are never read anyway.
+- **One flat folder by hash, or one occupancy file per ticket:** one open claim per
+  ticket would need content from every record; one file per ticket grows again and
+  hides fencing behind one validity.
+- **An append-only event file per claim transition:** every renewal adds a file, and
+  `tkt log` already holds the full history.
+- **A git ref per claim, or git notes:** they break the single-ref compare-and-swap that
+  makes every op one atomic commit (ADR 0001).
+- **Separating phase or resolution:** see *What is not separated*.
 
 ## Consequences
 
-- Part of protocol 2: `docs/format.md` describes the new layout when stage 2a lands.
-- The domain changes: `Ticket` loses its claim fields, claims become records with an
-  end, and `Snapshot` carries them; the rules keep their outcomes.
-- `show` and `list` join each ticket with its open claim, and `show` can list the
-  ticket's ended claims.
+- Part of protocol 2: `docs/format.md` describes the layout when stage 2a lands, and
+  stage 4's claim-id hashing moves into stage 2a.
+- The domain changes: `Ticket` loses its claim fields; claims become values parsed from
+  names, with an end; `Snapshot` carries them and the set-aside ones. The rules keep
+  their outcomes.
+- No JSON, size cap or cache for claims: the stage 2b cache covers ticket files only.
+- `show` and `list` join each ticket with its open claim, and `show` can list its ended
+  claims from their names.
 - Stage 1's `FULL`, `CLAIM_FILE_MAX` and `CONTENT_FILE_MAX` are removed, and the
-  cross-ticket duplicate-claim check of ADR 0005 is replaced by "one hash, one record".
-- One file per claim ever made. Listing `claims/` costs little; every record is read,
-  but ended records never change, so ADR 0006's cache keeps them like resolved tickets
-  (stage 2b), and an op reads only the open claims and new records.
-- An operator repairing a ticket finds all of its occupancy in `claims/<id>/`.
+  cross-ticket duplicate-claim check of ADR 0005 becomes "one hash, one file".
+- One empty file per claim ever made; they all share git's single empty blob. Each op
+  lists them (names only) and each claim op rewrites its ticket's folder and the
+  `claims/` tree, which has an entry per ticket that was ever claimed. At 20,000 tickets
+  with about 3 claims each, that should roughly triple ADR 0006's listing and tree
+  figures (about 20 and 40 ms); stage 2a measures it.
+- An operator repairing a ticket finds all of its occupancy in `claims/<id>/`, readable
+  through `tkt show`.

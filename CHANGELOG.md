@@ -45,11 +45,12 @@
 
   A lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now reads
   expired and may be taken over or reaped. git always gets `--` before the remote name.
-- Claims to become records of their own in 0.2.0 (ADR 0007): `claims/<id>/open.json`
-  for a ticket's open claim and `claims/<id>/<claim-hash>.json` for each ended one, so
-  fencing survives a ticket being set aside and ticket files stop growing with claims;
-  stage 1's file budgets and `FULL` go, and a new `SET_ASIDE` refusal names set-aside
-  tickets and claims.
+- Claims to become records of their own in 0.2.0 (ADR 0007): empty files under
+  `claims/<id>/` whose names hold the claim's whole state (hash, open or how it ended,
+  holder, times), so fencing survives a ticket being set aside, nothing in a claim is
+  ever parsed, and ticket files stop growing with claims. Claim-id hashing moves to
+  stage 2a; stage 1's file budgets and `FULL` go; a new `SET_ASIDE` refusal names
+  set-aside tickets and claims.
 
 ## 0.1.0 — milestone 1
 

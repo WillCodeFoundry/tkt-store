@@ -17,12 +17,12 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 
 | Term | Meaning |
 |---|---|
-| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding `tickets/<id>.json`, published to a shared remote (normally `origin`) and cached in each agent's clone. The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
+| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding `tickets/<id>.json` (from 0.2.0 also `claims/<id>/`, ADR 0007), published to a shared remote (normally `origin`) and cached in each agent's clone. The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
 | **Ticket** | A unit of work. Its fields fall into five groups, each changed one way (see *Data model* below). |
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
-| **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket (from 0.2.0 a record of its own under `claims/<id>/`, ADR 0007). Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
+| **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket (from 0.2.0 an empty file under `claims/<id>/` whose name holds its state, ADR 0007). Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
-| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/move/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history), and an id in any ticket's `ended_claim_ids` can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
+| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/move/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history; from 0.2.0 an ended claim file, ADR 0007), and an id recorded on any ticket can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
 | **Phase** | *Stored* workflow position: which kind of work (or agent role) the ticket waits for. A fixed set named after swarm-forge's roles plus common human steps: `triage`, `specification`, `implementation`, `cleanup`, `architecture`, `hardening`, `qa`, `review`, `release`. No forced order. Moved only by the holder's `move`. |
 | **Resolution** | *Stored*, set once: `done` (by the holder) or `cancelled` (by anyone). A resolved ticket is terminal: never claimable or editable again. |
 | **Status** | *Derived*, never stored — the availability axis: `open`, `blocked`, `claimed`, `expired`, plus `done`/`cancelled` surfaced from the resolution. |
@@ -42,7 +42,7 @@ That is the whole mental model: to know how a field behaves, find its group.
 | Identity | `id`, `kind`, `project`, `created` | `add` only | never changes |
 | Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `edit`, by anyone (from 0.2.0: only the holder while held, §5) | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
 | Workflow | `phase`, `resolution` | `move` (holder), `done` (holder), `cancel` (anyone): the lifecycle table below | per transition; `resolution` is set once |
-| Occupancy | `claim`, `ended_claim_ids` (from 0.2.0 claim records, ADR 0007) | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | holder ops (`renew`, `move`, `release`, `done`) fenced by claim id (holder-op table, §5); `reap` and `cancel` deliberately unfenced |
+| Occupancy | `claim`, `ended_claim_ids` (from 0.2.0 claim files, ADR 0007) | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | holder ops (`renew`, `move`, `release`, `done`) fenced by claim id (holder-op table, §5); `reap` and `cancel` deliberately unfenced |
 | Bookkeeping | `updated`, unknown keys | the system | — |
 
 Lifecycle (workflow group):
@@ -239,7 +239,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 - Every claim end appends to `ended_claim_ids`: release, reap, takeover, cancel, done.
   The list is never truncated, so step 3 recognises an ended claim however many claims
   came after it. A ticket only accumulates a handful of claims in its life, so the list
-  stays small. From 0.2.0 each ended claim is a record of its own (ADR 0007), so the
+  stays small. From 0.2.0 each ended claim is a file of its own (ADR 0007), so the
   ticket file no longer grows with them.
 - A re-run of a landed `move` or `release` (including after a push that landed but was
   retried, or after other claims came and went) is a NoOp at step 3. A fenced agent
@@ -265,8 +265,8 @@ file cap (*Changes in 0.2.0*).
 
 ### Changes in 0.2.0 (ADR 0005, §8)
 
-- **Claims store a hash.** `claim.claim_id` and `ended_claim_ids` hold the SHA-256 of
-  each claim id (64 lowercase hex), and so does the `tkt-claim` trailer. Every rule above
+- **Claims store a hash** (stage 2a, with claim files): claim file names hold the
+  SHA-256 of each claim id (64 lowercase hex), and so does the `tkt-claim` trailer. Every rule above
   compares hashes, so fencing and re-runs are unchanged; a re-run is recognised by the
   hash alone (no agent comparison). Callers always supply claim ids (the CLI already
   does; the library stops minting them), since a minted id could not be read back.
@@ -279,11 +279,11 @@ file cap (*Changes in 0.2.0*).
 - **edit while held** needs the holder's claim id; anyone else is refused `NOT_HOLDER`.
   An unheld ticket may be edited by anyone, as before.
 - **revoke** (new, anyone, optional reason): `NOT_FOUND`; `TERMINAL` if resolved; NoOp
-  if not claimed; otherwise the claim ends (its hash appended to `ended_claim_ids`) and
-  the ticket stays open in its phase. The holder's next `renew`, `move` or `done` is
+  if not claimed; otherwise the claim ends (its file renamed to `revoked`) and the
+  ticket stays open in its phase. The holder's next `renew`, `move` or `done` is
   `NOT_HOLDER`, its `release` a NoOp, and both messages say the claim was revoked.
-- **add** of an id whose file is set aside on reading (§8) is `DUPLICATE_ID`: the id is
-  taken, and the file is evidence.
+- **add** of an id whose file is set aside on reading (§8), or that has claim files
+  without a ticket, is `SET_ASIDE`: the id is taken, and the files are evidence.
 - **Blockers:** writes still refuse unknown or self blockers; on reading, a blocker that
   is missing or set aside counts as not done.
 - **Field rules** (`domain/fields.py`, `docs/format.md`): `validate_op` checks every
@@ -291,15 +291,18 @@ file cap (*Changes in 0.2.0*).
   lowercase slugs for ids, tags and agents, `[owner/]repo` projects, free text without
   controls or invisible characters (fixed ranges, no normalisation), size limits,
   priority 0 to 100, at most 20 blockers and tags without duplicates.
-- **Claim records (ADR 0007):** occupancy leaves the ticket file. A ticket's open claim
-  is `claims/<id>/open.json` and each ended claim `claims/<id>/<claim-hash>.json`,
-  recording how it ended; every rule above keeps its outcome and looks there instead.
-  Fencing uses the claim hashes in file names, so it holds even when a ticket or a
-  record is set aside. An op naming a set-aside ticket or claim is refused `SET_ASIDE`
-  (new). Stage 1's file budgets and `FULL` go: a ticket file no longer grows with
-  claims, so every op may write up to 256 KiB.
-- **Skipping:** `claim-next` skips a candidate it cannot write (an invalid ticket) and
-  `reap` leaves such a ticket out, so one ticket never stops them for everyone.
+- **Claim files (ADR 0007):** occupancy leaves the ticket file. Each claim is an empty
+  file under `claims/<id>/` whose name holds its whole state:
+  `<hash>.open.<holder>.<claimed_at>.<lease_until>`, renamed on renew and, when the
+  claim ends, to `<hash>.<ended_by>.<holder>.<claimed_at>.<ended_at>`. Every rule above
+  keeps its outcome and looks at names instead; nothing in a claim file is read, so
+  fencing holds even when a ticket or a claim is set aside. Forged names are judged
+  from the listing alone (ADR 0007 has the table). An op naming a set-aside ticket or
+  claim is refused `SET_ASIDE` (new). Stage 1's file budgets and `FULL` go: every op
+  may write a ticket file of up to 256 KiB.
+- **Skipping:** set-aside tickets are never candidates for `claim-next`, which also
+  passes over a ticket held by a set-aside claim, and `reap` leaves such claims alone, so
+  one bad file never stops them for everyone; `cancel` can always resolve the ticket.
 - **Leases:** a lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after
   now is treated as takeable (and reads expired). Honest leases never are: the cap is
   relative to now, and the margin keeps a writer whose clock runs up to 10 minutes fast
@@ -334,8 +337,9 @@ cache. From 0.2.0 each clone also caches resolved and invalid tickets by blob id
 file in its git directory, so a snapshot reads and checks only the other files
 (ADR 0006).
 
-Only `tkt-store.json` and `tickets/<id>.json` files are read; any other path is
-preserved and ignored.
+Only `tkt-store.json` and `tickets/<id>.json` files are read (from 0.2.0 claim files
+under `claims/<id>/` are listed, never read; ADR 0007); any other path is preserved and
+ignored.
 The store's format version lives in `tkt-store.json` at the tree root and is checked on
 every snapshot. The push states its
 expected old value (`--force-with-lease=<ref>:<base>`), so compare-and-swap does not rely
@@ -411,7 +415,7 @@ agent has its own git identity, which does not change while it runs.
 | Code execution in other agents | No shell anywhere (argument lists only); git always gets the remote name after `--`; no checkout. Deployment: never a path remote shared across agents that do not fully trust each other (README) |
 | Prompt injection through stored text | Strict field rules (identifier allowlists; free text without controls or invisible characters, fixed ranges that never change with the Unicode version; size limits in code points); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
 | Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached as invalid, ADR 0006), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
-| Acting as another agent's holder | Claim records (ADR 0007) and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
+| Acting as another agent's holder | Claim file names (ADR 0007) and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
 | Locking a ticket forever | A lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now is treated as takeable |
 
 **A partial view is acceptable.** Setting an invalid ticket aside means a snapshot may

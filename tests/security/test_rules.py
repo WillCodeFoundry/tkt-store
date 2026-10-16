@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from tests.security.support import design
 from tkt_store.domain.operations import ClaimOp, Op, ReapOp
 from tkt_store.domain.outcomes import Apply, NoOp, Refusal, RefusalCode
 from tkt_store.domain.rules import decide
@@ -45,7 +44,9 @@ FORGED_LEASE = Claim(agent=A, claim_id=C1, lease_until=NOW + 100 * MAX_TTL, clai
 """A lease no honest writer can produce: renew and claim cap it at now + MAX_TTL."""
 
 
-@design("a forged lease far beyond MAX_TTL locks a ticket until someone cancels it")
+@pytest.mark.security_design(
+    "a forged lease far beyond MAX_TTL locks a ticket until someone cancels it"
+)
 @pytest.mark.parametrize(
     "op", [ClaimOp(T1, B, C2, TTL), ReapOp()], ids=["claim by another agent", "reap"]
 )

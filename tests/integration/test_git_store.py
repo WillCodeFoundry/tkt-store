@@ -281,19 +281,9 @@ def test_committed_revision_is_the_ref(local: Path, bare_remote: Path) -> None:
     assert isinstance(outcome, Committed) and outcome.revision == head(bare_remote)
 
 
-class BlobCountingRunner:
-    """A real runner that records how many blobs each `cat-file --batch` was asked for."""
-
-    def __init__(self, repo: Path) -> None:
-        self._run = git_runner(repo)
-        self.batches: list[int] = []
-        self.commands: list[str] = []
-
-    def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
-        self.commands.append(args[0])
-        if args[:2] == ("cat-file", "--batch"):
-            self.batches.append(len((stdin or b"").split()))
-        return self._run(*args, stdin=stdin)
+def blobs_read(runner: HookedRunner) -> list[int]:
+    """How many blobs each `cat-file --batch` was asked for."""
+    return [len(data.split()) for data in runner.inputs_to("cat-file", "--batch")]
 
 
 def test_snapshots_read_only_ticket_files_they_have_not_seen(
@@ -301,17 +291,17 @@ def test_snapshots_read_only_ticket_files_they_have_not_seen(
 ) -> None:
     """Decoded tickets are cached by blob id: unchanged files are not read again, and
     tickets this store just wrote are not read back."""
-    runner = BlobCountingRunner(local)
+    runner = HookedRunner(local)
     store = GitStore(runner, remote="origin")
     tickets = TicketStore(store, FakeClock(NOW), SequentialIds())
     tickets.add("Second", ticket_id=T2)  # snapshot reads T1; the commit writes T2
-    assert runner.batches == [1]
+    assert blobs_read(runner) == [1]
     assert {v.ticket.id for v in tickets.list()} == {T1, T2}
-    assert runner.batches == [1]  # T2 came from the commit, T1 from the cache
+    assert blobs_read(runner) == [1]  # T2 came from the commit, T1 from the cache
     write_files(bare_remote, {wire.ticket_path(T1): wire.encode_ticket(tkt(T1, title="Edited"))})
     view = tickets.view(T1)
     assert view is not None and view.ticket.title == "Edited"
-    assert runner.batches == [1, 1]  # only the changed file
+    assert blobs_read(runner) == [1, 1]  # only the changed file
 
 
 def test_a_cached_store_sees_the_same_tickets_as_a_fresh_one(
@@ -332,12 +322,12 @@ def test_every_commit_runs_gc_auto(local: Path) -> None:
     """Plumbing never triggers git's housekeeping, so the store runs `gc --auto` after each
     commit. (Whether it packs is git's decision: it estimates loose objects by sampling, so
     a test-sized store would not reliably cross the threshold.)"""
-    runner = BlobCountingRunner(local)
+    runner = HookedRunner(local)
     tickets = TicketStore(GitStore(runner, remote="origin"), FakeClock(NOW), SequentialIds())
     for n in range(2, 5):
         tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
     tickets.view(T1)  # reads never run it
-    assert runner.commands.count("gc") == 3
+    assert len(runner.inputs_to("gc")) == 3
 
 
 def test_a_failing_gc_does_not_fail_the_commit(local: Path) -> None:

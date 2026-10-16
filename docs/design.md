@@ -271,11 +271,11 @@ file budget, `FULL` for a claim on a full ticket (*Changes in 0.2.0*).
   hash alone (no agent comparison). Callers always supply claim ids (the CLI already
   does; the library stops minting them), since a minted id could not be read back.
 - **The holder is recorded, not declared.** No op takes an agent name. A claim records
-  `holder`: the claimer's git name, mapped to a slug with ASCII only (lowercased; each
-  run of characters outside `[a-z0-9]`, hyphens and non-ASCII letters included, becomes
-  one `-`; cut to 39; then hyphens trimmed; refused if nothing is left). A re-run keeps
-  the claim's `holder`; `list --holder` maps its argument the same way and matches
-  exactly. Who did each op is the commit's author.
+  `holder`: the claimer's git name, mapped to a slug with ASCII only (`A`–`Z`
+  lowercased; each run of characters outside `[a-z0-9]`, hyphens and non-ASCII letters
+  included, becomes one `-`; cut to 39; then hyphens trimmed; refused if nothing is
+  left). A re-run keeps the claim's `holder`; `list --holder` maps its argument the same
+  way and matches exactly. Who did each op is the commit's author.
 - **edit while held** needs the holder's claim id; anyone else is refused `NOT_HOLDER`.
   An unheld ticket may be edited by anyone, as before.
 - **revoke** (new, anyone, optional reason): `NOT_FOUND`; `TERMINAL` if resolved; NoOp
@@ -291,16 +291,18 @@ file budget, `FULL` for a claim on a full ticket (*Changes in 0.2.0*).
   lowercase slugs for ids, tags and agents, `[owner/]repo` projects, free text without
   controls or invisible characters (fixed ranges, no normalisation), size limits,
   priority 0 to 100, at most 20 blockers and tags without duplicates.
-- **File budgets:** `add` and `edit` may fill 192 KiB of the ticket file (`INVALID`
-  beyond), a claim 255 KiB (`FULL` beyond: the claim history fills the ticket), and the
-  ops that end a claim (release, done, cancel, reap) 256 KiB, so a full ticket can
+- **File budgets:** `add`, and an `edit` that grows the file, may fill 192 KiB of the
+  ticket file (`INVALID` beyond; an edit that does not grow it is never refused for
+  size), a claim 255 KiB (`FULL` beyond: the claim history fills the ticket), and every
+  other op (renew, move, release, done, cancel, reap) 256 KiB, so a full ticket can
   still be finished or cancelled. `claim-next` skips a candidate it cannot write
   (invalid or full) and `reap` leaves such a ticket out, so one ticket never stops them
   for everyone.
 - **Leases:** a lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after
   now is treated as takeable (and reads expired). Honest leases never are: the cap is
-  relative to now, and the margin covers a writer's clock running up to 10 minutes
-  fast.
+  relative to now, and the margin keeps a writer whose clock runs up to 10 minutes fast
+  from having its own longest lease look forged. The skew tolerated between writers
+  stays `SKEW_GRACE` (60 s).
 - **git** always gets `--` before the remote name, so a name starting with `-` is never
   read as an option.
 
@@ -421,7 +423,7 @@ GIT_AUTHOR_IDENT`: the `GIT_AUTHOR_*` variables, then the clone's config, then g
 system), run with `user.useConfigOnly=true` so git never invents one from the OS account
 and host name; it refuses to write if none is configured. The commit author is the record of who
 did each op; `tkt log` shows its name and email, unverified. A claim also stores
-`holder`, the git name mapped to a slug with ASCII only (lowercased; each run of
+`holder`, the git name mapped to a slug with ASCII only (`A`–`Z` lowercased; each run of
 characters outside `[a-z0-9]` to one `-`; cut to 39; then hyphens trimmed from both
 ends; a name with no ASCII letters or digits is refused), so `show` and `list` say who is
 working on what. `tkt clone` prints the identity and the holder name; every write

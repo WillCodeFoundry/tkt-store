@@ -96,9 +96,10 @@ protocol 2 (ADR 0005).
   Everything else, including emoji and characters not yet assigned, is allowed.
   Refusing the zero-width joiners (U+200C, U+200D) and tag characters rules out some
   Persian and Indic spellings, joined emoji such as family emoji, and subdivision flags.
-- **File budgets.** A ticket file never exceeds 256 KiB. `add` and `edit` may fill 192
-  KiB of it (`INVALID` beyond), a claim 255 KiB (`FULL` beyond), and the ops that end a
-  claim the rest, so a full ticket can still be released, finished or cancelled.
+- **File budgets.** A ticket file never exceeds 256 KiB. `add`, and an `edit` that grows
+  the file, may fill 192 KiB of it (`INVALID` beyond), a claim 255 KiB (`FULL` beyond),
+  and every other op (renew, move, release, done, cancel, reap) the rest, so a full
+  ticket can still be released, finished or cancelled.
 
 Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
 `extra` object on disk (`Ticket.extra` is only their in-memory holder).

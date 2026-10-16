@@ -39,9 +39,9 @@
     and hidden-data characters (never normalised; title and reason one line without
     outer whitespace), at most 256, 65,536 and 256 characters;
   - priority 0 to 100; at most 20 blockers and 20 tags without duplicates;
-  - file budgets: `add`/`edit` up to 192 KiB, a claim up to 255 KiB (`FULL`, a new
-    refusal, beyond), the ops that end a claim up to 256 KiB; `claim-next` and `reap`
-    skip tickets they cannot write.
+  - file budgets: `add`, and an `edit` that grows the file, up to 192 KiB; a claim up
+    to 255 KiB (`FULL`, a new refusal, beyond); every other op up to 256 KiB;
+    `claim-next` and `reap` skip tickets they cannot write.
 
   A lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now reads
   expired and may be taken over or reaped. git always gets `--` before the remote name.

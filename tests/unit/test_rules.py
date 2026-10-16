@@ -460,6 +460,14 @@ class TestValidation:
         fits = sized(fields.CONTENT_FILE_MAX - 100, ticket_id=T2).body  # add differs slightly
         assert isinstance(decide(snap(tkt()), AddOp(T2, "Expire tokens", body=fits), NOW), Apply)
 
+    def test_an_edit_that_does_not_grow_a_large_file_is_never_refused_for_size(self) -> None:
+        """A long claim history must not freeze a ticket's content."""
+        history = tuple(ClaimId(f"{n:032x}") for n in range(5_500))
+        large = tkt(ended_claim_ids=history, body="old body")
+        assert len(large.encoded()) > fields.CONTENT_FILE_MAX
+        assert isinstance(decide(snap(large), EditOp(T1, 1, body=""), NOW), Apply)
+        refused(decide(snap(large), EditOp(T1, 1, body="a longer body"), NOW), RefusalCode.INVALID)
+
     def test_a_full_ticket_refuses_claims_but_can_still_be_ended(self) -> None:
         full = sized(fields.CLAIM_FILE_MAX - 10)
         refused(decide(snap(full), ClaimOp(T1, A, C1, TTL), NOW), RefusalCode.FULL)
@@ -557,6 +565,8 @@ class TestReap:
         tickets = snap(invalid, tkt(T2, claim=held(C2, B, TAKEABLE)))
         decision = decide(tickets, ReapOp(), NOW)
         assert isinstance(decision, Apply) and decision.record.ticket_ids == (T2,)
+        only_invalid = noop(decide(snap(invalid), ReapOp(), NOW))
+        assert "1 lapsed claim(s) on invalid tickets" in only_invalid.reason
 
 
 class TestEdit:

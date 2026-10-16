@@ -74,9 +74,9 @@ flags (`…`) may be given several times.
 
 ## Rules worth knowing
 
-- **Ids.** The caller supplies every id: ticket ids are 8 to 32 lowercase letters, digits and
-  single hyphens (`docs/format.md`); claim ids
-  are exactly 32 lowercase hex characters. Re-running a command with the same ids
+- **Ids.** The caller supplies every id: ticket ids are 8 to 32 lowercase letters,
+  digits and single hyphens (`docs/format.md`); claim ids are exactly 32 lowercase hex
+  characters. Re-running a command with the same ids
   converges (`unchanged`) instead of creating a second ticket or claim. A claim id is
   single-use and names one claim on one ticket; after its claim ends it is refused
   (`NOT_HOLDER`) for good: every ticket records its full claim history (`ended_claim_ids`).
@@ -112,8 +112,8 @@ flags (`…`) may be given several times.
   `--project` is `[owner/]repo`, lowercase; `--title` and `--reason` are one line (at
   most 256 characters) without leading or trailing whitespace, `--body` at most 65,536;
   none holds control or invisible characters (a body may hold newlines and tabs);
-  `--priority` is 0 to 100; at most 20 `--blocked-by`. `add` and `edit` may fill at
-  most 192 KiB of the ticket file.
+  `--priority` is 0 to 100; at most 20 `--blocked-by`. `add`, and an `edit` that grows
+  the file, may fill at most 192 KiB of the ticket file.
 - **Full tickets.** A claim on a ticket whose claim history fills its file (255 KiB) is
   refused `FULL`; the ticket can still be released, finished or cancelled. `claim-next`
   skips full and invalid tickets.

@@ -58,8 +58,9 @@ or commit signing could expose.
   claim hash current on one ticket only: if two tickets carry it, both are set aside).
 - A strict schema: a ticket with keys outside it is invalid; `tkt-store.json` too.
 - A ticket file is at most 256 KiB. Reads check the size before reading, and writes stay
-  within budgets: `add` and `edit` may fill 192 KiB (`INVALID` beyond), a claim 255 KiB,
-  and the ops that end a claim the full 256 KiB. `ended_claim_ids` is kept whole until
+  within budgets: `add`, and an `edit` that grows the file, may fill 192 KiB (`INVALID`
+  beyond), a claim 255 KiB, and every other op (renew, move, release, done, cancel,
+  reap) the full 256 KiB. `ended_claim_ids` is kept whole until
   the ticket is full: a claim that would pass 255 KiB is refused `FULL`, and the ticket
   can still be released, finished or cancelled. `claim-next` and `reap` skip a ticket
   they cannot write (invalid or full), so one ticket never stops them for everyone.
@@ -71,8 +72,10 @@ or commit signing could expose.
   preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
   `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now is treated as takeable (and reads
-  expired). The margin lets a writer's clock run up to 10 minutes fast without its
-  longest lease looking forged; a forged lease locks a ticket for at most that long.
+  expired). The margin only keeps a fast writer's own longest lease from looking forged;
+  the skew the system tolerates between writers stays `SKEW_GRACE` (60 s), since a fast
+  writer takes over others' lapsed claims early. A forged lease locks a ticket for at
+  most `MAX_TTL` + the margin.
 
 **Output carries no surprises:** all non-ASCII is escaped; errors never echo values read
 from the store (they name the file and the field); `list` never prints a ticket's body
@@ -96,8 +99,9 @@ GIT_AUTHOR_IDENT`), run with `user.useConfigOnly=true` so git never invents one 
 OS account and host name, and refuses to write if none is configured. The commit author
 records who did each op, and `tkt log` shows its name and email, unverified; the
 `tkt-agent` trailer goes. A claim stores `holder`, the git name mapped to a slug with
-ASCII only, the same on every Python: lowercased, each run of characters outside
-`[a-z0-9]` (hyphens and non-ASCII letters included) replaced by one `-`, cut to 39, then
+ASCII only, the same on every Python: `A`–`Z` lowercased (and no other character, so
+Python's Unicode case data never applies), each run of characters outside `[a-z0-9]`
+(hyphens and non-ASCII letters included) replaced by one `-`, cut to 39, then
 hyphens trimmed from both ends; refused if nothing is left (so a name with no ASCII
 letters or digits needs an ASCII `user.name`). `show` and `list` say who is working on
 what; `list --holder NAME` maps its argument the same way and matches exactly. A re-run of a

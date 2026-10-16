@@ -217,9 +217,10 @@ def blockers_problem(blocked_by: tuple[str, ...]) -> str | None:
 
 def ticket_problem(ticket: Ticket) -> str | None:
     """The first field of a whole ticket that breaks its rule, or None: every stored
-    value, including a ticket blocking itself and the claim history. Run on every ticket
+    field, including a ticket blocking itself and the claim history. Run on every ticket
     an op writes, so tkt never writes an invalid ticket, and to be run on every ticket
-    read."""
+    read. Invariants between fields (no claim on a resolved ticket, claimed_at before
+    lease_until, ...) are not checked here: reading the store will check them as well."""
     claim = ticket.claim
     verdicts = (
         ticket_id_problem(ticket.id),

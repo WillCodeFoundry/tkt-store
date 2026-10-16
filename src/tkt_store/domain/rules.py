@@ -78,22 +78,25 @@ def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
     decision = _decide(snapshot, op, now)
     if isinstance(decision, Apply):
         for change in decision.changes:
-            if refusal := _unwritable(change.ticket, op):
+            if refusal := _unwritable(change.ticket, op, snapshot.get(change.ticket.id)):
                 return refusal
     return decision
 
 
-def _unwritable(ticket: Ticket, op: Op) -> Refusal | None:
-    """Why `op` may not write `ticket`, if it may not: INVALID if a field breaks its rule
-    (`fields.ticket_problem`) or the file exceeds the op's budget: `add` and `edit` up to
-    fields.CONTENT_FILE_MAX, the ops that end a claim up to fields.TICKET_FILE_MAX; FULL
-    if a claim would grow it past fields.CLAIM_FILE_MAX (the claim history fills it)."""
+def _unwritable(ticket: Ticket, op: Op, before: Ticket | None = None) -> Refusal | None:
+    """Why `op` may not write `ticket` (replacing `before`), if it may not: INVALID if a
+    field breaks its rule (`fields.ticket_problem`) or the file exceeds the op's budget:
+    `add` and an `edit` that grows the file up to fields.CONTENT_FILE_MAX (an edit that
+    does not grow it is never refused for size, however long the claim history), every
+    op but a claim up to fields.TICKET_FILE_MAX; FULL if a claim would grow it past
+    fields.CLAIM_FILE_MAX (the claim history fills it)."""
     if problem := fields.ticket_problem(ticket):
         return _invalid(f"{ticket.id}: {problem}")
     size = len(ticket.encoded())
+    grows = before is None or size > len(before.encoded())
     match op:
         case AddOp() | EditOp():
-            if size > fields.CONTENT_FILE_MAX:
+            if size > fields.CONTENT_FILE_MAX and grows:
                 kib = fields.CONTENT_FILE_MAX // 1024
                 return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
         case ClaimOp() | ClaimNextOp():
@@ -103,10 +106,9 @@ def _unwritable(ticket: Ticket, op: Op) -> Refusal | None:
                     f"{ticket.id} is full: its claim history fills the ticket file; "
                     "cancel it and add a new ticket",
                 )
-        case _:
-            if size > fields.TICKET_FILE_MAX:
-                kib = fields.TICKET_FILE_MAX // 1024
-                return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
+    if size > fields.TICKET_FILE_MAX:
+        kib = fields.TICKET_FILE_MAX // 1024
+        return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
     return None
 
 
@@ -439,13 +441,15 @@ def decide_reap(snapshot: Snapshot, op: ReapOp, now: Timestamp) -> Decision:
     all. A ticket reap cannot write (`_unwritable`: an invalid ticket) is left out, so it
     never stops the others being reaped. NoOp: none is past the grace period. Safe to run
     from any writer on a schedule (idempotent)."""
-    reaped = [
-        ended
+    takeable = [
+        ticket
         for ticket in sorted(snapshot.tickets.values(), key=lambda t: t.id)
         if ticket.claim is not None and ticket.claim.is_takeable(now)
-        if not _unwritable(ended := _end_claim(ticket, now), op)
     ]
+    reaped = [ended for ticket in takeable if not _unwritable(ended := _end_claim(ticket, now), op)]
     if not reaped:
+        if left_out := len(takeable):
+            return NoOp(f"no claim reaped: {left_out} lapsed claim(s) on invalid tickets")
         return NoOp("no claim is past the grace period")
     record = OpRecord(
         op.name,

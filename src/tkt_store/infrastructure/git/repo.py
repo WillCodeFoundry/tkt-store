@@ -9,18 +9,26 @@ snapshot():
                                                 from the private ref the fetch wrote, never
                                                 from the local ref or FETCH_HEAD)
     remote.fast_forward_local(remote head)
-    git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError if
-                                                missing on a born ref or a newer protocol
-    git ls-tree -r <revision> tickets/       -> blob ids of wire.is_ticket_path entries only
-    git cat-file --batch                     -> contents (bytes) of the blobs this store has
-                                                not decoded before (decoded tickets are
-                                                cached by blob id) -> wire.decode_ticket;
-                                                one corrupt ticket fails the whole snapshot
+    git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError unless
+                                                exactly protocol 2
+    git ls-tree -l <revision> tickets/       -> modes, blob ids and sizes of ticket paths (not
+                                                recursive: a tree at a ticket path is set
+                                                aside, never recursed into)
+    git cat-file --batch                     -> contents of the regular ticket files within
+                                                the cap whose blob this store has not
+                                                checked before -> wire.decode_ticket and
+                                                fields.ticket_problem; a bad file is set
+                                                aside, never fatal (ADR 0005)
+    git ls-tree -r <revision> claims/        -> claim files, from their names alone
+                                                (wire.claim_of; ADR 0007)
+    occupancy.assemble                       -> the snapshot
 
 commit(base, changes, record):
-    git hash-object -w --stdin                (one per changed ticket)
-    git mktree                                (base tree with replaced entries; when base
-                                               is None, also wire.encode_store_meta() as
+    git hash-object -w --stdin                (one per changed ticket; the empty blob for
+                                               claim files)
+    git mktree                                (each touched tree, bottom up: replaced ticket
+                                               files, renamed claim files; when base is
+                                               None, also wire.encode_store_meta() as
                                                tkt-store.json in the root commit)
     git commit-tree <tree> [-p <base>] -F -   (message = wire.encode_message(record))
     remote.publish(new, base)                 -> push with --force-with-lease=<ref>:<base>;
@@ -43,8 +51,10 @@ from types import MappingProxyType
 
 from tkt_store.application.errors import StoreError
 from tkt_store.application.store import HistoryEntry
-from tkt_store.domain.outcomes import Change, OpRecord
-from tkt_store.domain.ticket import Revision, Snapshot, Ticket, TicketId
+from tkt_store.domain import fields
+from tkt_store.domain.occupancy import assemble
+from tkt_store.domain.outcomes import Change, OpRecord, WriteClaim, WriteTicket
+from tkt_store.domain.ticket import ClaimFile, Revision, Snapshot, Ticket, TicketId
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.runner import GitError, GitRunner, git_runner
@@ -70,10 +80,12 @@ class GitStore:
         self._git = git
         self._ref = ref
         self._remote = remote
-        self._decoded: dict[str, Ticket] = {}
-        """Tickets already decoded, by blob id. A blob id names exact content, so an entry
-        can never be stale; a snapshot reads and decodes only the files whose content it
-        has not seen. Pruned to the latest snapshot's tickets, so it stays bounded."""
+        self._verdicts: dict[str, Ticket | str] = {}
+        """Ticket files already checked, by blob id: the valid ticket, or the check that
+        failed. A blob id names exact content, so an entry can never be stale; a snapshot
+        reads and checks only the files whose content it has not seen. Pruned to the
+        latest snapshot's files, so it stays bounded."""
+        self._empty: str | None = None
 
     @classmethod
     def at(cls, repo: Path, *, remote: str, ref: str = DEFAULT_REF) -> GitStore:
@@ -85,27 +97,78 @@ class GitStore:
         if revision is None:
             return Snapshot(None, MappingProxyType({}))
         self._check_meta(revision)
-        listing = self._git("ls-tree", "-r", "-z", revision, "--", f"{wire.TICKETS_DIR}/")
-        blobs: dict[str, str] = {}  # path -> blob id
-        for entry in _entries(listing):
-            path = entry.name.decode(errors="replace")  # undecodable: never a ticket path
-            if entry.kind == "blob" and wire.is_ticket_path(path):
-                blobs[path] = entry.oid
-        decoded = {oid: self._decoded[oid] for oid in blobs.values() if oid in self._decoded}
-        unseen = {oid: path for path, oid in blobs.items() if oid not in decoded}
-        for (oid, path), data in zip(unseen.items(), self._read_blobs(list(unseen)), strict=True):
-            try:
-                decoded[oid] = wire.decode_ticket(data)
-            except StoreError as error:
-                raise StoreError(f"{path} at {revision}: {error}") from error
+        self._check_layout(revision)
+        tickets, set_aside = self._tickets(revision)
+        claims, not_folders = self._claims(revision)
+        return assemble(revision, tickets, set_aside, claims, not_folders)
+
+    def _check_layout(self, revision: Revision) -> None:
+        """`tickets` and `claims`, where present, must be folders: the store's own layout,
+        like `tkt-store.json`. Anything else is a StoreError that names no value, since
+        nothing could be written until an operator repairs it (ADR 0007)."""
+        for entry in _entries(self._git("ls-tree", "-z", revision)):
+            name = entry.name.decode(errors="replace")
+            if name in (wire.TICKETS_DIR, wire.CLAIMS_DIR) and entry.kind != "tree":
+                raise StoreError(
+                    f"{self._ref} at {revision}: {name} is not a folder; an operator must "
+                    "repair the store"
+                )
+
+    def _tickets(self, revision: Revision) -> tuple[dict[TicketId, Ticket], dict[TicketId, str]]:
+        """Every ticket file, checked (ADR 0005): only a regular file of at most
+        TICKET_FILE_MAX (both known from the listing, before reading) is read; it must
+        decode strictly, follow the field rules and be named by its id. The others are
+        set aside, with the check that failed. Verdicts are kept by blob id: a blob id
+        names exact content, so a file is never read or checked twice."""
+        listing = self._git("ls-tree", "-l", "-z", revision, "--", f"{wire.TICKETS_DIR}/")
+        set_aside: dict[TicketId, str] = {}
+        to_check: dict[TicketId, str] = {}  # id -> blob id
+        for raw in listing.split(b"\0"):
+            if not raw:
+                continue
+            meta, name = raw.split(b"\t", 1)
+            mode, kind, oid, size = meta.decode().split()
+            ticket_id = wire.ticket_id_of(name.decode(errors="replace"))
+            if ticket_id is None:
+                continue  # not a ticket path: preserved, never interpreted
+            if mode != BLOB_MODE or kind != "blob":
+                set_aside[ticket_id] = "not a regular file"
+            elif int(size) > fields.TICKET_FILE_MAX:
+                set_aside[ticket_id] = f"larger than {fields.TICKET_FILE_MAX // 1024} KiB"
+            else:
+                to_check[ticket_id] = oid
+        verdicts = {oid: self._verdicts[oid] for oid in to_check.values() if oid in self._verdicts}
+        unseen = [oid for oid in dict.fromkeys(to_check.values()) if oid not in verdicts]
+        for oid, data in zip(unseen, self._read_blobs(unseen), strict=True):
+            verdicts[oid] = _verdict(data)
         tickets: dict[TicketId, Ticket] = {}
-        for path, oid in blobs.items():
-            ticket = decoded[oid]
-            if wire.ticket_path(ticket.id) != path:
-                raise StoreError(f"{path} at {revision} holds ticket {ticket.id}")
-            tickets[ticket.id] = ticket
-        self._decoded = decoded
-        return Snapshot(revision, MappingProxyType(tickets))
+        for ticket_id, oid in to_check.items():
+            match verdicts[oid]:
+                case Ticket() as ticket if ticket.id == ticket_id:
+                    tickets[ticket_id] = ticket
+                case Ticket():
+                    set_aside[ticket_id] = "its id is not its file name"
+                case str() as problem:
+                    set_aside[ticket_id] = problem
+        self._verdicts = verdicts
+        return tickets, set_aside
+
+    def _claims(self, revision: Revision) -> tuple[list[ClaimFile], list[TicketId]]:
+        """Every claim file (ADR 0007), from the listing alone: an empty regular file whose
+        path parses (`wire.claim_of`). Nothing in a claim file is read; any other path
+        under claims/ is an unknown file, preserved and never interpreted. Also the ticket
+        ids whose `claims/<id>` is not a folder."""
+        listing = self._git("ls-tree", "-r", "-z", revision, "--", f"{wire.CLAIMS_DIR}/")
+        empty = self._empty_blob()
+        claims, not_folders = [], []
+        for entry in _entries(listing):
+            path = entry.name.decode(errors="replace")
+            empty_file = entry.mode == BLOB_MODE and entry.kind == "blob" and entry.oid == empty
+            if empty_file and (claim := wire.claim_of(path)) is not None:
+                claims.append(claim)
+            elif (ticket_id := wire.claims_folder_of(path)) is not None:
+                not_folders.append(ticket_id)
+        return claims, not_folders
 
     def commit(
         self,
@@ -140,17 +203,21 @@ class GitStore:
         ticket_id: TicketId | None = None,
         limit: int | None = None,
     ) -> Iterator[HistoryEntry]:
-        """git log <ref> --format=%H%x00%B, decoded with wire.decode_message.
-        Times come from the tkt-time trailer (`record.at`), never git's commit date."""
+        """git log <ref> --format=%H%x00%B, decoded with wire.decode_message. Foreign and
+        malformed commits are skipped, so one bad commit never breaks history. Times come
+        from the tkt-time trailer (`record.at`), never git's commit date."""
         revision = self._head()
         if revision is None:
             return iter(())
         out = self._git("log", "-z", "--format=%H%x00%B", revision).decode(errors="replace")
-        fields = out.split("\0")
+        parts = out.split("\0")
 
         def entries() -> Iterator[HistoryEntry]:
-            for commit, message in zip(fields[::2], fields[1::2], strict=False):
-                record = wire.decode_message(message)
+            for commit, message in zip(parts[::2], parts[1::2], strict=False):
+                try:
+                    record = wire.decode_message(message)
+                except wire.Invalid:
+                    continue  # a malformed tkt commit (pushed by hand) is skipped
                 if record is None:
                     continue
                 if ticket_id is None or ticket_id in record.ticket_ids:
@@ -195,28 +262,53 @@ class GitStore:
         return contents
 
     def _tree(self, base: Revision | None, changes: Sequence[Change]) -> str:
-        """The new root tree: `base`'s tree with each changed ticket's file replaced.
-        Every other entry, known or not, is carried over untouched (names stay bytes, so
-        a name that is not UTF-8 survives too)."""
-        root = {} if base is None else _by_name(self._git("ls-tree", "-z", f"{base}^{{tree}}"))
+        """The new root tree: `base`'s tree with each change applied. A ticket replaces its
+        file; a claim adds its file (git's empty blob) and removes the name it replaces, so
+        a renewal or an end is a rename. Every other entry, known or not, is carried over
+        untouched (names stay bytes, so a name that is not UTF-8 survives too)."""
+        edits: dict[str, str | None] = {}  # path -> blob id, or None to remove
         if base is None:
-            meta = self._hash(wire.encode_store_meta())
-            name = wire.STORE_META_PATH.encode()
-            root[name] = _Entry(BLOB_MODE, "blob", meta, name)
-        tickets_dir = wire.TICKETS_DIR.encode()
-        current = root.get(tickets_dir)
-        if current is not None and current.kind != "tree":
-            raise StoreError(f"{wire.TICKETS_DIR} at {base} is not a directory")
-        tickets = {} if current is None else _by_name(self._git("ls-tree", "-z", current.oid))
+            edits[wire.STORE_META_PATH] = self._hash(wire.encode_store_meta())
         for change in changes:
-            name = wire.ticket_path(change.ticket.id).removeprefix(f"{wire.TICKETS_DIR}/").encode()
-            oid = self._hash(wire.encode_ticket(change.ticket))
-            self._decoded[oid] = change.ticket  # encoding round-trips: no need to read it back
-            tickets[name] = _Entry(BLOB_MODE, "blob", oid, name)
-        if tickets:
-            oid = self._mktree(tickets)
-            root[tickets_dir] = _Entry(TREE_MODE, "tree", oid, tickets_dir)
-        return self._mktree(root)
+            match change:
+                case WriteTicket(ticket=ticket):
+                    oid = self._hash(wire.encode_ticket(ticket))
+                    self._verdicts[oid] = ticket  # encoding round-trips: no need to read it
+                    edits[wire.ticket_path(ticket.id)] = oid
+                case WriteClaim(claim=claim, replaces=replaced):
+                    if replaced is not None:
+                        edits[wire.claim_path(replaced)] = None
+                    edits[wire.claim_path(claim)] = self._empty_blob(write=True)
+        return self._edit_tree(None if base is None else f"{base}^{{tree}}", edits)
+
+    def _edit_tree(self, tree: str | None, edits: dict[str, str | None]) -> str:
+        """`tree` (None: empty) with `edits` applied, paths relative to it; returns the new
+        tree's id. Only the subtrees an edit touches are read and rewritten."""
+        entries = {} if tree is None else _by_name(self._git("ls-tree", "-z", tree))
+        nested: dict[str, dict[str, str | None]] = {}
+        for path, oid in edits.items():
+            head, slash, rest = path.partition("/")
+            if slash:
+                nested.setdefault(head, {})[rest] = oid
+            elif oid is None:
+                entries.pop(head.encode(), None)
+            else:
+                entries[head.encode()] = _Entry(BLOB_MODE, "blob", oid, head.encode())
+        for name, sub_edits in nested.items():
+            current = entries.get(name.encode())
+            if current is not None and current.kind != "tree":
+                raise StoreError(f"{name} is not a directory")
+            oid = self._edit_tree(None if current is None else current.oid, sub_edits)
+            entries[name.encode()] = _Entry(TREE_MODE, "tree", oid, name.encode())
+        return self._mktree(entries)
+
+    def _empty_blob(self, *, write: bool = False) -> str:
+        """The id of git's empty blob in this repository (its hash depends on the object
+        format), written to the object store when a claim file needs it."""
+        if write or self._empty is None:
+            args = ("hash-object", "-w", "--stdin") if write else ("hash-object", "--stdin")
+            self._empty = self._git(*args, stdin=b"").decode().strip()
+        return self._empty
 
     def _hash(self, data: bytes) -> str:
         return self._git("hash-object", "-w", "--stdin", stdin=data).decode().strip()
@@ -224,6 +316,15 @@ class GitStore:
     def _mktree(self, entries: dict[bytes, _Entry]) -> str:
         listing = b"".join(e.line() for e in entries.values())
         return self._git("mktree", "-z", stdin=listing).decode().strip()
+
+
+def _verdict(data: bytes) -> Ticket | str:
+    """A ticket file's content checked on its own: the ticket, or the check that failed."""
+    try:
+        ticket = wire.decode_ticket(data)
+    except wire.Invalid as invalid:
+        return str(invalid)
+    return fields.ticket_problem(ticket) or ticket
 
 
 class _Entry:

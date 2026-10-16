@@ -1,7 +1,7 @@
 # 0007 — Claims are records of their own, held in file names
 
-**Status:** accepted; to be implemented for 0.2.0 (protocol 2) in stage 2a, before the
-read-side validation of ADR 0005 builds on it
+**Status:** accepted; implemented for 0.2.0 (protocol 2) in stage 2a, with the read-side
+validation of ADR 0005
 
 ## Context
 
@@ -89,33 +89,41 @@ it looks only at names:
   says `done` (replacing "the last of `ended_claim_ids`"). If that file was deleted by
   hand, the re-run is `NOT_HOLDER` ("completed by another claim"): wrong but safe. A
   revoked claim's refusals say so from its name;
-- `claim` and `claim-next` look the claim's hash up first, so a re-run always finds its
-  own claim, whatever state its ticket is in.
+- `claim-next` looks the claim's hash up first, so a re-run always finds its own claim,
+  whatever state its ticket is in; `claim` names its ticket, so it answers `NOT_FOUND` or
+  `TERMINAL` for that ticket first, then looks the hash up.
 
 **Reading.** The snapshot lists `tickets/` and `claims/` and reads only ticket files;
-claim state comes from the listing alone. The checks run in this order, the same for
+claim state comes from the listing alone. `tickets` and `claims` must be folders, like
+`tkt-store.json` the store's own layout: anything else refuses the whole store until an
+operator repairs it. A `claims/<id>` that is not a folder holds its ticket by a set-aside
+claim (nothing in it can be read, so nothing is known free), or sets the id aside when
+there is no ticket. The checks run in this order, the same for
 every reader, and a claim they set aside still fences its hash:
 
 1. **Each file:** not a valid claim file (mode, empty blob, name) → an unknown file,
    ignored; a valid name whose times are out of order (`claimed_at` after
    `lease_until` or `ended_at`, which tkt never writes) → the claim is set aside.
 2. **Each hash,** over the files that passed step 1 (files set aside there still
-   fence): in more than one folder → every file with it is set aside; an `open` and an
-   ended file in one folder → the ended one wins, only the `open` is set aside.
+   fence): in more than one folder → every file with it is set aside; ended more than
+   once → every file with it is set aside (the claim is over, so its ticket is not
+   held); an `open` and an ended file in one folder → the ended one wins, only the `open`
+   is set aside.
 3. **Each folder,** counting only claims still valid, in this order: no ticket file →
    its claims are set aside (and `add` of that id is refused); a resolved ticket →
    every valid `open` is set aside, the resolution wins; more than one valid `open` →
    all of them are set aside.
 
-A ticket is **held by a set-aside claim** when an `open` file of its folder was set
-aside in step 1, in step 2 for being in more than one folder, or in step 3 for being one
-of several. Then it cannot be claimed (`claim-next` passes over it), is left out by
-`reap`, and every op on it but `cancel` is refused `SET_ASIDE`; `cancel` always
-resolves it, so no ticket is locked for good. When the claim is proven over (an ended
-file wins, or the ticket is resolved), the ticket is not held. `show` reports a held
-ticket as held by a set-aside claim. Claims on a set-aside ticket keep fencing and
-can't be acted on. A lease beyond the cap (stage 1) is a rule, not a verdict: it reads
-expired and is takeable.
+A ticket is **held by a set-aside claim** when it is left with no valid open claim after
+an `open` file of its folder was set aside in step 1, in step 2 for being in more than
+one folder, or in step 3 for being one of several. (A forged file beside a valid open
+claim is set aside and fences, but the valid claim stands.) Then it cannot be claimed
+(`claim-next` passes over it), is left out by `reap`, and every op on it but `cancel` is
+refused `SET_ASIDE`; `cancel` always resolves it, so no ticket is locked for good. When
+the claim is proven over (an ended file wins, or the ticket is resolved), the ticket is
+not held. `show` reports a held ticket as held by a set-aside claim. Claims on a set-
+aside ticket keep fencing and can't be acted on. A lease beyond the cap (stage 1) is a
+rule, not a verdict: it reads expired and is takeable.
 
 **`SET_ASIDE`** is a new refusal. It never echoes a value; it names the check that
 failed and says an operator must repair the store. In order, after `validate_op`'s
@@ -173,6 +181,8 @@ store.
 - **A git ref per claim, or git notes:** they break the single-ref compare-and-swap that
   makes every op one atomic commit (ADR 0001).
 - **Separating phase or resolution:** see *What is not separated*.
+- **Replacing a file where a folder belongs** on the next write: tkt never deletes a file
+  it does not recognise.
 
 ## Consequences
 
@@ -189,8 +199,18 @@ store.
   cross-ticket duplicate-claim check of ADR 0005 becomes "one hash, one file".
 - One empty file per claim ever made; they all share git's single empty blob. Each op
   lists them (names only) and each claim op rewrites its ticket's folder and the
-  `claims/` tree, which has an entry per ticket that was ever claimed. At 20,000 tickets
-  with about 3 claims each, that should roughly triple ADR 0006's listing and tree
-  figures (about 20 and 40 ms); stage 2a measures it.
+  `claims/` tree, which has an entry per ticket that was ever claimed. Measured in stage
+  2a at 20,000 tickets with 3 claims each (60,000 names): listing `claims/` about
+  170 ms, parsing the names about 260 ms, assembling the snapshot about 250 ms, and
+  rebuilding one folder and the `claims/` tree about 30 ms, all per op. That is more
+  than the ~60 ms first estimated, and about doubles the uncached cost of an op at that
+  size. Stage 2b's cache (ADR 0006) therefore also keeps parsed claim folders by their
+  tree id, so an op lists `claims/` without recursing (about 20 ms) and re-reads only the
+  folders that changed.
 - An operator repairing a ticket finds all of its occupancy in `claims/<id>/`, readable
   through `tkt show`.
+- A forger with push access can change what claim files say, as they can delete them:
+  a second ended file for a claim that already ended turns its re-runs into
+  `SET_ASIDE`, which never releases work early; a forged ended file beside a genuine
+  open claim ends that claim (the ended file wins), freeing its ticket for another
+  agent, as deleting the open file would.

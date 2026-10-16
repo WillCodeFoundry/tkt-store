@@ -13,7 +13,7 @@ from tests.gitkit import HookedRunner, head, once
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed, Refused
 from tkt_store.domain.outcomes import RefusalCode
-from tkt_store.domain.ticket import AgentId, ClaimId, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, TicketId, claim_hash
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.ids import SequentialIds
@@ -53,7 +53,7 @@ def test_exactly_one_clone_wins_a_claim(seeded: list[Path]) -> None:
     outcome = a.claim(T1, A, TTL, claim_id=C1)
     assert isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.ALREADY_CLAIMED
     view = b.view(T1)
-    assert view is not None and view.ticket.claim is not None and view.ticket.claim.agent == B
+    assert view is not None and view.claim is not None and view.claim.agent == B
 
 
 def test_exactly_one_wins_when_truly_concurrent(seeded: list[Path]) -> None:
@@ -78,7 +78,7 @@ def test_unrelated_tickets_both_succeed(seeded: list[Path]) -> None:
     a = service(seeded[0], once("push", lambda: b.claim(T2, B, TTL, claim_id=C2)))
     assert isinstance(a.claim(T1, A, TTL, claim_id=C1), Committed)  # after one retry
     view = a.view(T2)
-    assert view is not None and view.ticket.claim is not None and view.ticket.claim.agent == B
+    assert view is not None and view.claim is not None and view.claim.agent == B
 
 
 def test_loser_never_sees_partial_state(seeded: list[Path], bare_remote: Path) -> None:
@@ -88,5 +88,5 @@ def test_loser_never_sees_partial_state(seeded: list[Path], bare_remote: Path) -
     views = [service(c).list() for c in seeded]
     assert views[0] == views[1]
     assert head(seeded[0]) == head(seeded[1]) == head(bare_remote)
-    claims = [v.ticket.claim for v in views[0] if v.ticket.claim is not None]
-    assert [c.claim_id for c in claims] == [C2]
+    claims = [v.claim for v in views[0] if v.claim is not None]
+    assert [c.hash for c in claims] == [claim_hash(C2)]

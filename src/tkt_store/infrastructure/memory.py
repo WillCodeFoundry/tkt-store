@@ -13,6 +13,7 @@ from types import MappingProxyType
 
 from tkt_store.application.errors import Conflict
 from tkt_store.application.store import HistoryEntry
+from tkt_store.domain.occupancy import after
 from tkt_store.domain.outcomes import Change, OpRecord
 from tkt_store.domain.ticket import Revision, Snapshot, TicketId
 
@@ -75,7 +76,5 @@ class MemStore:
 
     def _append(self, changes: Sequence[Change], record: OpRecord) -> Revision:
         revision = Revision(f"mem-{len(self._commits) + 1}")
-        tickets = dict(self.snapshot().tickets)
-        tickets.update((change.ticket.id, change.ticket) for change in changes)
-        self._commits.append((Snapshot(revision, MappingProxyType(tickets)), record))
+        self._commits.append((after(self.snapshot(), changes, revision), record))
         return revision

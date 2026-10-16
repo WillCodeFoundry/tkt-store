@@ -19,7 +19,7 @@ from tkt_store.application.transaction import (
     transact,
 )
 from tkt_store.domain.operations import AddOp, ClaimOp, InitOp, OpName
-from tkt_store.domain.outcomes import Change, OpRecord, RefusalCode, WriteTicket
+from tkt_store.domain.outcomes import Change, OpRecord, RefusalCode, WriteClaim, WriteTicket
 from tkt_store.domain.ticket import (
     AgentId,
     Claim,
@@ -29,6 +29,7 @@ from tkt_store.domain.ticket import (
     Snapshot,
     Ticket,
     TicketId,
+    claim_hash,
 )
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.memory import MemStore
@@ -60,8 +61,9 @@ def store() -> MemStore:
     return store
 
 
-def other_writer(store: MemStore, *tickets: Ticket) -> None:
-    store.force_advance(tuple(WriteTicket(t) for t in tickets), OpRecord(OpName.EDIT, at=NOW))
+def other_writer(store: MemStore, *items: Ticket | Claim) -> None:
+    changes = tuple(WriteTicket(i) if isinstance(i, Ticket) else WriteClaim(i) for i in items)
+    store.force_advance(changes, OpRecord(OpName.EDIT, at=NOW))
 
 
 class FailingStore:
@@ -107,7 +109,7 @@ def test_conflict_triggers_retry_with_fresh_snapshot(store: MemStore) -> None:
 
 
 def test_retry_rechecks_rules(store: MemStore) -> None:
-    taken = tkt(T1, claim=Claim(agent=B, claim_id=C2, lease_until=NOW + 600, claimed_at=NOW))
+    taken = Claim(T1, claim_hash(C2), B, NOW, NOW + 600)
     store.before_next_commit(lambda: other_writer(store, taken))
     outcome = transact(store, ClaimOp(T1, A, C1, TTL), FakeClock(NOW))
     assert isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.ALREADY_CLAIMED
@@ -140,7 +142,7 @@ def test_refusal_and_noop_write_nothing(store: MemStore) -> None:
 def test_committed_carries_the_written_tickets(store: MemStore) -> None:
     outcome = transact(store, ClaimOp(T1, A, C1, TTL), FakeClock(NOW))
     assert isinstance(outcome, Committed)
-    assert [t.id for t in outcome.tickets] == [T1] and outcome.tickets[0].claim is not None
+    assert [t.ticket.id for t in outcome.tickets] == [T1] and outcome.tickets[0].claim is not None
     assert outcome.revision == store.snapshot().revision
 
 
@@ -149,7 +151,8 @@ def test_unchanged_carries_the_tickets_it_concerns(store: MemStore) -> None:
     transact(store, ClaimOp(T1, A, C1, TTL), clock)
     outcome = transact(store, ClaimOp(T1, A, C1, TTL), clock)
     assert isinstance(outcome, Unchanged)
-    assert outcome.tickets[0].claim is not None and outcome.tickets[0].claim.claim_id == C1
+    claim = outcome.tickets[0].claim
+    assert claim is not None and claim.hash == claim_hash(C1)
 
 
 def test_commit_uses_the_snapshot_revision_not_a_fresh_read(store: MemStore) -> None:

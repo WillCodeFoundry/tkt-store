@@ -17,7 +17,7 @@ from tkt_store.application.errors import RetriesExhausted, StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.cli import emit_error, main, render_outcome
 from tkt_store.domain.operations import ClaimOp
-from tkt_store.domain.ticket import SKEW_GRACE, AgentId, ClaimId, TicketId
+from tkt_store.domain.ticket import SKEW_GRACE, AgentId, ClaimId, TicketId, claim_hash
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.ids import SequentialIds
@@ -32,6 +32,7 @@ pytestmark = pytest.mark.git
 README = Path(__file__).resolve().parents[2] / "README.md"
 TICKET = "tkt-7f3a91c2"
 C1, C2 = "1" * 32, "2" * 32
+H1 = claim_hash(ClaimId(C1))
 
 
 class Tkt:
@@ -65,34 +66,35 @@ def test_add_claim_release_done_flow(tkt: Tkt) -> None:
     """Each command prints one JSON value with the documented shape."""
     code, out = claim(tkt)
     assert code == 0 and out["outcome"] == "committed" and len(out["revision"]) == 40
-    (ticket,) = out["tickets"]
-    assert ticket["id"] == TICKET and ticket["claim"]["claim_id"] == C1
+    (state,) = out["tickets"]
+    assert state["ticket"]["id"] == TICKET and state["claim"]["claim_hash"] == H1
+    assert C1 not in json.dumps(out)  # a claim id is never printed, only its hash
     assert tkt("move", TICKET, "--claim-id", C1, "--to-phase", "review")[1]["outcome"] == (
         "committed"
     )
     assert tkt("release", TICKET, "--claim-id", C1, "--reason", "handoff")[0] == 0
     code, out = tkt("claim-next", "--as", B, "--ttl", "1800", "--claim-id", C2, "--phase", "review")
-    assert code == 0 and out["tickets"][0]["id"] == TICKET
+    assert code == 0 and out["tickets"][0]["ticket"]["id"] == TICKET
     code, out = tkt("done", TICKET, "--claim-id", C2)
-    assert code == 0 and out["tickets"][0]["resolution"] == "done"
+    assert code == 0 and out["tickets"][0]["ticket"]["resolution"] == "done"
     code, out = tkt("show", TICKET)
-    assert code == 0 and out["status"] == "done" and out["ticket"]["ended_claim_ids"] == [C1, C2]
+    assert code == 0 and out["status"] == "done" and out["claim"] is None
     code, rows = tkt("list", "--status", "done")
     assert code == 0 and [r["ticket"]["id"] for r in rows] == [TICKET]
     code, log = tkt("log", TICKET, "--limit", "2")
     assert code == 0 and [e["op"] for e in log] == ["done", "claim-next"]
     assert set(log[0]) == {
-        "revision", "at", "op", "ticket_ids", "agent", "claim_id", "phase", "reason",
+        "revision", "at", "op", "ticket_ids", "agent", "claim_hash", "phase", "reason",
     }  # fmt: skip
 
 
 def test_edit_and_cancel(tkt: Tkt) -> None:
     code, out = tkt("edit", TICKET, "--if-version", "1", "--title", "New", "--tag", "auth")
-    assert code == 0 and out["tickets"][0]["content_version"] == 2
+    assert code == 0 and out["tickets"][0]["ticket"]["content_version"] == 2
     code, out = tkt("edit", TICKET, "--if-version", "1", "--title", "Other")
     assert code == 1 and out["code"] == "STALE"
     code, out = tkt("cancel", TICKET, "--reason", "duplicate", "--as", B)
-    assert code == 0 and out["tickets"][0]["resolution"] == "cancelled"
+    assert code == 0 and out["tickets"][0]["ticket"]["resolution"] == "cancelled"
 
 
 @pytest.mark.parametrize(("command", "count"), [("init", 0), ("claim", 1), ("reap", 2)])
@@ -118,7 +120,7 @@ def test_rerunning_the_same_command_is_unchanged(tkt: Tkt) -> None:
     claim(tkt)
     code, out = claim(tkt)
     assert code == 0 and out["outcome"] == "unchanged" and out["reason"]
-    assert out["tickets"][0]["claim"]["claim_id"] == C1
+    assert out["tickets"][0]["claim"]["claim_hash"] == H1
 
 
 def test_show_unknown_id_is_refused_not_found(tkt: Tkt) -> None:
@@ -168,4 +170,4 @@ def test_readme_quickstart_runs_as_written(clones: list[Path]) -> None:
     outputs = [json.loads(line) for line in result.stdout.splitlines()]
     assert all(not isinstance(o, dict) or o.get("outcome") != "refused" for o in outputs)
     done = outputs[-3]
-    assert done["outcome"] == "committed" and done["tickets"][0]["resolution"] == "done"
+    assert done["outcome"] == "committed" and done["tickets"][0]["ticket"]["resolution"] == "done"

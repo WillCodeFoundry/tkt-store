@@ -45,6 +45,18 @@
 
   A lease ending more than `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now reads
   expired and may be taken over or reaped. git always gets `--` before the remote name.
+- 0.2.0 stage 2a (ADR 0005, ADR 0007): **protocol 2**. Claims are empty files under
+  `claims/<id>/` whose names hold their state (hash, open or how it ended, agent,
+  times), renamed on renew and when they end; tickets lose `claim` and
+  `ended_claim_ids`. Claim ids are stored and printed only as their SHA-256 hash, and
+  the library no longer mints them. Everything read is checked: `tkt-store.json` must be
+  exactly `{"protocol": 2}`; a ticket file must be a regular file of at most 256 KiB,
+  decode strictly (unknown keys invalid) and follow the field rules; claim files are
+  judged from their names alone, in a fixed order. A bad file is set aside, never
+  fatal, and never echoed; an op naming one is refused `SET_ASIDE` (new). History skips
+  malformed commits. Output: each ticket comes with its open claim
+  (`{"ticket", "claim"}`), and `log` entries carry `claim_hash`. Stage 1's file budgets
+  and `FULL` are gone.
 - Claims to become records of their own in 0.2.0 (ADR 0007): empty files under
   `claims/<id>/` whose names hold the claim's whole state (hash, open or how it ended,
   holder, times), so fencing survives a ticket being set aside, nothing in a claim is

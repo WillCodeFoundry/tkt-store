@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tkt_store.domain.occupancy import assemble
 from tkt_store.domain.operations import ClaimOp, Op, ReapOp
 from tkt_store.domain.outcomes import Apply, NoOp, Refusal, RefusalCode
 from tkt_store.domain.rules import decide
@@ -22,6 +23,7 @@ from tkt_store.domain.ticket import (
     Snapshot,
     Ticket,
     TicketId,
+    claim_hash,
 )
 
 NOW = 1_000_000
@@ -41,7 +43,12 @@ def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
     return replace(base, **fields)
 
 
-FORGED_LEASE = Claim(agent=A, claim_id=C1, lease_until=NOW + 100 * MAX_TTL, claimed_at=NOW)
+def held_by(claim: Claim) -> Snapshot:
+    """A snapshot holding T1 under `claim`."""
+    return assemble(Revision("r1"), {T1: tkt(T1)}, {}, [claim])
+
+
+FORGED_LEASE = Claim(T1, claim_hash(C1), A, NOW, NOW + 100 * MAX_TTL)
 """A lease no honest writer can produce: renew and claim cap it at now + MAX_TTL."""
 
 
@@ -53,13 +60,11 @@ def test_a_forged_far_future_lease_does_not_lock_a_ticket(op: Op) -> None:
     clock margin), the claim can be taken over or reaped, however far its lease_until
     claims to run."""
     later = NOW + MAX_TTL + LEASE_CAP_MARGIN + 1
-    assert isinstance(
-        decide(Snapshot(Revision("r1"), {T1: tkt(T1, claim=FORGED_LEASE)}), op, later), Apply
-    )
+    assert isinstance(decide(held_by(FORGED_LEASE), op, later), Apply)
 
 
 RENEWED_AT = NOW + MAX_TTL + LEASE_CAP_MARGIN + 1
-HONESTLY_RENEWED = Claim(agent=A, claim_id=C1, lease_until=RENEWED_AT + TTL, claimed_at=NOW)
+HONESTLY_RENEWED = Claim(T1, claim_hash(C1), A, NOW, RENEWED_AT + TTL)
 """Claimed at NOW and renewed for longer than MAX_TTL: renew keeps claimed_at."""
 
 
@@ -68,7 +73,7 @@ def test_guard_an_honestly_renewed_claim_is_never_taken_over() -> None:
     take over a claim that has been renewed for more than MAX_TTL while its lease is live,
     breaking invariant 1; only a cap relative to now passes both tests."""
     now = RENEWED_AT + 1
-    snapshot = Snapshot(Revision("r1"), {T1: tkt(T1, claim=HONESTLY_RENEWED)})
+    snapshot = held_by(HONESTLY_RENEWED)
     claim = decide(snapshot, ClaimOp(T1, B, C2, TTL), now)
     assert isinstance(claim, Refusal) and claim.code is RefusalCode.ALREADY_CLAIMED
     assert isinstance(decide(snapshot, ReapOp(), now), NoOp)

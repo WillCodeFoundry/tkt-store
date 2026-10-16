@@ -16,7 +16,7 @@ from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed, Unchanged
 from tkt_store.domain.operations import ClaimOp, OpName
-from tkt_store.domain.ticket import AgentId, ClaimId, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, TicketId, claim_hash
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError
@@ -86,7 +86,7 @@ def test_crash_after_push_before_local_update_converges_on_next_op(
         service(repo, hook=once("update-ref", crash)).claim(T1, A, TTL, claim_id=C1)
     assert head(repo) != head(bare_remote)  # published; the local cache is behind
     view = service(repo).view(T1)
-    assert view is not None and view.ticket.claim is not None
+    assert view is not None and view.claim is not None
     assert head(repo) == head(bare_remote)  # the next snapshot repaired the cache
 
 
@@ -95,7 +95,7 @@ def test_rerunning_claim_with_same_claim_id_converges_to_one_claim(repo: Path) -
         service(repo, hook=once("update-ref", crash)).claim(T1, A, TTL, claim_id=C1)
     again = service(repo).claim(T1, A, TTL, claim_id=C1)
     assert isinstance(again, Unchanged)
-    assert again.tickets[0].claim is not None and again.tickets[0].claim.claim_id == C1
+    assert again.tickets[0].claim is not None and again.tickets[0].claim.hash == claim_hash(C1)
     assert claims(repo) == [OpName.CLAIM]
 
 
@@ -113,6 +113,6 @@ def test_ambiguous_push_failure_rerun_converges(repo: Path) -> None:
     op = exc.value.op
     assert isinstance(op, ClaimOp) and op.claim_id == C1
     again = service(repo).claim(op.ticket_id, op.agent, op.ttl, claim_id=op.claim_id)
-    assert isinstance(again, Unchanged) and again.tickets[0].id == T1
-    assert again.tickets[0].claim is not None and again.tickets[0].claim.claim_id == C1
+    assert isinstance(again, Unchanged) and again.tickets[0].ticket.id == T1
+    assert again.tickets[0].claim is not None and again.tickets[0].claim.hash == claim_hash(C1)
     assert claims(repo) == [OpName.CLAIM]

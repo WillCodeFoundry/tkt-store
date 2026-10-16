@@ -27,11 +27,11 @@ class Store(Protocol):
     """Contract:
 
     snapshot()
-        Returns the current revision and all tickets. Reflects every commit that
-        returned successfully before the call. May fetch first.
-        Raises StoreError if the store's format version is missing or newer than
-        supported, or if a ticket file is corrupt (the whole snapshot fails: a partial
-        view could mislead dependency checks and claim-next).
+        Returns the current revision, the valid tickets and claims, and what was set
+        aside on reading (ADR 0005, ADR 0007). Reflects every commit that returned
+        successfully before the call. May fetch first.
+        Raises StoreError if the store's format is not protocol 2. A bad ticket or claim
+        file never fails it: it is set aside, and the rules never act on it.
 
     commit(base, changes, record)
         Atomically applies `changes` as ONE commit whose parent is `base`, and
@@ -47,7 +47,8 @@ class Store(Protocol):
 
     history(ticket_id, limit)
         Newest first. Filtered to records naming `ticket_id` when given.
-        Commits without tkt trailers (foreign commits) yield no entry.
+        Commits without tkt trailers (foreign commits) and malformed tkt commits yield
+        no entry.
     """
 
     def snapshot(self) -> Snapshot: ...

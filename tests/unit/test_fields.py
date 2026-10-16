@@ -10,7 +10,7 @@ from dataclasses import replace
 import pytest
 
 from tkt_store.domain import fields
-from tkt_store.domain.ticket import AgentId, Claim, ClaimId, ProjectId, Ticket, TicketId
+from tkt_store.domain.ticket import ProjectId, Ticket, TicketId
 
 ACCEPTED_TEXT = {
     "plain": "Fix tests",
@@ -239,10 +239,8 @@ def test_ticket_problem_checks_every_stored_field() -> None:
         "priority": replace(ticket, priority=101),
         "self block": replace(ticket, blocked_by=(ticket.id,)),
         "tags": replace(ticket, tags=("Auth",)),
-        "claim agent": replace(
-            ticket, claim=Claim(AgentId("Coder"), ClaimId("1" * 32), lease_until=1, claimed_at=0)
-        ),
-        "ended claim": replace(ticket, ended_claim_ids=(ClaimId("short"),)),
+        "content version": replace(ticket, content_version=0),
+        "updated before created": replace(ticket, created=5, updated=4),
     }
     for name, value in broken.items():
         assert fields.ticket_problem(value) is not None, name

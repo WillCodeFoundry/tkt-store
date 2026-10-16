@@ -31,14 +31,6 @@ from tkt_store.domain.ticket import CLAIM_ID_RE, TICKET_ID_RE, Ticket
 TICKET_FILE_MAX = 256 * 1024
 """Bytes in an encoded ticket file: tkt never writes a larger one, and will refuse to
 read one."""
-CONTENT_FILE_MAX = 192 * 1024
-"""Bytes `add` and `edit` may leave in the file. The rest is for the claim history, so
-content never stops a ticket being claimed, released, finished or cancelled."""
-CLAIM_FILE_MAX = TICKET_FILE_MAX - 1024
-"""Bytes a claim may grow the file to. Past it the ticket is full (`FULL`); the last
-KiB is for the ops that end a claim (release, done, cancel, reap), so a full ticket
-can still be finished or cancelled."""
-
 TITLE_MAX = 256
 BODY_MAX = 65_536
 REASON_MAX = 256
@@ -217,11 +209,10 @@ def blockers_problem(blocked_by: tuple[str, ...]) -> str | None:
 
 def ticket_problem(ticket: Ticket) -> str | None:
     """The first field of a whole ticket that breaks its rule, or None: every stored
-    field, including a ticket blocking itself and the claim history. Run on every ticket
-    an op writes, so tkt never writes an invalid ticket, and to be run on every ticket
-    read. Invariants between fields (no claim on a resolved ticket, claimed_at before
-    lease_until, ...) are not checked here: reading the store will check them as well."""
-    claim = ticket.claim
+    field, a ticket blocking itself, content_version of at least 1, and updated not
+    before created. Run on every ticket an op writes, so tkt never writes an invalid
+    ticket, and on every ticket read. Claims are checked from their file names
+    (`domain.occupancy`, ADR 0007)."""
     verdicts = (
         ticket_id_problem(ticket.id),
         title_problem(ticket.title),
@@ -231,12 +222,7 @@ def ticket_problem(ticket: Ticket) -> str | None:
         blockers_problem(ticket.blocked_by),
         "a ticket cannot block itself" if ticket.id in ticket.blocked_by else None,
         tags_problem(ticket.tags),
-        None if claim is None else agent_problem(claim.agent),
-        None if claim is None else claim_id_problem(claim.claim_id),
-        *(
-            f"ended claim {position} is not a claim id"
-            for position, claim_id in enumerate(ticket.ended_claim_ids, 1)
-            if claim_id_problem(claim_id)
-        ),
+        "content_version is below 1" if ticket.content_version < 1 else None,
+        "updated is before created" if ticket.updated < ticket.created else None,
     )
     return next((verdict for verdict in verdicts if verdict is not None), None)

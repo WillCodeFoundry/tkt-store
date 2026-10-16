@@ -1,10 +1,10 @@
-# On-branch format — tkt-protocol 1
+# On-branch format — tkt-protocol 2
 
-Pre-1.0, while no store is deployed, format changes keep protocol 1 when documented
-here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`;
-phases are the nine-value set below, without `development`), `ended_claim_ids`,
-`claim.claimed_at`, `content_version`, the `move` op with its `tkt-phase` trailer, and
-`tkt-store.json`.
+Protocol 2 (0.2.0) is the format of ADR 0005 and ADR 0007: claims are files of their
+own whose names hold their state, claim ids are stored only as their SHA-256 hash, and
+everything read is checked; anything that fails a check is set aside, never fatal.
+Protocol 1 stores are not read and not migrated. Pre-1.0, while no store is deployed,
+format changes keep protocol 2 when documented here (AGENTS.md).
 
 ## Branch layout
 
@@ -17,19 +17,32 @@ tkt-store.json
 tickets/
   tkt-7f3a91c2.json
   tkt-91c20b4e.json
+claims/
+  tkt-7f3a91c2/
+    3f9c…a7e1.open.coder-7.1790995000.1790996800
+    81d0…4c2b.released.coder-7.1790990500.1790994100
 ```
 
-- `tkt-store.json` records the format version, `{"protocol": 1}`; other keys are
-  ignored. `init` writes it into the root commit; every snapshot checks it and fails
-  (`StoreError`) if it is missing or newer than the client supports.
+- `tkt-store.json` is exactly `{"protocol": 2}`. `init` writes it into the root commit;
+  every snapshot checks it and fails (`StoreError`) if it is missing or anything else.
+  The error never repeats what it read.
 - One file per ticket, `tickets/<id>.json`: any file there whose name without `.json`
-  follows the id rule (below) is a ticket file. The id is both the filename stem and the
-  `id` field (a mismatch is an error).
-- Files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
+  follows the id rule (below) is a ticket file, and its `id` field must be that name.
+- Claims are files under `claims/<id>/`, one folder per ticket (*Claims* below).
+- `tickets` and `claims`, where present, must be folders: anything else refuses the whole
+  store (`StoreError`), like a bad `tkt-store.json`.
+- Ticket files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
   (stable diffs, byte-identical round trips).
-- No other files are meaningful. Unknown files (anything not matching the two paths
-  above) are preserved, never interpreted. A ticket file that fails to decode fails the
-  whole snapshot; repair it with an ordinary git commit.
+- No other files are meaningful. Unknown files (anything not matching these paths) are
+  preserved, never interpreted.
+
+**Reading.** Every file is treated as hostile. A ticket file is read only if it is a
+regular file (mode `100644`) of at most 256 KiB, both known from the listing before
+anything is read; it must then decode strictly (exactly the fields below, each of its
+type), follow the field rules, and be named by its `id`. A file that fails any check is
+**set aside**: left out of every decision, kept unchanged, its id still taken, and
+recorded with the check that failed (never the value read). An operator repairs it with
+an ordinary git commit. Nothing read from a set-aside file is used.
 
 ## Ticket schema
 
@@ -43,10 +56,8 @@ tickets/
   "priority": 2,
   "blocked_by": ["tkt-91c20b4e"],
   "tags": ["auth"],
-  "claim": {"agent": "coder-7", "claim_id": "c9f2e1d07b3a4e58a6f0c2b9e4d1a873", "lease_until": 1791000000, "claimed_at": 1790995000},
   "phase": "implementation",
   "resolution": null,
-  "ended_claim_ids": ["8a21c4f09e3b4d7fb6c5a1e2d3f40b9c"],
   "created": 1790990000,
   "updated": 1790995000,
   "content_version": 3
@@ -61,19 +72,18 @@ tickets/
 | `kind` | `"story" \| "task" \| "bug"` | |
 | `project` | string \| null | `[owner/]repo`: an optional owner (a slug of 1 to 39) and `/`, then a repo of 1 to 100 lowercase letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit (e.g. `willcodefoundry/tkt-store`, or a root-commit hash); never interpreted; null = no project; a `--project` filter matches that exact value only |
 | `priority` | int \| null | 0 to 100, lower = more urgent; null sorts last |
-| `blocked_by` | list[string] | at most 20 ticket ids (same pattern as `id`), no duplicates, never the ticket itself, each an existing ticket when written; they must be `done` before claiming |
+| `blocked_by` | list[string] | at most 20 ticket ids (same pattern as `id`), no duplicates, never the ticket itself, each an existing valid ticket when written; they must be `done` before claiming (a missing or set-aside blocker counts as not done) |
 | `tags` | list[string] | at most 20, no duplicates, each a slug of 1 to 50 (a valid GitHub topic) |
-| `claim` | object \| null | present ⇒ held (possibly expired): `agent` (a slug of 1 to 39, a lowercase GitHub username), `claim_id` (exactly 32 lowercase hex characters), `lease_until`, `claimed_at` (unix seconds; renew keeps it). A `lease_until` more than `MAX_TTL` + `LEASE_CAP_MARGIN` (2 h + 10 min) after now, which no honest writer sets, reads expired and may be taken over or reaped |
 | `phase` | `"triage" \| "specification" \| "implementation" \| "cleanup" \| "architecture" \| "hardening" \| "qa" \| "review" \| "release"` | workflow position (which role the ticket waits for); moved only by the holder's `move` |
 | `resolution` | `"done" \| "cancelled"` \| null | null while open; set once by `done`/`cancel`; non-null means terminal (final) |
-| `ended_claim_ids` | list[string] | every claim id that has ended on this ticket, oldest first, however it ended (released, reaped, taken over, cancelled, done); never truncated; an id here can never claim again; a claim that would grow the file past 255 KiB is refused `FULL`; when `resolution` is `done`, the last entry completed the ticket |
-| `created`, `updated` | int | unix seconds (from the injected clock); `updated` is set by every op that writes the ticket |
-| `content_version` | int | optimistic concurrency for content: 1 when added, incremented only by `edit`; an edit must name it (`STALE` otherwise) |
+| `created`, `updated` | int | unix seconds (from the injected clock); `updated` is never before `created`, and is set by every op that writes the ticket (add, edit, move, done, cancel; claim ops do not write it) |
+| `content_version` | int | at least 1: 1 when added, incremented only by `edit`; an edit must name it (`STALE` otherwise) |
+
+A key outside this table, or a missing one, makes the file invalid (set aside).
 
 **Field rules.** tkt never writes a ticket that breaks the rules in the table: an op
-whose values break them, or whose resulting ticket would, is refused `INVALID`. Files
-are not yet checked against these rules when read; that comes with the rest of
-protocol 2 (ADR 0005).
+whose values break them, or whose resulting ticket would, is refused `INVALID`. Every
+ticket read is checked against the same rules.
 
 - **Slugs.** Identifiers are lowercase slugs: letters `a-z` and digits in runs joined by
   single hyphens, never a hyphen at either end (`tkt-7f3a91c2`, `coder-7`, `auth`).
@@ -96,15 +106,69 @@ protocol 2 (ADR 0005).
   Everything else, including emoji and characters not yet assigned, is allowed.
   Refusing the zero-width joiners (U+200C, U+200D) and tag characters rules out some
   Persian and Indic spellings, joined emoji such as family emoji, and subdivision flags.
-- **File budgets.** A ticket file never exceeds 256 KiB. `add`, and an `edit` that grows
-  the file, may fill 192 KiB of it (`INVALID` beyond), a claim 255 KiB (`FULL` beyond),
-  and every other op (renew, move, release, done, cancel, reap) the rest, so a full
-  ticket can still be released, finished or cancelled.
+- **File size.** A ticket file never exceeds 256 KiB: an op whose ticket file would is
+  refused `INVALID`.
 
-Unknown keys are preserved **at top level** and round-tripped unchanged; there is no
-`extra` object on disk (`Ticket.extra` is only their in-memory holder).
+**Not stored:** status and history (derived). Claim age is derived from the open claim's
+`claimed_at`.
 
-**Not stored:** status and history (derived). Claim age is derived from `claim.claimed_at`.
+## Claims
+
+A claim is an **empty file** whose name is its whole state (ADR 0007). Nothing in a
+claim file is ever read:
+
+```text
+claims/<id>/<hash>.open.<agent>.<claimed_at>.<lease_until>        the ticket's open claim
+claims/<id>/<hash>.<ended_by>.<agent>.<claimed_at>.<ended_at>     each claim that ended on it
+```
+
+| Part | Value |
+|---|---|
+| `<id>` | the ticket's id |
+| `<hash>` | the SHA-256 of the claim id, 64 lowercase hex. The claim id itself (32 lowercase hex, supplied by the caller) is never stored or printed: only the agent that minted it can act on its claim |
+| `<ended_by>` | how the claim ended: `released`, `done`, `cancelled`, `reaped`, `taken-over`, `revoked` |
+| `<agent>` | the acting agent: a slug of 1 to 39 |
+| `<claimed_at>`, `<lease_until>`, `<ended_at>` | unix seconds, 1 to 12 digits, no leading zero |
+
+No part can hold a `.`, so a name splits unambiguously; a name is at most 141
+characters. Each op writes its claim changes in the same commit as the rest:
+
+| Op | Claim files |
+|---|---|
+| `claim`, `claim-next` | adds the `open` file; a takeover first renames the old one to `taken-over` |
+| `renew` | renames the `open` file with the new `lease_until` |
+| `release` | renames the `open` file to `released` |
+| `done` | renames the `open` file to `done` (and writes the ticket's resolution) |
+| `cancel` | renames any `open` file to `cancelled` (and writes the ticket's resolution) |
+| `reap` | renames each takeable `open` file to `reaped` |
+
+`ended_at` is never before `claimed_at`, and a renewed `lease_until` never before
+`claimed_at`, whatever the writer's clock. A `lease_until` more than `MAX_TTL` +
+`LEASE_CAP_MARGIN` (2 h + 10 min) after now, which no honest writer sets, reads expired
+and may be taken over or reaped. Ended claim files are kept for good: a claim hash that
+appears anywhere can never claim again.
+
+**Reading claims.** A file under `claims/` is a claim only if its mode is `100644`, its
+blob is git's empty blob and its path matches the pattern above; anything else is an
+unknown file, preserved, and no part of it is used (renaming a claim file to anything
+else has the effect of deleting it). A `claims/<id>` that is not a folder holds its
+ticket by a set-aside claim, or sets the id aside when there is no ticket. The claims
+are then checked in this order, the same for every reader; a claim set aside still
+fences its hash (it can never claim again):
+
+1. **Each file:** `claimed_at` after `lease_until` or `ended_at` → the claim is set aside.
+2. **Each hash:** in more than one folder → every file with it is set aside; ended more
+   than once → all set aside; an `open` and an ended file in one folder → the ended one
+   wins, only the `open` one is set aside.
+3. **Each folder,** counting only the claims still valid: no ticket file → its claims are
+   set aside, and so is the id (`add` of it is refused); a set-aside ticket → its claims
+   fence but can't be acted on; a resolved ticket → every `open` claim is set aside (the
+   resolution wins); more than one `open` claim → all of them are set aside.
+
+A ticket that is left with no valid open claim after an `open` file of its folder was
+set aside in step 1, in step 2 for being in more than one folder, or in step 3 for being
+one of several, is **held by a set-aside claim**: it reads `claimed`, cannot be claimed
+or reaped, and only `cancel` may act on it, so no ticket is locked for good.
 
 ## Commit messages
 
@@ -114,27 +178,29 @@ trailers are machine-readable:
 ```text
 claim tkt-7f3a91c2: Expire reset tokens
 
-tkt-protocol: 1
+tkt-protocol: 2
 tkt-op: claim
 tkt-time: 1790995000
 tkt-id: tkt-7f3a91c2
 tkt-agent: coder-7
-tkt-claim: c9f2e1d07b3a4e58a6f0c2b9e4d1a873
+tkt-claim: 3f9c…a7e1
 ```
 
 | Trailer | Required | Values |
 |---|---|---|
-| `tkt-protocol` | yes | integer protocol version |
+| `tkt-protocol` | yes | `2` |
 | `tkt-op` | yes | `init`, `add`, `edit`, `claim`, `claim-next`, `renew`, `move`, `release`, `done`, `cancel`, `reap` |
 | `tkt-time` | yes | unix seconds from the writer's injected clock; informational across writers |
 | `tkt-id` | yes (except `init`) | ticket id; `reap` lists one `tkt-id` per released ticket |
-| `tkt-agent` | when an agent acted | agent id (the rule for `claim.agent`) |
-| `tkt-claim` | for claim-scoped ops | claim id |
+| `tkt-agent` | when an agent acted | agent id (a slug of 1 to 39) |
+| `tkt-claim` | for claim-scoped ops | the claim's hash (64 lowercase hex), never the claim id |
 | `tkt-phase` | on `move` | the ticket's new phase |
 | `tkt-reason` | optional | free text, one line, at most 256 characters (cancel/release reasons) |
 
-A commit without tkt trailers is foreign and ignored by history. A tkt commit missing
-a required trailer, or with an unknown future protocol version, is a `StoreError`.
+A commit without tkt trailers is foreign and ignored by history. A tkt commit whose
+trailers break the format (another protocol, a missing or repeated required trailer, a
+value that breaks its rule) is skipped by history, so one bad commit never breaks
+`tkt log`.
 
 Commit author/committer are the identity of the writing process (whatever runs `tkt`);
 the acting agent is recorded in `tkt-agent`.

@@ -23,7 +23,7 @@ from tkt_store.domain.ticket import Resolution, Snapshot, Ticket, TicketId, Time
 class Status(StrEnum):
     OPEN = "open"  # live, unclaimed, not blocked — available to claim
     BLOCKED = "blocked"  # no live claim, some blocker not yet done
-    CLAIMED = "claimed"  # a live claim (lease_until > now)
+    CLAIMED = "claimed"  # a live claim (lease_until > now), or held by a set-aside claim
     EXPIRED = "expired"  # a claim is present, its lease has lapsed, not blocked
     DONE = "done"  # terminal: resolution is DONE
     CANCELLED = "cancelled"  # terminal: resolution is CANCELLED
@@ -42,8 +42,9 @@ def open_blockers(snapshot: Snapshot, ticket: Ticket) -> tuple[TicketId, ...]:
 def derive_status(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Status:
     """Compute a ticket's status.
 
-    Precedence: resolution > CLAIMED (live claim) > BLOCKED (any blocker not
-    DONE) > EXPIRED (lapsed claim) > OPEN. Blocked outranks expired so a blocked
+    Precedence: resolution > CLAIMED (live claim, or held by a set-aside claim, whose
+    lease is not trusted) > BLOCKED (any blocker not DONE) > EXPIRED (lapsed claim) >
+    OPEN. Blocked outranks expired so a blocked
     ticket never reads as available; side effect: a blocked ticket with a lapsed
     claim reads BLOCKED (`list --status expired` omits it) although `reap` still
     releases that claim once it is past the grace. Blockers are resolved against
@@ -53,11 +54,12 @@ def derive_status(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Status:
         return Status.DONE
     if ticket.resolution is Resolution.CANCELLED:
         return Status.CANCELLED
-    if ticket.claim is not None and ticket.claim.is_live(now):
+    claim = snapshot.claim_of(ticket.id)
+    if (claim is not None and claim.is_live(now)) or ticket.id in snapshot.held_aside:
         return Status.CLAIMED
     if open_blockers(snapshot, ticket):
         return Status.BLOCKED
-    if ticket.claim is not None:
+    if claim is not None:
         return Status.EXPIRED
     return Status.OPEN
 
@@ -67,7 +69,8 @@ def why_not_claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Ref
 
     None if a NEW claim may be taken now; otherwise the refusal, in this order:
     TERMINAL (resolved); BLOCKED (any blocker not resolved DONE; unknown counts as not done);
-    ALREADY_CLAIMED (a claim that is not takeable: live, or lapsed within SKEW_GRACE).
+    SET_ASIDE (held by a set-aside claim); ALREADY_CLAIMED (a claim that is not takeable:
+    live, or lapsed within SKEW_GRACE).
     Not the same as status in {OPEN, EXPIRED}: a claim within the grace reads EXPIRED
     but cannot be taken yet. Claim-id checks (re-runs, ended ids) are the rules' concern.
     """
@@ -75,7 +78,9 @@ def why_not_claimable(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> Ref
         return Refusal(RefusalCode.TERMINAL, f"{ticket.id} is {ticket.resolution.value}")
     if blockers := open_blockers(snapshot, ticket):
         return Refusal(RefusalCode.BLOCKED, f"{ticket.id} is blocked by {', '.join(blockers)}")
-    claim = ticket.claim
+    if why := snapshot.held_aside.get(ticket.id):
+        return Refusal(RefusalCode.SET_ASIDE, f"{ticket.id} is held by a set-aside claim: {why}")
+    claim = snapshot.claim_of(ticket.id)
     if claim is not None and not claim.is_takeable(now):
         state = "until" if claim.is_live(now) else "lapsed at"
         return Refusal(

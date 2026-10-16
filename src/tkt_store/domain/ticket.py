@@ -7,11 +7,14 @@ Status is NOT here — it is derived in `domain.status`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from enum import StrEnum
+from functools import cached_property
+from types import MappingProxyType
 from typing import Any, NewType
 
 TicketId = NewType("TicketId", str)
@@ -28,8 +31,19 @@ and single hyphens, starting and ending with a letter or digit (e.g. `tkt-7f3a91
 `match` with `$`, which accepts a trailing newline)."""
 
 CLAIM_ID_RE = re.compile(r"[0-9a-f]{32}")
-"""A claim id: exactly 128 bits as lowercase hex. Written into the `tkt-claim` trailer.
-Always check with `fullmatch`."""
+"""A claim id: exactly 128 bits as lowercase hex, supplied by the caller and never stored:
+only its hash is (`claim_hash`). Always check with `fullmatch`."""
+
+ClaimHash = NewType("ClaimHash", str)
+CLAIM_HASH_RE = re.compile(r"[0-9a-f]{64}")
+"""A claim's hash: the SHA-256 of its claim id, 64 lowercase hex. It names the claim's
+file and fills the `tkt-claim` trailer (ADR 0005, ADR 0007). Check with `fullmatch`."""
+
+
+def claim_hash(claim_id: ClaimId) -> ClaimHash:
+    """The stored form of a claim id. Only the agent that minted the id can produce it."""
+    return ClaimHash(hashlib.sha256(claim_id.encode()).hexdigest())
+
 
 Revision = NewType("Revision", str)
 """An opaque handle to one committed state of the store.
@@ -95,20 +109,33 @@ class Resolution(StrEnum):
     CANCELLED = "cancelled"  # abandoned (`cancel`, an administrative act)
 
 
+class EndedBy(StrEnum):
+    """How a claim ended (ADR 0007): part of its file name once it has."""
+
+    RELEASED = "released"  # its holder gave it back
+    DONE = "done"  # its holder completed the ticket
+    CANCELLED = "cancelled"  # the ticket was cancelled while it was held
+    REAPED = "reaped"  # reap cleared it, past its lease and the grace
+    TAKEN_OVER = "taken-over"  # a new claim took the ticket, past its lease and the grace
+    REVOKED = "revoked"  # stage 4: ended by anyone without resolving the ticket
+
+
 @dataclass(frozen=True)
 class Claim:
-    """An exclusive, time-limited hold on a ticket (ADR 0003).
+    """An open, exclusive, time-limited hold on a ticket (ADR 0003, ADR 0007).
 
-    The lease is advisory; the `claim_id` is authoritative (fencing). A lapsed
-    claim may still be renewed, released or completed by its holder until someone
-    takes it over or reaps it.
+    Stored as an empty file whose name is its whole state:
+    `claims/<ticket_id>/<hash>.open.<agent>.<claimed_at>.<lease_until>`. The lease is
+    advisory; the hash is authoritative (fencing). A lapsed claim may still be renewed,
+    released or completed by its holder until someone takes it over or reaps it.
     """
 
+    ticket_id: TicketId
+    hash: ClaimHash
     agent: AgentId
-    claim_id: ClaimId
-    lease_until: Timestamp
     claimed_at: Timestamp
     """When this claim was taken (the claimant's injected clock); renew keeps it."""
+    lease_until: Timestamp
 
     def age(self, now: Timestamp) -> Duration:
         """Seconds since `claimed_at` (claim age, shown by `tkt show`), never negative.
@@ -134,14 +161,53 @@ class Claim:
         honestly renewed claim is never beyond it."""
         return self.lease_until > now + MAX_TTL + LEASE_CAP_MARGIN
 
+    def renewed(self, lease_until: Timestamp) -> Claim:
+        """This claim with a new lease, never before `claimed_at`: a renewer whose clock
+        is behind the claimer's still writes a name it would accept (ADR 0007)."""
+        return replace(self, lease_until=max(lease_until, self.claimed_at))
+
+    def ended(self, by: EndedBy, at: Timestamp) -> EndedClaim:
+        """This claim, ended `by` at `at`, never before `claimed_at` (as `renewed`)."""
+        return EndedClaim(
+            self.ticket_id, self.hash, self.agent, self.claimed_at, by, max(at, self.claimed_at)
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        """The claim as plain data, as it appears in the ticket file (docs/format.md)."""
+        """The claim as plain data, as interfaces print it: the hash, never a claim id."""
         return {
+            "claim_hash": self.hash,
             "agent": self.agent,
-            "claim_id": self.claim_id,
-            "lease_until": self.lease_until,
             "claimed_at": self.claimed_at,
+            "lease_until": self.lease_until,
         }
+
+
+@dataclass(frozen=True)
+class EndedClaim:
+    """A claim that has ended, kept for good so its hash stays fenced (it can never claim
+    again) and re-runs of holder ops converge. Stored as an empty file:
+    `claims/<ticket_id>/<hash>.<ended_by>.<agent>.<claimed_at>.<ended_at>`."""
+
+    ticket_id: TicketId
+    hash: ClaimHash
+    agent: AgentId
+    claimed_at: Timestamp
+    ended_by: EndedBy
+    ended_at: Timestamp
+
+    def to_dict(self) -> dict[str, Any]:
+        """The ended claim as plain data, as interfaces print it."""
+        return {
+            "claim_hash": self.hash,
+            "agent": self.agent,
+            "claimed_at": self.claimed_at,
+            "ended_by": self.ended_by.value,
+            "ended_at": self.ended_at,
+        }
+
+
+ClaimFile = Claim | EndedClaim
+"""What one claim file holds: an open claim or an ended one."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -156,9 +222,10 @@ class Ticket:
                    — changed only by `edit` (anyone), guarded by content_version
     - workflow     phase, resolution — phase by the holder's `move`; resolution set
                    once by `done` (holder) or `cancel` (anyone)
-    - occupancy    claim, ended_claim_ids — changed by claim ops, done, cancel and reap;
-                   holder ops (renew/move/release/done) fenced by claim id
-    - bookkeeping  updated, extra — maintained by the system
+    - bookkeeping  updated — maintained by the system
+
+    Occupancy is not here: claims are files of their own (`Claim`, `EndedClaim`;
+    ADR 0007), held in the snapshot next to the tickets.
     """
 
     # --- identity: set by add, never changes
@@ -182,20 +249,10 @@ class Ticket:
     resolution: Resolution | None = None
     """None while open; set once by done/cancel. Non-None means terminal (final)."""
 
-    # --- occupancy: claim ops, done, cancel, reap; holder ops fenced by claim id
-    claim: Claim | None = None
-    ended_claim_ids: tuple[ClaimId, ...] = ()
-    """Every claim that has ended on this ticket, oldest first, however it ended:
-    released, reaped, taken over, cancelled, or done. A complete record, so an ended id
-    is fenced for good (it can never claim again), re-runs of holder ops converge no
-    matter how many claims came since, and refusals can say "your claim already ended".
-    With resolution DONE, the last entry is the claim that completed the ticket."""
-
     # --- bookkeeping: maintained by the system
     updated: Timestamp
-    """Set to `now` by every op that writes this ticket."""
-    extra: Mapping[str, Any] = field(default_factory=dict)
-    """Unknown keys from the file, preserved verbatim on write-back."""
+    """Set to `now` by every op that writes this ticket: add, edit, move, done, cancel.
+    Claim ops do not write the ticket, so they leave it alone."""
 
     @property
     def is_terminal(self) -> bool:
@@ -209,11 +266,10 @@ class Ticket:
         return self.resolution is Resolution.DONE
 
     def to_dict(self) -> dict[str, Any]:
-        """The ticket as plain data, with `extra` keys back at top level. This IS the
-        on-branch ticket format (docs/format.md): a change here is a format change,
-        under the protocol-version rule in AGENTS.md. Interfaces print it too."""
+        """The ticket as plain data. This IS the on-branch ticket format (docs/format.md):
+        a change here is a format change, under the protocol-version rule in AGENTS.md.
+        Interfaces print it too."""
         return {
-            **self.extra,
             "id": self.id,
             "kind": self.kind.value,
             "project": self.project,
@@ -226,8 +282,6 @@ class Ticket:
             "content_version": self.content_version,
             "phase": self.phase.value,
             "resolution": None if self.resolution is None else self.resolution.value,
-            "claim": None if self.claim is None else self.claim.to_dict(),
-            "ended_claim_ids": list(self.ended_claim_ids),
             "updated": self.updated,
         }
 
@@ -243,8 +297,20 @@ def canonical_json(value: object) -> bytes:
 
 
 @dataclass(frozen=True)
+class TicketState:
+    """A ticket with its valid open claim, as one snapshot sees it."""
+
+    ticket: Ticket
+    claim: Claim | None = None
+
+
+_EMPTY: Mapping[Any, Any] = MappingProxyType({})
+
+
+@dataclass(frozen=True)
 class Snapshot:
-    """An immutable view of the store at one revision.
+    """An immutable view of the store at one revision: the valid tickets and claims, and
+    what was set aside on reading (ADR 0005, ADR 0007), which the rules never act on.
 
     `revision` is None only for an unborn store (before `init`). It is what a commit
     built from this snapshot passes as its `base` (compare-and-swap).
@@ -252,6 +318,35 @@ class Snapshot:
 
     revision: Revision | None
     tickets: Mapping[TicketId, Ticket]
+    claims: Mapping[TicketId, Claim] = _EMPTY
+    """The valid open claim of each held ticket."""
+    ended: Mapping[ClaimHash, EndedClaim] = _EMPTY
+    """Every valid ended claim, by hash."""
+    set_aside: Mapping[TicketId, str] = _EMPTY
+    """Ticket ids set aside, with the check that failed: an invalid ticket file, or a
+    claims folder with no ticket. No op may act on them (`SET_ASIDE`)."""
+    held_aside: Mapping[TicketId, str] = _EMPTY
+    """Valid tickets held by a set-aside claim: only `cancel` may act on them."""
+    fenced: Mapping[ClaimHash, str] = _EMPTY
+    """Hashes with no valid claim file but a set-aside one, or whose claim lies on a
+    set-aside ticket: they fence (never claim again) but can't be acted on."""
 
     def get(self, ticket_id: TicketId) -> Ticket | None:
         return self.tickets.get(ticket_id)
+
+    def claim_of(self, ticket_id: TicketId) -> Claim | None:
+        """The ticket's valid open claim, if it is held by one."""
+        return self.claims.get(ticket_id)
+
+    def state(self, ticket_id: TicketId) -> TicketState | None:
+        """The ticket with its open claim, or None if there is no such valid ticket."""
+        ticket = self.tickets.get(ticket_id)
+        return None if ticket is None else TicketState(ticket, self.claims.get(ticket_id))
+
+    def find(self, claim_hash: ClaimHash) -> ClaimFile | None:
+        """The valid claim, open or ended, with this hash anywhere in the store."""
+        return self._open_by_hash.get(claim_hash) or self.ended.get(claim_hash)
+
+    @cached_property
+    def _open_by_hash(self) -> Mapping[ClaimHash, Claim]:
+        return {claim.hash: claim for claim in self.claims.values()}

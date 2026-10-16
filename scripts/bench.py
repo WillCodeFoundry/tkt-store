@@ -140,7 +140,7 @@ def latency(repo: Path, rounds: int) -> dict[str, Any]:
         added, t = timed(tickets.add, f"latency {i}")
         assert isinstance(added, Committed), added
         samples["add"].append(t)
-        ticket_id = added.tickets[0].id
+        ticket_id = added.tickets[0].ticket.id
         claim_id = RandomIds().claim_id()
         claimed, t = timed(tickets.claim, ticket_id, agent, TTL, claim_id=claim_id)
         assert isinstance(claimed, Committed), claimed
@@ -186,7 +186,7 @@ def contention(clones: list[Path], per_agent: int) -> dict[str, Any]:
                 continue
             durations.append(t)
             ops["claim-next"] += 1
-            ticket_id: TicketId = claimed.tickets[0].id
+            ticket_id: TicketId = claimed.tickets[0].ticket.id
             try:
                 done, t = timed(tickets.done, ticket_id, claim_id)
             except Exception as error:

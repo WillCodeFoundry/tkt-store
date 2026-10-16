@@ -76,10 +76,11 @@ flags (`…`) may be given several times.
 
 - **Ids.** The caller supplies every id: ticket ids are 8 to 32 lowercase letters,
   digits and single hyphens (`docs/format.md`); claim ids are exactly 32 lowercase hex
-  characters. Re-running a command with the same ids
-  converges (`unchanged`) instead of creating a second ticket or claim. A claim id is
-  single-use and names one claim on one ticket; after its claim ends it is refused
-  (`NOT_HOLDER`) for good: every ticket records its full claim history (`ended_claim_ids`).
+  characters (`tkt mint claim-id`). Keep your claim id: tkt stores and prints only its
+  SHA-256 hash, so nothing in the store or in any output can give it back. Re-running a
+  command with the same ids converges (`unchanged`) instead of creating a second ticket
+  or claim. A claim id is single-use and names one claim on one ticket; after its claim
+  ends it is refused (`NOT_HOLDER`) for good: every claim that ended stays on the branch.
 - **TTL** is an integer number of seconds, `0 < ttl <= 7200` (2 h); 1800 (30 min) is a
   sensible default. Renew at about two-thirds of the lease (every ~20 min for 30 min):
   every renewal is a push, and the host's push rate is the store's budget (ADR 0001).
@@ -112,11 +113,15 @@ flags (`…`) may be given several times.
   `--project` is `[owner/]repo`, lowercase; `--title` and `--reason` are one line (at
   most 256 characters) without leading or trailing whitespace, `--body` at most 65,536;
   none holds control or invisible characters (a body may hold newlines and tabs);
-  `--priority` is 0 to 100; at most 20 `--blocked-by`. `add`, and an `edit` that grows
-  the file, may fill at most 192 KiB of the ticket file.
-- **Full tickets.** A claim on a ticket whose claim history fills its file (255 KiB) is
-  refused `FULL`; the ticket can still be released, finished or cancelled. `claim-next`
-  skips full and invalid tickets.
+  `--priority` is 0 to 100; at most 20 `--blocked-by`. A ticket file never exceeds
+  256 KiB.
+- **Set aside.** A ticket or claim file that breaks the format (pushed by hand, outside
+  tkt) is set aside on reading: left out of every decision and never printed, so it
+  never stops the store. A command naming it, as its ticket or as a blocker, is refused
+  `SET_ASIDE`, with the check that failed (never the value read) and the instruction to
+  have an operator repair the file; so is a claim command whose claim id is only on a
+  set-aside file. A ticket held by a set-aside claim reads `claimed`, and only `cancel`
+  may act on it. `claim-next` and `reap` pass set-aside tickets and claims over.
 - **Actor.** `--as` on `add`, `edit` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
 
@@ -137,15 +142,26 @@ Mutations print an object:
 {"outcome": "error", "exit": 4, "message": "push failed: …", "op": {"op": "claim", "ticket_id": "tkt-7f3a91c2", "claim_id": "…"}}
 ```
 
-- `tickets` lists the affected tickets as they are after the op, in their on-branch
-  form (docs/format.md): exactly one for single-ticket commands, none for `init`, zero
-  or more for `reap`. An `unchanged` claim or claim-next still shows the claim it holds.
+Each entry of `tickets` is the ticket in its on-branch form and its open claim, if any:
+
+```json
+{"ticket": {"id": "tkt-7f3a91c2", "title": "…", …}, "claim": {"claim_hash": "3f9c…a7e1", "agent": "coder-7", "claimed_at": 1790995000, "lease_until": 1790996800}}
+```
+
+- `tickets` lists the affected tickets as they are after the op: exactly one for
+  single-ticket commands, none for `init`, zero or more for `reap`. An `unchanged`
+  claim or claim-next still shows the claim it holds. A claim shows its hash, never a
+  claim id; `claim` is null when the ticket has no open claim.
 - Refusals carry a `code` and `message`; failures carry the `op` with the ids it was
-  last tried with, so the same command can simply be re-run.
-- Reads, each taken from a single snapshot: `show` prints `{"ticket": {…}, "status": "…"}`
-  (or a refused `NOT_FOUND` object for an unknown id); `list` prints a JSON array of
-  those objects; `log` prints a JSON array of history entries
-  `{"revision", "at", "op", "ticket_ids", "agent", "claim_id", "phase", "reason"}`.
+  last tried with (your own claim id included), so the same command can simply be
+  re-run.
+- Reads, each taken from a single snapshot: `show` prints `{"ticket": {…}, "claim": {…}
+  or null, "status": "…", "held_aside": null}` (or a refused object: `NOT_FOUND` for an
+  unknown id, `SET_ASIDE` for one set aside); `list` prints a JSON array of those
+  objects, leaving set-aside tickets out. `held_aside` names the check that failed when
+  the ticket is held by a set-aside claim (status `claimed`, `claim` null); `log` prints
+  a JSON array of history entries `{"revision", "at", "op", "ticket_ids", "agent",
+  "claim_hash", "phase", "reason"}`, skipping commits that break the format.
 - Output is never partial: a result is printed only once it is complete, and a failure
   prints only the error object. Check the exit code first.
 
@@ -154,7 +170,7 @@ Mutations print an object:
 | Code | Meaning |
 |---|---|
 | 0 | Committed, unchanged, a successful read, or `mint` |
-| 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit, not found) |
+| 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit, not found, set aside) |
 | 2 | Usage error (missing or conflicting flags) |
 | 3 | Retries exhausted after repeated conflicts; nothing written — re-run the same command |
-| 4 | Store error (git failure, remote unreachable or not configured, corrupt data). A failure during the push may mean the commit landed: re-run the same command, which converges either way |
+| 4 | Store error (git failure, remote unreachable or not configured, not a protocol 2 store, or its `tickets`/`claims` not folders). A failure during the push may mean the commit landed: re-run the same command, which converges either way |

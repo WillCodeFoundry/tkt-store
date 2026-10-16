@@ -96,6 +96,11 @@ run code in that clone (ADR 0005).
 - The first op in a new clone, and the first after an upgrade, reads every file once.
 - The cache grows with resolved tickets: about the size of their files.
 - The cache changes no format: it is local to each clone and to the GitStore adapter.
-- Claims (ADR 0007) need no cache: their state is in file names, so a snapshot only
-  lists them. They add to the listing and tree figures above (about three times as many
-  entries at 20,000 tickets with three claims each), which stage 2a measures.
+- Claims (ADR 0007) have no content to cache, but listing and parsing their names
+  costs about 430 ms per op at 20,000 tickets with three claims each (measured in stage
+  2a), plus about 250 ms to assemble the snapshot. The cache therefore also keeps each
+  ticket's parsed claims, and their hashes, by the blob id of its `claims/<id>/` tree
+  (parsed names only, never verdicts, which depend on the ticket): a snapshot lists
+  `claims/` without recursing, reads the folders whose tree changed in one batch, and
+  does the per-hash check with a count over the cached hashes, so only open or changed
+  folders need the full per-file work.

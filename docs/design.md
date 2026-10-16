@@ -70,7 +70,7 @@ names an outer one; outer layers depend on inner ones through small ports
 (protocols) that the inner layer owns.
 
 ```text
-domain/          ticket · fields · status · operations · outcomes · rules · errors
+domain/          ticket · fields · occupancy · status · operations · outcomes · rules · errors
                    pure values and decisions; imports nothing but itself
 
 application/     store (port) · clock (port) · ids (port)
@@ -162,8 +162,9 @@ never a fresh read (lesson from balls' bl-cdec G1).
 4. **Fencing.** `renew`, `move`, `release`, `done` require the current `claim_id`;
    otherwise `NOT_HOLDER`, or `NOT_CLAIMED` when there is no claim (exact rules in the
    table below). Fencing survives the end of a claim: every claim that ends (released,
-   reaped, taken over, cancelled, done) is appended to the ticket's `ended_claim_ids`, a
-   complete history, and an id recorded there on any ticket can never claim again
+   reaped, taken over, cancelled, done) is appended to the ticket's `ended_claim_ids` (from
+   0.2.0 kept as an ended claim file, ADR 0007), a complete history, and an id recorded
+   there on any ticket can never claim again
    (`NOT_HOLDER`). A holder whose lease lapsed may still renew, move, release or
    complete until someone takes the claim over or reaps it.
 5. **Idempotence.** Repeating an op whose effect is already present yields `NoOp`, not an error
@@ -217,7 +218,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 
 1. resolved ticket (first table);
 2. the current claim has `op.claim_id`;
-3. an ended claim has it (`op.claim_id in ended_claim_ids`);
+3. an ended claim has it (`op.claim_id in ended_claim_ids`; from 0.2.0 an ended claim
+   file in the ticket's folder has its hash, ADR 0007);
 4. no claim;
 5. claimed by another.
 
@@ -226,7 +228,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | renew | `TERMINAL` |
 | move | `TERMINAL` |
 | release | `TERMINAL` |
-| done | cancelled → `TERMINAL`; done and `op.claim_id` is the last of `ended_claim_ids` → NoOp; done otherwise → `NOT_HOLDER` |
+| done | cancelled → `TERMINAL`; done and `op.claim_id` is the last of `ended_claim_ids` (from 0.2.0: its claim file says `done`) → NoOp; done otherwise → `NOT_HOLDER` |
 
 | op | 2. current claim matches | 3. ended claim matches | 4. no claim | 5. claimed by another |
 |---|---|---|---|---|
@@ -236,7 +238,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | done | Apply | `NOT_HOLDER` | `NOT_CLAIMED` | `NOT_HOLDER` |
 
 - A matching current claim is accepted even if lapsed, as long as nobody took it over.
-- Every claim end appends to `ended_claim_ids`: release, reap, takeover, cancel, done.
+- Every claim end appends to `ended_claim_ids` (from 0.2.0 renames the claim's file to
+  how it ended): release, reap, takeover, cancel, done.
   The list is never truncated, so step 3 recognises an ended claim however many claims
   came after it. A ticket only accumulates a handful of claims in its life, so the list
   stays small. From 0.2.0 each ended claim is a file of its own (ADR 0007), so the

@@ -99,5 +99,8 @@ run code in that clone (ADR 0005).
 - Claims (ADR 0007) have no content to cache, but listing and parsing their names
   costs about 430 ms per op at 20,000 tickets with three claims each (measured in stage
   2a), plus about 250 ms to assemble the snapshot. The cache therefore also keeps each
-  ticket's parsed claims by the blob id of its `claims/<id>/` tree: a snapshot lists
-  `claims/` without recursing and reads only the folders whose tree changed.
+  ticket's parsed claims, and their hashes, by the blob id of its `claims/<id>/` tree
+  (parsed names only, never verdicts, which depend on the ticket): a snapshot lists
+  `claims/` without recursing, reads the folders whose tree changed in one batch, and
+  does the per-hash check with a count over the cached hashes, so only open or changed
+  folders need the full per-file work.

@@ -34,6 +34,7 @@ from tkt_store.domain.ticket import (
     Snapshot,
     Ticket,
     TicketId,
+    TicketState,
 )
 
 
@@ -128,6 +129,31 @@ def assemble(
         held_aside=MappingProxyType(held),
         fenced=MappingProxyType(fenced),
     )
+
+
+def states_after(
+    snapshot: Snapshot, changes: Iterable[Change], ticket_ids: Iterable[TicketId]
+) -> tuple[TicketState, ...]:
+    """The tickets `ticket_ids`, each with its open claim, once `changes` are applied to
+    `snapshot`: what an op reports. Built from the changes alone, without assembling the
+    whole store again."""
+    tickets: dict[TicketId, Ticket] = {}
+    claims: dict[TicketId, Claim | None] = {}
+    for change in changes:
+        match change:
+            case WriteTicket(ticket=ticket):
+                tickets[ticket.id] = ticket
+            case WriteClaim(claim=Claim() as claim):
+                claims[claim.ticket_id] = claim
+            case WriteClaim(claim=EndedClaim() as claim):
+                claims.setdefault(claim.ticket_id, None)
+    states = []
+    for ticket_id in ticket_ids:
+        found = tickets.get(ticket_id) or snapshot.get(ticket_id)
+        if found is not None:
+            held = claims[ticket_id] if ticket_id in claims else snapshot.claim_of(ticket_id)
+            states.append(TicketState(found, held))
+    return tuple(states)
 
 
 def after(snapshot: Snapshot, changes: Iterable[Change], revision: Revision) -> Snapshot:

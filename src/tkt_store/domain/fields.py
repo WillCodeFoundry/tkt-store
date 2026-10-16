@@ -31,14 +31,6 @@ from tkt_store.domain.ticket import CLAIM_ID_RE, TICKET_ID_RE, Ticket
 TICKET_FILE_MAX = 256 * 1024
 """Bytes in an encoded ticket file: tkt never writes a larger one, and will refuse to
 read one."""
-CONTENT_FILE_MAX = 192 * 1024
-"""Bytes `add` and `edit` may leave in the file. The rest is for the claim history, so
-content never stops a ticket being claimed, released, finished or cancelled."""
-CLAIM_FILE_MAX = TICKET_FILE_MAX - 1024
-"""Bytes a claim may grow the file to. Past it the ticket is full (`FULL`); the last
-KiB is for the ops that end a claim (release, done, cancel, reap), so a full ticket
-can still be finished or cancelled."""
-
 TITLE_MAX = 256
 BODY_MAX = 65_536
 REASON_MAX = 256

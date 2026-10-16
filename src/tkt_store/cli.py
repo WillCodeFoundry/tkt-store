@@ -310,7 +310,10 @@ def state_json(state: TicketState) -> dict[str, Any]:
 
 
 def view_json(view: TicketView) -> dict[str, Any]:
-    return state_json(TicketState(view.ticket, view.claim)) | {"status": view.status.value}
+    """`state_json`, the status, and `held_aside`: the check that failed when the ticket is
+    held by a set-aside claim, else null."""
+    state = state_json(TicketState(view.ticket, view.claim))
+    return state | {"status": view.status.value, "held_aside": view.held_aside}
 
 
 def entry_json(entry: HistoryEntry) -> dict[str, Any]:

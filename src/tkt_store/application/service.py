@@ -50,6 +50,7 @@ from tkt_store.domain.ticket import (
     Snapshot,
     Ticket,
     TicketId,
+    Timestamp,
 )
 
 DEFAULT_TTL: Duration = 30 * 60
@@ -57,17 +58,17 @@ DEFAULT_TTL: Duration = 30 * 60
 MAX_MINT_ATTEMPTS = 10
 """How often `add` re-mints a ticket id that collided with an existing one."""
 
-TAKEN = frozenset({RefusalCode.DUPLICATE_ID, RefusalCode.SET_ASIDE})
-"""Refusals that mean a minted ticket id is already taken."""
-
 
 @dataclass(frozen=True)
 class TicketView:
-    """A ticket with its open claim and derived status, all taken from the same snapshot."""
+    """A ticket with its open claim and derived status, all taken from the same snapshot.
+    `held_aside` is the check that failed when the ticket is held by a set-aside claim
+    (ADR 0007): it reads claimed, with no claim to show, and only `cancel` may act on it."""
 
     ticket: Ticket
     claim: Claim | None
     status: Status
+    held_aside: str | None = None
 
 
 class TicketStore:
@@ -138,10 +139,23 @@ class TicketStore:
         if ticket_id is not None:
             return self._transact(op(ticket_id))
         for _ in range(MAX_MINT_ATTEMPTS):
-            outcome = self._transact(op(self._ids.ticket_id()))
-            if not (isinstance(outcome, Refused) and outcome.refusal.code in TAKEN):
+            minted = self._ids.ticket_id()
+            outcome = self._transact(op(minted))
+            if not (isinstance(outcome, Refused) and self._taken(minted, outcome)):
                 return outcome
         return outcome
+
+    def _taken(self, ticket_id: TicketId, refused: Refused) -> bool:
+        """True if `refused` says the minted `ticket_id` itself is taken: DUPLICATE_ID, or
+        SET_ASIDE because that id is set aside (not, say, a set-aside blocker, which a new
+        id would not fix)."""
+        match refused.refusal.code:
+            case RefusalCode.DUPLICATE_ID:
+                return True
+            case RefusalCode.SET_ASIDE:
+                return ticket_id in self._store.snapshot().set_aside
+            case _:
+                return False
 
     def edit(
         self,
@@ -249,8 +263,7 @@ class TicketStore:
         ticket = snapshot.get(ticket_id)
         if ticket is None:
             return None
-        status = derive_status(snapshot, ticket, self._clock.now())
-        return TicketView(ticket, snapshot.claim_of(ticket_id), status)
+        return _view(snapshot, ticket, self._clock.now())
 
     def show(self, ticket_id: TicketId) -> TicketView | Refused:
         """`view`, or the refusal for an id with no valid ticket: SET_ASIDE if its file was
@@ -261,8 +274,7 @@ class TicketStore:
         ticket = snapshot.get(ticket_id)
         if ticket is None:
             return Refused(Refusal(RefusalCode.NOT_FOUND, f"no ticket {ticket_id}"))
-        status = derive_status(snapshot, ticket, self._clock.now())
-        return TicketView(ticket, snapshot.claim_of(ticket_id), status)
+        return _view(snapshot, ticket, self._clock.now())
 
     def list(
         self,
@@ -278,8 +290,8 @@ class TicketStore:
         now = self._clock.now()
         views = []
         for ticket in sorted(snapshot.tickets.values(), key=lambda t: t.id):
-            claim = snapshot.claim_of(ticket.id)
-            view = TicketView(ticket, claim, derive_status(snapshot, ticket, now))
+            view = _view(snapshot, ticket, now)
+            claim = view.claim
             if (
                 (status is None or view.status is status)
                 and (phase is None or ticket.phase is phase)
@@ -294,6 +306,12 @@ class TicketStore:
         self, ticket_id: TicketId | None = None, limit: int | None = None
     ) -> Sequence[HistoryEntry]:
         return list(self._store.history(ticket_id, limit))
+
+
+def _view(snapshot: Snapshot, ticket: Ticket, now: Timestamp) -> TicketView:
+    status = derive_status(snapshot, ticket, now)
+    held = snapshot.held_aside.get(ticket.id)
+    return TicketView(ticket, snapshot.claim_of(ticket.id), status, held)
 
 
 def raise_for_refusal(outcome: Outcome) -> Outcome:

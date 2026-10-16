@@ -13,7 +13,7 @@ from tkt_store.application.backoff import Backoff
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import Conflict, RetriesExhausted, StoreError
 from tkt_store.application.store import Store
-from tkt_store.domain.occupancy import after
+from tkt_store.domain.occupancy import states_after
 from tkt_store.domain.operations import Op
 from tkt_store.domain.outcomes import NoOp, OpRecord, Refusal
 from tkt_store.domain.rules import decide
@@ -93,10 +93,10 @@ def transact(
             continue
         except StoreError as error:
             raise StoreError(str(error), op=op) from error
-        written = after(snapshot, decision.changes, revision)
-        return Committed(revision, decision.record, _states(written, decision.record.ticket_ids))
+        written = states_after(snapshot, decision.changes, decision.record.ticket_ids)
+        return Committed(revision, decision.record, written)
     raise RetriesExhausted(op)
 
 
 def _states(snapshot: Snapshot, ticket_ids: tuple[TicketId, ...]) -> tuple[TicketState, ...]:
-    return tuple(state for i in ticket_ids if (state := snapshot.state(i)) is not None)
+    return states_after(snapshot, (), ticket_ids)

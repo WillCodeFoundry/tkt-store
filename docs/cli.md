@@ -155,12 +155,13 @@ Each entry of `tickets` is the ticket in its on-branch form and its open claim, 
 - Refusals carry a `code` and `message`; failures carry the `op` with the ids it was
   last tried with (your own claim id included), so the same command can simply be
   re-run.
-- Reads, each taken from a single snapshot: `show` prints
-  `{"ticket": {…}, "claim": {…} or null, "status": "…"}` (or a refused object:
-  `NOT_FOUND` for an unknown id, `SET_ASIDE` for one set aside); `list` prints a JSON array of those
-  objects, leaving set-aside tickets out; `log` prints a JSON array of history entries
-  `{"revision", "at", "op", "ticket_ids", "agent", "claim_hash", "phase", "reason"}`,
-  skipping commits that break the format.
+- Reads, each taken from a single snapshot: `show` prints `{"ticket": {…}, "claim": {…}
+  or null, "status": "…", "held_aside": null}` (or a refused object: `NOT_FOUND` for an
+  unknown id, `SET_ASIDE` for one set aside); `list` prints a JSON array of those
+  objects, leaving set-aside tickets out. `held_aside` names the check that failed when
+  the ticket is held by a set-aside claim (status `claimed`, `claim` null); `log` prints
+  a JSON array of history entries `{"revision", "at", "op", "ticket_ids", "agent",
+  "claim_hash", "phase", "reason"}`, skipping commits that break the format.
 - Output is never partial: a result is printed only once it is complete, and a failure
   prints only the error object. Check the exit code first.
 

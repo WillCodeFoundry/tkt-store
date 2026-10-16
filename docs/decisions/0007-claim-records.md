@@ -89,8 +89,9 @@ it looks only at names:
   says `done` (replacing "the last of `ended_claim_ids`"). If that file was deleted by
   hand, the re-run is `NOT_HOLDER` ("completed by another claim"): wrong but safe. A
   revoked claim's refusals say so from its name;
-- `claim` and `claim-next` look the claim's hash up first, so a re-run always finds its
-  own claim, whatever state its ticket is in.
+- `claim-next` looks the claim's hash up first, so a re-run always finds its own claim,
+  whatever state its ticket is in; `claim` names its ticket, so it answers `NOT_FOUND` or
+  `TERMINAL` for that ticket first, then looks the hash up.
 
 **Reading.** The snapshot lists `tickets/` and `claims/` and reads only ticket files;
 claim state comes from the listing alone. The checks run in this order, the same for
@@ -100,8 +101,10 @@ every reader, and a claim they set aside still fences its hash:
    ignored; a valid name whose times are out of order (`claimed_at` after
    `lease_until` or `ended_at`, which tkt never writes) → the claim is set aside.
 2. **Each hash,** over the files that passed step 1 (files set aside there still
-   fence): in more than one folder → every file with it is set aside; an `open` and an
-   ended file in one folder → the ended one wins, only the `open` is set aside.
+   fence): in more than one folder → every file with it is set aside; ended more than
+   once → every file with it is set aside (the claim is over, so its ticket is not
+   held); an `open` and an ended file in one folder → the ended one wins, only the `open`
+   is set aside.
 3. **Each folder,** counting only claims still valid, in this order: no ticket file →
    its claims are set aside (and `add` of that id is refused); a resolved ticket →
    every valid `open` is set aside, the resolution wins; more than one valid `open` →

@@ -162,8 +162,8 @@ def decode_store_meta(data: bytes) -> None:
 
 
 def encode_ticket(ticket: Ticket) -> bytes:
-    """Canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline.
-    `extra` keys are merged back at top level. Round-trips byte-identically."""
+    """Canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline. Round-trips
+    byte-identically."""
     return ticket.encoded()
 
 

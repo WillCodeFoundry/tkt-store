@@ -15,8 +15,11 @@ from typing import Any
 
 import pytest
 
-from tkt_store.cli import STORE_OPTIONS, build_parser
+from tkt_store.application.service import TicketView
+from tkt_store.cli import STORE_OPTIONS, build_parser, view_json
 from tkt_store.domain.operations import UNSET
+from tkt_store.domain.status import Status
+from tkt_store.domain.ticket import Ticket, TicketId
 
 CLI_MD = Path(__file__).resolve().parents[2] / "docs" / "cli.md"
 STORE = ["--repo", "/work/tasks", "--remote", "origin"]
@@ -176,3 +179,12 @@ def test_release_takes_no_phase() -> None:
 def test_show_uses_one_snapshot() -> None:
     method, args, _ = _run(["show", "tkt-0001"])
     assert (method, args) == ("show", ("tkt-0001",))
+
+
+def test_a_view_says_when_its_ticket_is_held_by_a_set_aside_claim() -> None:
+    ticket = Ticket(id=TicketId("tkt-0001"), title="T", created=0, updated=0)
+    held = view_json(TicketView(ticket, None, Status.CLAIMED, "more than one open claim"))
+    assert (held["status"], held["claim"], held["held_aside"]) == (
+        "claimed", None, "more than one open claim"
+    )  # fmt: skip
+    assert view_json(TicketView(ticket, None, Status.OPEN))["held_aside"] is None

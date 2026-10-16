@@ -197,6 +197,22 @@ class TestClocks:
         ended = applied(s, decide(s, CancelOp(T1), NOW)).ended[claim_hash(C1)]
         assert ended.ended_at == NOW + 30
 
+    @pytest.mark.parametrize(
+        "op",
+        [EditOp(T1, 1, title="X"), MoveOp(T1, C1, Phase.QA), DoneOp(T1, C1), CancelOp(T1)],
+        ids=["edit", "move", "done", "cancel"],
+    )
+    def test_a_ticket_write_is_never_before_its_creation(self, op: Op) -> None:
+        """A writer whose clock is behind the creator's still writes a valid ticket."""
+        s = snap(tkt(created=NOW + 5, updated=NOW + 5), held())
+        ticket = applied(s, decide(s, op, NOW)).get(T1)
+        assert ticket is not None and ticket.updated == NOW + 5
+
+    def test_a_renewal_that_changes_nothing_is_a_noop(self) -> None:
+        """Clamped to claimed_at by a slow clock, the name would not change: no commit."""
+        future = Claim(T1, claim_hash(C1), A, NOW + TTL + 30, NOW + TTL + 30)
+        noop(decide(snap(tkt(), future), RenewOp(T1, C1, TTL), NOW))
+
     def test_a_renewal_is_never_before_the_claim(self) -> None:
         future = Claim(T1, claim_hash(C1), A, NOW + TTL + 30, NOW + TTL + 600)
         s = snap(tkt(), future)

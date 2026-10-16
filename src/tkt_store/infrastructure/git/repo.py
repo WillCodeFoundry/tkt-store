@@ -11,7 +11,9 @@ snapshot():
     remote.fast_forward_local(remote head)
     git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError unless
                                                 exactly protocol 2
-    git ls-tree -r -l <revision> tickets/    -> modes, blob ids and sizes of ticket paths
+    git ls-tree -l <revision> tickets/       -> modes, blob ids and sizes of ticket paths (not
+                                                recursive: a tree at a ticket path is set
+                                                aside, never recursed into)
     git cat-file --batch                     -> contents of the regular ticket files within
                                                 the cap whose blob this store has not
                                                 checked before -> wire.decode_ticket and
@@ -104,7 +106,7 @@ class GitStore:
         decode strictly, follow the field rules and be named by its id. The others are
         set aside, with the check that failed. Verdicts are kept by blob id: a blob id
         names exact content, so a file is never read or checked twice."""
-        listing = self._git("ls-tree", "-r", "-l", "-z", revision, "--", f"{wire.TICKETS_DIR}/")
+        listing = self._git("ls-tree", "-l", "-z", revision, "--", f"{wire.TICKETS_DIR}/")
         set_aside: dict[TicketId, str] = {}
         to_check: dict[TicketId, str] = {}  # id -> blob id
         for raw in listing.split(b"\0"):

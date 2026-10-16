@@ -7,11 +7,12 @@ live. The result is a `Decision` from `domain.outcomes`.
 
 Every `Apply.record` carries `at=now`, the injected time (`OpRecord.at`), the acting
 `agent` when the op names one, and the claim's hash when it concerns a claim. Every
-ticket an Apply writes gets updated = now; its `content_version` starts at 1 (add) and
-only `edit` increments it. Claims are files of their own (ADR 0007): a claim op writes
-a `WriteClaim`, never the ticket, and ending a claim (release, reap, takeover, cancel,
-done) turns it into an `EndedClaim`, kept for good. The full op x state -> outcome table
-is in docs/design.md §5; the docstrings below summarise it.
+ticket an Apply writes gets updated = now (never before created, `_touched`); its
+`content_version` starts at 1 (add) and only `edit` increments it. Claims are files of
+their own (ADR 0007): a claim op writes a `WriteClaim`, never the ticket, and ending a
+claim (release, reap, takeover, cancel, done) turns it into an `EndedClaim`, kept for
+good. The full op x state -> outcome table is in docs/design.md §5; the docstrings below
+summarise it.
 
 Ops carry the caller's claim id; the rules compare only its hash (`claim_hash`), and
 neither is ever echoed. Refusal messages distinguish three cases, so an agent knows what
@@ -266,7 +267,7 @@ def decide_edit(snapshot: Snapshot, op: EditOp, now: Timestamp) -> Decision:
             f"{ticket.id} is at content_version {ticket.content_version}, "
             f"the edit was based on {op.expected_version}; re-read and retry",
         )
-    edited = replace(ticket, **changes, content_version=ticket.content_version + 1, updated=now)
+    edited = _touched(ticket, now, **changes, content_version=ticket.content_version + 1)
     return _apply(op.name, now, edited, (WriteTicket(edited),), agent=op.agent)
 
 
@@ -329,7 +330,9 @@ def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
     TERMINAL; open claim has the op's hash -> Apply (even if lapsed, as long as nobody
     took it over); the hash ended on this ticket -> NOT_HOLDER ("already ended"); no
     claim -> NOT_CLAIMED; claimed by another -> NOT_HOLDER.
-    Apply: the claim with lease_until = now + ttl (claimed_at unchanged)."""
+    Apply: the claim with lease_until = now + ttl (claimed_at unchanged); NoOp if that is
+    its lease already (the same file name: a re-run in the same second, or a renewer whose
+    clock is clamped to claimed_at)."""
     ticket = snapshot.get(op.ticket_id)
     if ticket is None:
         return _not_found(op.ticket_id)
@@ -343,6 +346,8 @@ def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
             return _already_ended(ticket.id)
         case Claim() as current:
             renewed = current.renewed(now + op.ttl)
+            if renewed == current:  # same name: nothing to write, no push to spend
+                return NoOp(f"the lease on {ticket.id} already ends then", (ticket.id,))
             return _apply(
                 op.name, now, ticket, (WriteClaim(renewed, current),),
                 agent=current.agent, claim_hash=hashed,
@@ -375,7 +380,7 @@ def decide_move(snapshot: Snapshot, op: MoveOp, now: Timestamp) -> Decision:
         return Refusal(
             RefusalCode.NOT_HOLDER, f"this claim already ended on {ticket.id} before the move"
         )
-    moved = replace(ticket, phase=op.to_phase, updated=now)
+    moved = _touched(ticket, now, phase=op.to_phase)
     return _apply(
         op.name, now, moved, (WriteTicket(moved),),
         agent=holder.agent, claim_hash=hashed, phase=op.to_phase,
@@ -436,7 +441,7 @@ def decide_done(snapshot: Snapshot, op: DoneOp, now: Timestamp) -> Decision:
         case EndedClaim():
             return _already_ended(ticket.id)
         case Claim() as current:
-            done = replace(ticket, resolution=Resolution.DONE, updated=now)
+            done = _touched(ticket, now, resolution=Resolution.DONE)
             changes = (WriteTicket(done), WriteClaim(current.ended(EndedBy.DONE, now), current))
             return _apply(op.name, now, done, changes, agent=current.agent, claim_hash=hashed)
 
@@ -454,7 +459,7 @@ def decide_cancel(snapshot: Snapshot, op: CancelOp, now: Timestamp) -> Decision:
         return NoOp(f"{ticket.id} is already cancelled", (ticket.id,))
     if ticket.resolution is Resolution.DONE:
         return _terminal(ticket)
-    cancelled = replace(ticket, resolution=Resolution.CANCELLED, updated=now)
+    cancelled = _touched(ticket, now, resolution=Resolution.CANCELLED)
     changes: list[Change] = [WriteTicket(cancelled)]
     if (current := snapshot.claim_of(ticket.id)) is not None:
         changes.append(WriteClaim(current.ended(EndedBy.CANCELLED, now), current))
@@ -607,6 +612,13 @@ def _cycle_through(
     return None
 
 
+def _touched(ticket: Ticket, now: Timestamp, **changes: Any) -> Ticket:
+    """`ticket` with `changes`, written at `now`: `updated` is never before `created`, even
+    when this writer's clock is behind the creator's (tkt never writes what it would set
+    aside)."""
+    return replace(ticket, **changes, updated=max(now, ticket.created))
+
+
 def _holder(snapshot: Snapshot, ticket: Ticket, hashed: ClaimHash) -> Claim | EndedClaim | Refusal:
     """Steps 2-5 of the holder-op order (design.md §5): the ticket's open claim if it has
     the hash, the claim if it ended on this ticket, else NOT_CLAIMED (no claim) or
@@ -645,10 +657,12 @@ def _claim(
             return Refusal(
                 RefusalCode.ALREADY_CLAIMED, f"this claim on {ticket.id} belongs to {current.agent}"
             )
-        if current.is_live(now):
+        renewed = current.renewed(now + ttl)
+        if current.is_live(now) or renewed == current:
             return NoOp(f"{ticket.id} is already held by this claim", (ticket.id,))
-        renewed = (WriteClaim(current.renewed(now + ttl), current),)
-        return _apply(op_name, now, ticket, renewed, agent=agent, claim_hash=hashed)
+        return _apply(
+            op_name, now, ticket, (WriteClaim(renewed, current),), agent=agent, claim_hash=hashed
+        )
     found = snapshot.find(hashed)
     if isinstance(found, Claim):
         return Refusal(

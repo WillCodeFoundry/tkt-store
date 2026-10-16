@@ -17,9 +17,9 @@ from tests.gitkit import HookedRunner, git, head, write_files
 from tkt_store import open_store
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.application.service import TicketStore
-from tkt_store.application.transaction import Committed
+from tkt_store.application.transaction import Committed, Refused
 from tkt_store.domain.operations import OpName
-from tkt_store.domain.outcomes import OpRecord, WriteTicket
+from tkt_store.domain.outcomes import OpRecord, RefusalCode, WriteTicket
 from tkt_store.domain.ticket import (
     AgentId,
     ClaimId,
@@ -191,6 +191,25 @@ def test_a_bad_ticket_file_is_set_aside_not_fatal(
     write_files(bare_remote, {path: content}, modes={path: mode} if mode else {})
     snapshot = opened(local).snapshot()
     assert snapshot.set_aside == {T2: why} and snapshot.get(T1) is not None
+
+
+def test_a_directory_at_a_ticket_path_is_set_aside(local: Path, bare_remote: Path) -> None:
+    write_files(bare_remote, {f"{wire.ticket_path(T2)}/inner": b"x"})
+    snapshot = opened(local).snapshot()
+    assert snapshot.set_aside == {T2: "not a regular file"} and snapshot.get(T1) is not None
+
+
+def test_add_does_not_remint_when_only_a_blocker_is_set_aside(
+    clones: list[Path], bare_remote: Path
+) -> None:
+    """A fresh id would not help: refused SET_ASIDE once, without minting again."""
+    ids = SequentialIds()
+    tickets = TicketStore(GitStore.at(clones[0], remote="origin"), FakeClock(NOW), ids)
+    tickets.init()
+    write_files(bare_remote, {wire.ticket_path(T2): b"not json"})
+    outcome = tickets.add("Blocked", blocked_by=(T2,))
+    assert isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.SET_ASIDE
+    assert ids.ticket_id() == "tkt-0002"  # only tkt-0001 was minted
 
 
 def test_claims_are_empty_files_renamed_as_they_change(local: Path, bare_remote: Path) -> None:

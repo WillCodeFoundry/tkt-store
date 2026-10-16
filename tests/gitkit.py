@@ -1,5 +1,9 @@
-"""Real-git helpers for tests: repositories with local config, out-of-band commits, and
-GitRunner wrappers that interleave or fail commands on purpose (injected, not patched)."""
+"""Real-git machinery for tests, the one helper module shared across suites.
+
+`git()` runs git for setup and inspection; `new_repo`/`clone` make repositories with local
+config; `write_files` commits by hand, as a person or an agent bypassing tkt would; and
+`HookedRunner` is a GitRunner that records every call and can interleave, fail or crash
+commands on purpose (injected, not patched)."""
 
 from __future__ import annotations
 

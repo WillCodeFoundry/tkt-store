@@ -1,5 +1,6 @@
 """Reading the store (GitStore.snapshot) after a compromised agent pushed forged content
-with plain git, and how the store's remote name reaches git."""
+with plain git, what that content costs every honest commit, and how the store's remote
+name reaches git."""
 
 from __future__ import annotations
 

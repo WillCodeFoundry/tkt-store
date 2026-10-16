@@ -2,9 +2,9 @@
 
 Each generated scenario: two agents and three tickets (one blocked by another), random
 ops (claim, claim-next, renew, move, release, done, cancel, reap, edit with a random
-expected version), clock jumps, and conflicts injected at the
-moment of commit. Every step goes through the real TicketStore and transaction loop;
-the invariants of docs/design.md §5 are checked after every step.
+expected version), clock jumps, and conflicts injected at the moment of commit. Every
+step goes through the real TicketStore and transaction loop; the invariants of
+docs/design.md §5 are checked after every step.
 """
 
 from __future__ import annotations

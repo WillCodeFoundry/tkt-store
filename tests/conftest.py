@@ -1,5 +1,6 @@
-"""Shared fixtures, and the security markers. Fakes are injected, never patched in
-(AGENTS.md)."""
+"""Fixtures shared by every suite (clock, ids, stores, a bare remote and its clones), and
+the hook that turns the security markers into strict expected failures. Fakes are
+injected, never patched in (AGENTS.md)."""
 
 from __future__ import annotations
 

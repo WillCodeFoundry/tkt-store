@@ -1,5 +1,5 @@
-"""Shared builders for domain tests: fixed time, agents, claim and ticket ids, and small
-constructors for tickets, claims and snapshots."""
+"""Builders for the unit tests (other suites define what they need locally): fixed time,
+agents, claim and ticket ids, and small constructors for tickets, claims and snapshots."""
 
 from __future__ import annotations
 

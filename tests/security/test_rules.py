@@ -1,4 +1,5 @@
-"""The rules (domain/rules.py decide) facing forged state that decodes fine."""
+"""The rules (domain/rules.py decide) facing forged state that decodes fine, with a guard
+(an ordinary passing test) that the fix must keep: honest renewals are never taken over."""
 
 from __future__ import annotations
 

@@ -15,7 +15,9 @@ snapshot():
                                                 remote-backed store opened with remote=None,
                                                 or a local-only one opened with a remote)
     git ls-tree -r <revision> tickets/       -> blob ids of wire.is_ticket_path entries only
-    git cat-file --batch                     -> file contents (bytes) -> wire.decode_ticket;
+    git cat-file --batch                     -> contents (bytes) of the blobs this store has
+                                                not decoded before (decoded tickets are
+                                                cached by blob id) -> wire.decode_ticket;
                                                 one corrupt ticket fails the whole snapshot
 
 commit(base, changes, record):
@@ -34,6 +36,7 @@ commit(base, changes, record):
     [local]  git update-ref <ref> <new> <base> -> Conflict if the ref moved: here update-ref
                                                IS the compare-and-swap
                                                (for an unborn store: old value = zero id)
+    git gc --auto                             (housekeeping: plumbing never triggers it)
 """
 
 from __future__ import annotations
@@ -74,6 +77,10 @@ class GitStore:
         self._git = git
         self._ref = ref
         self._remote = remote
+        self._decoded: dict[str, Ticket] = {}
+        """Tickets already decoded, by blob id. A blob id names exact content, so an entry
+        can never be stale; a snapshot reads and decodes only the files whose content it
+        has not seen. Pruned to the latest snapshot's tickets, so it stays bounded."""
 
     @classmethod
     def at(cls, repo: Path, *, remote: str | None, ref: str = DEFAULT_REF) -> GitStore:
@@ -90,21 +97,25 @@ class GitStore:
             return Snapshot(None, MappingProxyType({}))
         self._check_meta(revision)
         listing = self._git("ls-tree", "-r", "-z", revision, "--", f"{wire.TICKETS_DIR}/")
-        paths, blobs = [], []
+        blobs: dict[str, str] = {}  # path -> blob id
         for entry in _entries(listing):
             path = entry.name.decode(errors="replace")  # undecodable: never a ticket path
             if entry.kind == "blob" and wire.is_ticket_path(path):
-                paths.append(path)
-                blobs.append(entry.oid)
-        tickets: dict[TicketId, Ticket] = {}
-        for path, data in zip(paths, self._read_blobs(blobs), strict=True):
+                blobs[path] = entry.oid
+        decoded = {oid: self._decoded[oid] for oid in blobs.values() if oid in self._decoded}
+        unseen = {oid: path for path, oid in blobs.items() if oid not in decoded}
+        for (oid, path), data in zip(unseen.items(), self._read_blobs(list(unseen)), strict=True):
             try:
-                ticket = wire.decode_ticket(data)
+                decoded[oid] = wire.decode_ticket(data)
             except StoreError as error:
                 raise StoreError(f"{path} at {revision}: {error}") from error
+        tickets: dict[TicketId, Ticket] = {}
+        for path, oid in blobs.items():
+            ticket = decoded[oid]
             if wire.ticket_path(ticket.id) != path:
                 raise StoreError(f"{path} at {revision} holds ticket {ticket.id}")
             tickets[ticket.id] = ticket
+        self._decoded = decoded
         return Snapshot(revision, MappingProxyType(tickets))
 
     def commit(
@@ -124,15 +135,25 @@ class GitStore:
             # published: the local ref is only a cache, repaired by the next snapshot
             with suppress(GitError):
                 self._git("update-ref", self._ref, new, base or "")
-            return new
-        try:
-            self._git("update-ref", self._ref, new, base or "")
-        except GitError as error:
-            actual = sync.local_head(self._git, self._ref)
-            if actual != base:
-                raise Conflict(base, actual) from error
-            raise
+        else:
+            try:
+                self._git("update-ref", self._ref, new, base or "")
+            except GitError as error:
+                actual = sync.local_head(self._git, self._ref)
+                if actual != base:
+                    raise Conflict(base, actual) from error
+                raise
+        self._housekeeping()
         return new
+
+    def _housekeeping(self) -> None:
+        """`git gc --auto` after each commit. Plumbing never triggers git's automatic
+        housekeeping, so without this every ticket version stays a loose object, and
+        reading thousands of loose objects is about 3x slower than reading a pack
+        (ADR 0001). It returns at once below git's thresholds and otherwise packs in the
+        background (gc.autoDetach); a failure only costs speed, so it is ignored."""
+        with suppress(GitError):
+            self._git("gc", "--auto", "--quiet")
 
     def history(
         self,
@@ -215,6 +236,7 @@ class GitStore:
         for change in changes:
             name = wire.ticket_path(change.ticket.id).removeprefix(f"{wire.TICKETS_DIR}/").encode()
             oid = self._hash(wire.encode_ticket(change.ticket))
+            self._decoded[oid] = change.ticket  # encoding round-trips: no need to read it back
             tickets[name] = _Entry(BLOB_MODE, "blob", oid, name)
         if tickets:
             oid = self._mktree(tickets)

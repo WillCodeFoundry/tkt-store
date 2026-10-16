@@ -360,6 +360,9 @@ Open questions:
 
 
 - Q1: Should resolved (done/cancelled) tickets be kept on the branch (current design) or moved to `archive/`?
+  Every op reads every ticket file, so a CLI op costs ~0.25 s at 5,000 tickets and ~1 s
+  at 20,000 on a local store (ADR 0001, *Store size*). Archiving would need blockers,
+  re-runs of `done` and claim-id fencing to work without reading archived tickets.
 - Q2: Project identity is now the caller's concern (an opaque string). Should callers
   standardise on root-commit hash (stable, but multi-root repos) or
   normalised remote URL (renames)? Out of scope for the store itself.

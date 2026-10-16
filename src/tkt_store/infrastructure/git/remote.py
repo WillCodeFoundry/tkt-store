@@ -110,8 +110,8 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     - "[remote rejected] (...)" is the server's refusal of our update; one `ls-remote`
       then says whether the branch moved. If it already holds `new` (another writer
       built the identical commit, or the server misreported a push that landed), `new`
-      is published and this returns normally, so a Conflict always means nothing of
-      ours became visible.
+      is published and this returns normally, so a Conflict always means our commit (or
+      an identical one) did not become visible through this push.
 
     The `ls-remote` comes just after the rejection, so two rare overlaps are possible,
     both safe: a push refused for another reason while someone else moves the branch is

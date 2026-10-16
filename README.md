@@ -68,13 +68,24 @@ git 2.29 or later.
 repository, and never let two processes use the same clone, for example by mounting one
 clone into several containers.
 
+**Agents use only `tkt`, never git, on the store.** `tkt` validates everything it writes
+and reads, never checks out files (so no checkout hooks, filters or symlinks are ever
+involved), writes only by compare-and-swap, and refuses to act on another agent's claim.
+Plain git does none of that: an agent running it can forge tickets and history that
+other agents then trust. Make each clone without a checkout (`git clone --no-checkout`;
+from 0.2.0, `tkt clone`), and give agents only the `tkt` command for the store. The
+security model behind this is in `docs/design.md` §8 and ADR 0005.
+
 The remote's repository is shared by all clones, so it needs the same care. A remote
 given as a file path (a bare repository) is only safe when every clone is on the same
 machine as that repository, with the same filesystem. If clones live in VMs or sandboxes
 (Docker Desktop, Docker Sandboxes) or on other machines, don't mount the remote's
 directory into them: git's locking may not hold across that boundary, and two agents
-could both get the same claim. Serve it over the network instead (a hosting service,
-SSH, or `git daemon`), so that only its own machine writes to it.
+could both get the same claim. A path remote is also a security risk: every agent can
+write the repository's files, so a compromised agent can plant a hook or change its
+config, and that hook then runs inside every other agent that pushes. Use a path remote
+only for agents that fully trust each other; otherwise serve it over the network (a
+hosting service, SSH, or `git daemon`), so that only its own machine writes to it.
 
 **Any git server works as the remote:** a hosting service such as GitHub, a bare
 repository over SSH or `git daemon`, or, when every clone is on the same machine as the
@@ -89,8 +100,9 @@ server must:
   from other writers.
 
 `git daemon` is for trusted local agents only (e.g. agents in containers or VMs on one
-host): it has no authentication, so anything that can reach its port can write the
-store. Bind it to loopback, and use SSH if you need authentication:
+host). It runs no code from the agents, but it has no authentication: anything that can
+reach its port can push anything with plain git, forged tickets included. Bind it to
+loopback, and use SSH if you need authentication:
 
 ```sh
 git daemon --reuseaddr --base-path=/srv/git --export-all \

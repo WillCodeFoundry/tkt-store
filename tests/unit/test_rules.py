@@ -9,27 +9,6 @@ from dataclasses import replace
 
 import pytest
 
-from tests.unit.builders import (
-    C1,
-    C2,
-    C3,
-    LAPSED,
-    NOW,
-    T1,
-    T2,
-    T3,
-    TAKEABLE,
-    TTL,
-    A,
-    B,
-    held,
-    noop,
-    pick,
-    refused,
-    snap,
-    tkt,
-    written,
-)
 from tkt_store.domain.operations import (
     AddOp,
     CancelOp,
@@ -39,15 +18,17 @@ from tkt_store.domain.operations import (
     EditOp,
     InitOp,
     MoveOp,
+    Op,
     OpName,
     ReapOp,
     ReleaseOp,
     RenewOp,
 )
-from tkt_store.domain.outcomes import Apply, Refusal, RefusalCode
+from tkt_store.domain.outcomes import Apply, Decision, NoOp, Refusal, RefusalCode
 from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import (
     MAX_TTL,
+    SKEW_GRACE,
     AgentId,
     Claim,
     ClaimId,
@@ -55,10 +36,58 @@ from tkt_store.domain.ticket import (
     Phase,
     ProjectId,
     Resolution,
+    Revision,
     Snapshot,
     Ticket,
     TicketId,
 )
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+B = AgentId("reviewer-2")
+C1 = ClaimId("1" * 32)
+C2 = ClaimId("2" * 32)
+C3 = ClaimId("3" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
+T3 = TicketId("tkt-3")
+LAPSED = NOW - 1  # a lease_until in the past, still within the grace
+TAKEABLE = NOW - SKEW_GRACE  # lease_until + SKEW_GRACE == NOW
+
+
+def tkt(ticket_id: TicketId = T1, **fields: object) -> Ticket:
+    """An open, unclaimed ticket in the implementation phase; `fields` override."""
+    base = Ticket(
+        id=ticket_id, created=0, title="Expire tokens", updated=0, phase=Phase.IMPLEMENTATION
+    )
+    return replace(base, **fields)  # type: ignore[arg-type]
+
+
+def held(claim_id: ClaimId = C1, agent: AgentId = A, lease_until: int = NOW + 600) -> Claim:
+    """A claim taken 10 minutes before NOW and, by default, live for 10 more."""
+    return Claim(agent=agent, claim_id=claim_id, lease_until=lease_until, claimed_at=NOW - 600)
+
+
+def snap(*tickets: Ticket) -> Snapshot:
+    """A snapshot at an arbitrary revision holding `tickets`."""
+    return Snapshot(Revision("r1"), {t.id: t for t in tickets})
+
+
+def written(decision: Decision, ticket_id: TicketId = T1) -> Ticket:
+    assert isinstance(decision, Apply), decision
+    return {change.ticket.id: change.ticket for change in decision.changes}[ticket_id]
+
+
+def refused(decision: Decision, code: RefusalCode) -> Refusal:
+    assert isinstance(decision, Refusal), decision
+    assert decision.code is code, decision
+    return decision
+
+
+def noop(decision: Decision) -> NoOp:
+    assert isinstance(decision, NoOp), decision
+    return decision
 
 
 class TestClaim:
@@ -258,16 +287,14 @@ class TestHolderOps:
     @pytest.mark.parametrize("ending", ["release", "reap", "takeover", "cancel", "done"])
     def test_ending_a_claim_appends_to_ended_claim_ids(self, ending: str) -> None:
         start = tkt(claim=held(lease_until=TAKEABLE), ended_claim_ids=(C3,))
-        op = pick(
-            {
-                "release": ReleaseOp(T1, C1),
-                "reap": ReapOp(),
-                "takeover": ClaimOp(T1, B, C2, TTL),
-                "cancel": CancelOp(T1),
-                "done": DoneOp(T1, C1),
-            },
-            ending,
-        )
+        options: dict[str, Op] = {
+            "release": ReleaseOp(T1, C1),
+            "reap": ReapOp(),
+            "takeover": ClaimOp(T1, B, C2, TTL),
+            "cancel": CancelOp(T1),
+            "done": DoneOp(T1, C1),
+        }
+        op = options[ending]
         assert written(decide(snap(start), op, NOW)).ended_claim_ids == (C3, C1)
 
     def test_stale_release_after_completion_is_terminal(self) -> None:
@@ -371,27 +398,23 @@ class TestValidation:
 
     @pytest.mark.parametrize("field", ["agent", "reason", "title"])
     def test_control_characters_are_invalid(self, field: str) -> None:
-        op = pick(
-            {
-                "agent": ClaimOp(T1, AgentId("a\nb"), C1, TTL),
-                "reason": CancelOp(T1, reason="x\ntkt-op: done"),
-                "title": AddOp(T2, "line\nbreak"),
-            },
-            field,
-        )
+        options: dict[str, Op] = {
+            "agent": ClaimOp(T1, AgentId("a\nb"), C1, TTL),
+            "reason": CancelOp(T1, reason="x\ntkt-op: done"),
+            "title": AddOp(T2, "line\nbreak"),
+        }
+        op = options[field]
         refused(decide(snap(tkt()), op, NOW), RefusalCode.INVALID)
 
     @pytest.mark.parametrize("ttl", [0, -1, MAX_TTL + 1])
     @pytest.mark.parametrize("op", ["claim", "claim-next", "renew"])
     def test_ttl_out_of_bounds_is_invalid(self, op: str, ttl: int) -> None:
-        operation = pick(
-            {
-                "claim": ClaimOp(T1, A, C1, ttl),
-                "claim-next": ClaimNextOp(A, C1, ttl),
-                "renew": RenewOp(T1, C1, ttl),
-            },
-            op,
-        )
+        options: dict[str, Op] = {
+            "claim": ClaimOp(T1, A, C1, ttl),
+            "claim-next": ClaimNextOp(A, C1, ttl),
+            "renew": RenewOp(T1, C1, ttl),
+        }
+        operation = options[op]
         refused(decide(snap(tkt(claim=held())), operation, NOW), RefusalCode.INVALID)
 
     @pytest.mark.parametrize(
@@ -530,19 +553,17 @@ class TestEdit:
     )
     def test_only_edit_changes_the_version(self, op: str) -> None:
         start = tkt(content_version=3, claim=held(lease_until=TAKEABLE))
-        operation = pick(
-            {
-                "claim": ClaimOp(T1, A, C1, TTL),
-                "claim-next": ClaimNextOp(A, C1, TTL),
-                "renew": RenewOp(T1, C1, TTL),
-                "move": MoveOp(T1, C1, Phase.REVIEW),
-                "release": ReleaseOp(T1, C1),
-                "done": DoneOp(T1, C1),
-                "cancel": CancelOp(T1),
-                "reap": ReapOp(),
-            },
-            op,
-        )
+        options: dict[str, Op] = {
+            "claim": ClaimOp(T1, A, C1, TTL),
+            "claim-next": ClaimNextOp(A, C1, TTL),
+            "renew": RenewOp(T1, C1, TTL),
+            "move": MoveOp(T1, C1, Phase.REVIEW),
+            "release": ReleaseOp(T1, C1),
+            "done": DoneOp(T1, C1),
+            "cancel": CancelOp(T1),
+            "reap": ReapOp(),
+        }
+        operation = options[op]
         assert written(decide(snap(start), operation, NOW)).content_version == 3
 
 
@@ -569,13 +590,11 @@ class TestRecord:
 
     @pytest.mark.parametrize("op", ["add", "edit", "cancel"])
     def test_record_carries_optional_actor(self, op: str) -> None:
-        operation = pick(
-            {
-                "add": AddOp(T2, "T", agent=A),
-                "edit": EditOp(T1, 1, title="X", agent=A),
-                "cancel": CancelOp(T1, agent=A),
-            },
-            op,
-        )
+        options: dict[str, Op] = {
+            "add": AddOp(T2, "T", agent=A),
+            "edit": EditOp(T1, 1, title="X", agent=A),
+            "cancel": CancelOp(T1, agent=A),
+        }
+        operation = options[op]
         decision = decide(snap(tkt()), operation, NOW)
         assert isinstance(decision, Apply) and decision.record.agent == A

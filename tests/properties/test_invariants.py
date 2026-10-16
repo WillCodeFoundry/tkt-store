@@ -2,9 +2,9 @@
 
 Each generated scenario: two agents and three tickets (one blocked by another), random
 ops (claim, claim-next, renew, move, release, done, cancel, reap, edit with a random
-expected version), clock jumps, and conflicts injected at the
-moment of commit. Every step goes through the real TicketStore and transaction loop;
-the invariants of docs/design.md §5 are checked after every step.
+expected version), clock jumps, and conflicts injected at the moment of commit. Every
+step goes through the real TicketStore and transaction loop; the invariants of
+docs/design.md §5 are checked after every step.
 """
 
 from __future__ import annotations
@@ -16,15 +16,18 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from tests.unit.builders import NOW, A, B
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed, Outcome, Refused, Unchanged
 from tkt_store.domain.operations import OpName
 from tkt_store.domain.outcomes import OpRecord, RefusalCode
-from tkt_store.domain.ticket import ClaimId, Phase, Snapshot, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Snapshot, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.ids import SequentialIds
 from tkt_store.infrastructure.memory import MemStore
+
+NOW = 1_000_000
+A = AgentId("coder-7")
+B = AgentId("reviewer-2")
 
 pytestmark = pytest.mark.slow
 

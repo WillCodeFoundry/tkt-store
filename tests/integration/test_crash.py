@@ -12,15 +12,21 @@ from pathlib import Path
 import pytest
 
 from tests.gitkit import HookedRunner, head, once
-from tests.unit.builders import C1, NOW, T1, TTL, A
 from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed, Unchanged
 from tkt_store.domain.operations import ClaimOp, OpName
+from tkt_store.domain.ticket import AgentId, ClaimId, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError
 from tkt_store.infrastructure.ids import SequentialIds
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+C1 = ClaimId("1" * 32)
+T1 = TicketId("tkt-1")
 
 pytestmark = pytest.mark.git
 

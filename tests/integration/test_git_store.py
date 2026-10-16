@@ -7,20 +7,20 @@ from __future__ import annotations
 
 import inspect
 import json
-import subprocess
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from tests.gitkit import HookedRunner, git, head, paths, show, write_files
-from tests.unit.builders import C1, NOW, T1, T2, TTL, A, tkt
+from tests.gitkit import HookedRunner, git, head, write_files
 from tkt_store import open_store
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed
 from tkt_store.domain.operations import OpName
 from tkt_store.domain.outcomes import OpRecord, WriteTicket
-from tkt_store.domain.ticket import Revision, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Revision, Ticket, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
@@ -28,9 +28,34 @@ from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError, git_runner
 from tkt_store.infrastructure.ids import SequentialIds
 
-pytestmark = pytest.mark.git
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+C1 = ClaimId("1" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
 
 REF = wire.DEFAULT_REF
+
+pytestmark = pytest.mark.git
+
+
+def show(repo: Path, path: str, ref: str = REF) -> bytes:
+    """The content of `path` at `ref`, as bytes."""
+    return git(repo, "show", f"{ref}:{path}", raw=True)
+
+
+def paths(repo: Path, ref: str = REF) -> set[str]:
+    """Every file path at `ref`."""
+    return set(git(repo, "ls-tree", "-r", "--name-only", ref).split())
+
+
+def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
+    """A plain open ticket; `fields` override."""
+    base = Ticket(
+        id=ticket_id, title="Expire tokens", created=0, updated=0, phase=Phase.IMPLEMENTATION
+    )
+    return replace(base, **fields)
 
 
 def service(store: GitStore) -> TicketStore:
@@ -213,10 +238,7 @@ def test_non_utf8_file_names_are_preserved(local: Path, bare_remote: Path) -> No
     tickets = service(opened(local))
     tickets.add("Second", ticket_id=T2)
     assert [v.ticket.id for v in tickets.list()] == [T1, T2]
-    listing = subprocess.run(
-        ["git", "-C", str(bare_remote), "ls-tree", "-r", "-z", "--name-only", REF],
-        capture_output=True, check=True,
-    ).stdout.split(b"\0")  # fmt: skip
+    listing = git(bare_remote, "ls-tree", "-r", "-z", "--name-only", REF, raw=True).split(b"\0")
     assert {name, b"tickets/" + name} <= set(listing)
 
 
@@ -264,19 +286,9 @@ def test_committed_revision_is_the_ref(local: Path, bare_remote: Path) -> None:
     assert isinstance(outcome, Committed) and outcome.revision == head(bare_remote)
 
 
-class BlobCountingRunner:
-    """A real runner that records how many blobs each `cat-file --batch` was asked for."""
-
-    def __init__(self, repo: Path) -> None:
-        self._run = git_runner(repo)
-        self.batches: list[int] = []
-        self.commands: list[str] = []
-
-    def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
-        self.commands.append(args[0])
-        if args[:2] == ("cat-file", "--batch"):
-            self.batches.append(len((stdin or b"").split()))
-        return self._run(*args, stdin=stdin)
+def blobs_read(runner: HookedRunner) -> list[int]:
+    """How many blobs each `cat-file --batch` was asked for."""
+    return [len(data.split()) for data in runner.inputs_to("cat-file", "--batch")]
 
 
 def test_snapshots_read_only_ticket_files_they_have_not_seen(
@@ -284,17 +296,17 @@ def test_snapshots_read_only_ticket_files_they_have_not_seen(
 ) -> None:
     """Decoded tickets are cached by blob id: unchanged files are not read again, and
     tickets this store just wrote are not read back."""
-    runner = BlobCountingRunner(local)
+    runner = HookedRunner(local)
     store = GitStore(runner, remote="origin")
     tickets = TicketStore(store, FakeClock(NOW), SequentialIds())
     tickets.add("Second", ticket_id=T2)  # snapshot reads T1; the commit writes T2
-    assert runner.batches == [1]
+    assert blobs_read(runner) == [1]
     assert {v.ticket.id for v in tickets.list()} == {T1, T2}
-    assert runner.batches == [1]  # T2 came from the commit, T1 from the cache
+    assert blobs_read(runner) == [1]  # T2 came from the commit, T1 from the cache
     write_files(bare_remote, {wire.ticket_path(T1): wire.encode_ticket(tkt(T1, title="Edited"))})
     view = tickets.view(T1)
     assert view is not None and view.ticket.title == "Edited"
-    assert runner.batches == [1, 1]  # only the changed file
+    assert blobs_read(runner) == [1, 1]  # only the changed file
 
 
 def test_a_cached_store_sees_the_same_tickets_as_a_fresh_one(
@@ -315,12 +327,12 @@ def test_every_commit_runs_gc_auto(local: Path) -> None:
     """Plumbing never triggers git's housekeeping, so the store runs `gc --auto` after each
     commit. (Whether it packs is git's decision: it estimates loose objects by sampling, so
     a test-sized store would not reliably cross the threshold.)"""
-    runner = BlobCountingRunner(local)
+    runner = HookedRunner(local)
     tickets = TicketStore(GitStore(runner, remote="origin"), FakeClock(NOW), SequentialIds())
     for n in range(2, 5):
         tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
     tickets.view(T1)  # reads never run it
-    assert runner.commands.count("gc") == 3
+    assert runner.count("gc") == 3
 
 
 def test_a_failing_gc_does_not_fail_the_commit(local: Path) -> None:

@@ -13,15 +13,19 @@ from typing import Any
 
 import pytest
 
-from tests.unit.builders import NOW, TTL, A, B
 from tkt_store.application.errors import RetriesExhausted, StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.cli import emit_error, main, render_outcome
 from tkt_store.domain.operations import ClaimOp
-from tkt_store.domain.ticket import SKEW_GRACE, ClaimId, TicketId
+from tkt_store.domain.ticket import SKEW_GRACE, AgentId, ClaimId, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.ids import SequentialIds
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+B = AgentId("reviewer-2")
 
 pytestmark = pytest.mark.git
 

@@ -6,14 +6,29 @@ a bare remote.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any
+
 import pytest
 
-from tests.unit.builders import NOW, T1, T2, tkt
 from tkt_store.application.errors import Conflict
 from tkt_store.application.store import Store
 from tkt_store.domain.operations import OpName
 from tkt_store.domain.outcomes import OpRecord, WriteTicket
-from tkt_store.domain.ticket import Revision, TicketId
+from tkt_store.domain.ticket import Phase, Revision, Ticket, TicketId
+
+NOW = 1_000_000
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
+
+
+def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
+    """A plain open ticket; `fields` override."""
+    base = Ticket(
+        id=ticket_id, title="Expire tokens", created=0, updated=0, phase=Phase.IMPLEMENTATION
+    )
+    return replace(base, **fields)
+
 
 STORES = [
     "memstore",

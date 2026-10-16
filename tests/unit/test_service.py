@@ -7,7 +7,6 @@ from collections.abc import Iterator, Sequence
 
 import pytest
 
-from tests.unit.builders import C1, NOW, T1, T2, TTL, A
 from tkt_store.application.errors import Conflict, RetriesExhausted
 from tkt_store.application.service import TicketStore
 from tkt_store.application.store import HistoryEntry
@@ -15,10 +14,17 @@ from tkt_store.application.transaction import Committed, Refused, Unchanged
 from tkt_store.domain.operations import AddOp, ClaimOp
 from tkt_store.domain.outcomes import Change, OpRecord, RefusalCode
 from tkt_store.domain.status import Status
-from tkt_store.domain.ticket import ClaimId, Phase, Revision, Snapshot, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Revision, Snapshot, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.ids import SequentialIds
 from tkt_store.infrastructure.memory import MemStore
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+C1 = ClaimId("1" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
 
 
 class ScriptedIds(SequentialIds):

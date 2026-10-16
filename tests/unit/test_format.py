@@ -7,15 +7,33 @@ from dataclasses import replace
 
 import pytest
 
-from tests.unit.builders import C1, C2, NOW, T1, T2, A, held, tkt
 from tkt_store.application.errors import StoreError
 from tkt_store.domain.operations import OpName
 from tkt_store.domain.outcomes import OpRecord
-from tkt_store.domain.ticket import Kind, Phase, ProjectId, Resolution, Ticket
+from tkt_store.domain.ticket import (
+    AgentId,
+    Claim,
+    ClaimId,
+    Kind,
+    Phase,
+    ProjectId,
+    Resolution,
+    Ticket,
+    TicketId,
+)
 from tkt_store.infrastructure.git import wire
 
-FULL = tkt(
-    T1,
+NOW = 1_000_000
+A = AgentId("coder-7")
+C1 = ClaimId("1" * 32)
+C2 = ClaimId("2" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
+CLAIM = Claim(agent=A, claim_id=C2, lease_until=NOW + 600, claimed_at=NOW - 600)
+
+FULL = Ticket(
+    id=T1,
+    phase=Phase.IMPLEMENTATION,
     title="Expire reset tokens — ünïcode",
     body="Line one\nline two",
     kind=Kind.BUG,
@@ -23,7 +41,7 @@ FULL = tkt(
     priority=2,
     blocked_by=(T2,),
     tags=("auth",),
-    claim=held(C2, A),
+    claim=CLAIM,
     ended_claim_ids=(C1,),
     content_version=3,
     created=NOW - 100,
@@ -64,7 +82,7 @@ def test_unknown_keys_preserved_at_top_level() -> None:
         ("phase", replace(FULL, phase=Phase.REVIEW)),
         ("resolution", replace(FULL, claim=None, resolution=Resolution.DONE)),
         ("ended_claim_ids", replace(FULL, ended_claim_ids=(C1, C2))),
-        ("claim.claimed_at", replace(FULL, claim=replace(held(C2, A), claimed_at=NOW - 5))),
+        ("claim.claimed_at", replace(FULL, claim=replace(CLAIM, claimed_at=NOW - 5))),
         ("content_version", replace(FULL, content_version=7)),
     ],
 )

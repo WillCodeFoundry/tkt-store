@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from tests.unit.builders import C2, LAPSED, NOW, T2, B, held, snap, tkt
 from tkt_store.domain.outcomes import RefusalCode
 from tkt_store.domain.status import (
     Status,
@@ -13,8 +14,45 @@ from tkt_store.domain.status import (
     sort_key_for_next,
     why_not_claimable,
 )
-from tkt_store.domain.ticket import SKEW_GRACE, Resolution, TicketId
-from tkt_store.domain.ticket import Ticket as Ticket
+from tkt_store.domain.ticket import (
+    SKEW_GRACE,
+    AgentId,
+    Claim,
+    ClaimId,
+    Phase,
+    Resolution,
+    Revision,
+    Snapshot,
+    Ticket,
+    TicketId,
+)
+
+NOW = 1_000_000
+A = AgentId("coder-7")
+B = AgentId("reviewer-2")
+C1 = ClaimId("1" * 32)
+C2 = ClaimId("2" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
+LAPSED = NOW - 1  # a lease_until in the past, still within the grace
+
+
+def tkt(ticket_id: TicketId = T1, **fields: object) -> Ticket:
+    """An open, unclaimed ticket in the implementation phase; `fields` override."""
+    base = Ticket(
+        id=ticket_id, created=0, title="Expire tokens", updated=0, phase=Phase.IMPLEMENTATION
+    )
+    return replace(base, **fields)  # type: ignore[arg-type]
+
+
+def held(claim_id: ClaimId = C1, agent: AgentId = A, lease_until: int = NOW + 600) -> Claim:
+    """A claim taken 10 minutes before NOW and, by default, live for 10 more."""
+    return Claim(agent=agent, claim_id=claim_id, lease_until=lease_until, claimed_at=NOW - 600)
+
+
+def snap(*tickets: Ticket) -> Snapshot:
+    """A snapshot at an arbitrary revision holding `tickets`."""
+    return Snapshot(Revision("r1"), {t.id: t for t in tickets})
 
 
 @pytest.mark.parametrize(

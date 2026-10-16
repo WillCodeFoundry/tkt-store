@@ -4,10 +4,11 @@ injected stores that fail on purpose."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
+from dataclasses import replace
+from typing import Any
 
 import pytest
 
-from tests.unit.builders import C1, C2, NOW, T1, T2, TTL, A, B, held, tkt
 from tkt_store.application.errors import Conflict, RetriesExhausted, StoreError
 from tkt_store.application.store import HistoryEntry
 from tkt_store.application.transaction import (
@@ -19,9 +20,35 @@ from tkt_store.application.transaction import (
 )
 from tkt_store.domain.operations import AddOp, ClaimOp, InitOp, OpName
 from tkt_store.domain.outcomes import Change, OpRecord, RefusalCode, WriteTicket
-from tkt_store.domain.ticket import Revision, Snapshot, Ticket, TicketId
+from tkt_store.domain.ticket import (
+    AgentId,
+    Claim,
+    ClaimId,
+    Phase,
+    Revision,
+    Snapshot,
+    Ticket,
+    TicketId,
+)
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.memory import MemStore
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+B = AgentId("reviewer-2")
+C1 = ClaimId("1" * 32)
+C2 = ClaimId("2" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
+
+
+def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
+    """A plain open ticket; `fields` override."""
+    base = Ticket(
+        id=ticket_id, title="Expire tokens", created=0, updated=0, phase=Phase.IMPLEMENTATION
+    )
+    return replace(base, **fields)
 
 
 @pytest.fixture
@@ -80,7 +107,7 @@ def test_conflict_triggers_retry_with_fresh_snapshot(store: MemStore) -> None:
 
 
 def test_retry_rechecks_rules(store: MemStore) -> None:
-    taken = tkt(T1, title="Expire tokens", claim=held(C2, B))
+    taken = tkt(T1, claim=Claim(agent=B, claim_id=C2, lease_until=NOW + 600, claimed_at=NOW))
     store.before_next_commit(lambda: other_writer(store, taken))
     outcome = transact(store, ClaimOp(T1, A, C1, TTL), FakeClock(NOW))
     assert isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.ALREADY_CLAIMED

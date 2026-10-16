@@ -1,4 +1,5 @@
-"""Shared fixtures. Fakes are injected, never patched in (AGENTS.md)."""
+"""Fixtures shared by every suite: clock, ids, stores, a bare remote and its clones.
+Fakes are injected, never patched in (AGENTS.md)."""
 
 from __future__ import annotations
 

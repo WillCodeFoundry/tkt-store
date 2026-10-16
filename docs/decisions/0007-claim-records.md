@@ -99,12 +99,13 @@ every reader, and a claim they set aside still fences its hash:
 1. **Each file:** not a valid claim file (mode, empty blob, name) → an unknown file,
    ignored; a valid name whose times are out of order (`claimed_at` after
    `lease_until` or `ended_at`, which tkt never writes) → the claim is set aside.
-2. **Each hash:** in more than one folder → every file with it is set aside; an `open`
-   and an ended file in one folder → the ended one wins, only the `open` is set aside.
-3. **Each folder,** counting only claims still valid: no ticket file → its claims are
-   set aside (and `add` of that id is refused); a resolved ticket → a valid `open` is
-   set aside, the resolution wins; more than one valid `open` → all of them are set
-   aside.
+2. **Each hash,** over the files that passed step 1 (files set aside there still
+   fence): in more than one folder → every file with it is set aside; an `open` and an
+   ended file in one folder → the ended one wins, only the `open` is set aside.
+3. **Each folder,** counting only claims still valid, in this order: no ticket file →
+   its claims are set aside (and `add` of that id is refused); a resolved ticket →
+   every valid `open` is set aside, the resolution wins; more than one valid `open` →
+   all of them are set aside.
 
 A ticket is **held by a set-aside claim** when an `open` file of its folder was set
 aside in step 1, in step 2 for being in more than one folder, or in step 3 for being one
@@ -120,8 +121,10 @@ expired and is takeable.
 failed and says an operator must repair the store. In order, after `validate_op`'s
 `INVALID` and `NOT_INITIALISED`:
 
-1. the op names a set-aside ticket, as its ticket or as a blocker (an `edit` checks the
-   blockers of the ticket it would write, existing ones included), or `add` names an id
+1. the op names a set-aside ticket, as its ticket or as a blocker (only `add` and
+   `edit` name blockers, and an `edit` checks the blockers of the ticket it would
+   write, existing ones included; to every other op a set-aside blocker is simply not
+   done, so a `claim` of the ticket it blocks is `BLOCKED`), or `add` names an id
    whose ticket is set aside or whose claims folder exists without a ticket:
    `SET_ASIDE` (for `add`, instead of `DUPLICATE_ID`; the library treats it like
    `DUPLICATE_ID` when it mints a fresh id);

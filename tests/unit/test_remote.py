@@ -46,6 +46,25 @@ def test_lost_race_is_conflict(reason: str) -> None:
         publish(FailingPush(status(reason)), "origin", REF, NEW, BASE)
 
 
+def test_failed_ref_update_with_a_moved_ref_on_the_remote_is_conflict() -> None:
+    """git daemon / receive-pack over SSH: the generic status, the reason on stderr."""
+    stderr = (
+        f"remote: error: cannot lock ref '{REF}': is at {'c' * 40} but expected {BASE}\n"
+        "error: failed to push some refs to 'git://host/tkt.git'"
+    )
+    with pytest.raises(Conflict):
+        publish(FailingPush(status("[remote rejected] (failed to update ref)"), stderr),
+                "origin", REF, NEW, BASE)  # fmt: skip
+
+
+def test_failed_ref_update_for_another_reason_is_a_store_error() -> None:
+    stderr = f"remote: error: cannot lock ref '{REF}': Unable to create '{REF}.lock': File exists"
+    with pytest.raises(StoreError) as exc:
+        publish(FailingPush(status("[remote rejected] (failed to update ref)"), stderr),
+                "origin", REF, NEW, BASE)  # fmt: skip
+    assert not isinstance(exc.value, Conflict)
+
+
 @pytest.mark.parametrize(
     "reason",
     [

@@ -29,6 +29,8 @@ claims/
 - One file per ticket, `tickets/<id>.json`: any file there whose name without `.json`
   follows the id rule (below) is a ticket file, and its `id` field must be that name.
 - Claims are files under `claims/<id>/`, one folder per ticket (*Claims* below).
+- `tickets` and `claims`, where present, must be folders: anything else refuses the whole
+  store (`StoreError`), like a bad `tkt-store.json`.
 - Ticket files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
   (stable diffs, byte-identical round trips).
 - No other files are meaningful. Unknown files (anything not matching these paths) are
@@ -149,7 +151,8 @@ appears anywhere can never claim again.
 **Reading claims.** A file under `claims/` is a claim only if its mode is `100644`, its
 blob is git's empty blob and its path matches the pattern above; anything else is an
 unknown file, preserved, and no part of it is used (renaming a claim file to anything
-else has the effect of deleting it). The claims are then checked in this order, the same
+else has the effect of deleting it). A `claims/<id>` that is not a folder holds its
+ticket by a set-aside claim, or sets the id aside when there is no ticket. The claims are then checked in this order, the same
 for every reader; a claim set aside still fences its hash (it can never claim again):
 
 1. **Each file:** `claimed_at` after `lease_until` or `ended_at` → the claim is set aside.

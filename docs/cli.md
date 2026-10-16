@@ -173,4 +173,4 @@ Each entry of `tickets` is the ticket in its on-branch form and its open claim, 
 | 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit, not found, set aside) |
 | 2 | Usage error (missing or conflicting flags) |
 | 3 | Retries exhausted after repeated conflicts; nothing written — re-run the same command |
-| 4 | Store error (git failure, remote unreachable or not configured, not a protocol 2 store). A failure during the push may mean the commit landed: re-run the same command, which converges either way |
+| 4 | Store error (git failure, remote unreachable or not configured, not a protocol 2 store, or its `tickets`/`claims` not folders). A failure during the push may mean the commit landed: re-run the same command, which converges either way |

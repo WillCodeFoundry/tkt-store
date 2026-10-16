@@ -140,6 +140,15 @@ def claim_of(path: str) -> ClaimFile | None:
     return EndedClaim(ticket_id, claim, holder, int(claimed_at), _ENDED_BY[state], int(last))
 
 
+def claims_folder_of(path: str) -> TicketId | None:
+    """The ticket id when `path` is 'claims/<id>' itself, a ticket's claims folder: listed
+    as an entry of its own only when it is not a folder (ADR 0007)."""
+    directory, slash, name = path.partition("/")
+    if directory != CLAIMS_DIR or not slash or "/" in name or not TICKET_ID_RE.fullmatch(name):
+        return None
+    return TicketId(name)
+
+
 def encode_store_meta() -> bytes:
     """The tkt-store.json written by init: canonical JSON {"protocol": PROTOCOL_VERSION}."""
     return canonical_json({"protocol": PROTOCOL_VERSION})

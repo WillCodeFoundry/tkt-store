@@ -94,7 +94,11 @@ it looks only at names:
   `TERMINAL` for that ticket first, then looks the hash up.
 
 **Reading.** The snapshot lists `tickets/` and `claims/` and reads only ticket files;
-claim state comes from the listing alone. The checks run in this order, the same for
+claim state comes from the listing alone. `tickets` and `claims` must be folders, like
+`tkt-store.json` the store's own layout: anything else refuses the whole store until an
+operator repairs it. A `claims/<id>` that is not a folder holds its ticket by a set-aside
+claim (nothing in it can be read, so nothing is known free), or sets the id aside when
+there is no ticket. The checks run in this order, the same for
 every reader, and a claim they set aside still fences its hash:
 
 1. **Each file:** not a valid claim file (mode, empty blob, name) → an unknown file,
@@ -177,6 +181,8 @@ store.
 - **A git ref per claim, or git notes:** they break the single-ref compare-and-swap that
   makes every op one atomic commit (ADR 0001).
 - **Separating phase or resolution:** see *What is not separated*.
+- **Replacing a file where a folder belongs** on the next write: tkt never deletes a file
+  it does not recognise.
 
 ## Consequences
 
@@ -203,3 +209,6 @@ store.
   folders that changed.
 - An operator repairing a ticket finds all of its occupancy in `claims/<id>/`, readable
   through `tkt show`.
+- A forger can turn a genuine claim's re-runs into `SET_ASIDE`, e.g. by pushing a second
+  ended file for its hash; like deleting a claim file, that is within the power of
+  anyone with push access, and it never releases work early.

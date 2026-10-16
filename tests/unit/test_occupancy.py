@@ -119,3 +119,9 @@ def test_after_renames_a_claim() -> None:
         before, (WriteClaim(opened().ended(EndedBy.DONE, NOW), opened()),), Revision("r2")
     )
     assert result.claim_of(T1) is None and result.ended[H1].ended_by is EndedBy.DONE
+
+
+def test_a_claims_folder_that_is_not_a_folder_holds_its_ticket() -> None:
+    s = assemble(Revision("r1"), {T1: tkt()}, {}, [], not_folders=[T1, T2])
+    assert s.held_aside == {T1: "its claims folder is not a folder"}
+    assert s.set_aside == {T2: "its claims folder is not a folder"}  # no ticket: the id

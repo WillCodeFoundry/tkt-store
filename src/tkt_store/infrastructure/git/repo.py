@@ -97,8 +97,22 @@ class GitStore:
         if revision is None:
             return Snapshot(None, MappingProxyType({}))
         self._check_meta(revision)
+        self._check_layout(revision)
         tickets, set_aside = self._tickets(revision)
-        return assemble(revision, tickets, set_aside, self._claims(revision))
+        claims, not_folders = self._claims(revision)
+        return assemble(revision, tickets, set_aside, claims, not_folders)
+
+    def _check_layout(self, revision: Revision) -> None:
+        """`tickets` and `claims`, where present, must be folders: the store's own layout,
+        like `tkt-store.json`. Anything else is a StoreError that names no value, since
+        nothing could be written until an operator repairs it (ADR 0007)."""
+        for entry in _entries(self._git("ls-tree", "-z", revision)):
+            name = entry.name.decode(errors="replace")
+            if name in (wire.TICKETS_DIR, wire.CLAIMS_DIR) and entry.kind != "tree":
+                raise StoreError(
+                    f"{self._ref} at {revision}: {name} is not a folder; an operator must "
+                    "repair the store"
+                )
 
     def _tickets(self, revision: Revision) -> tuple[dict[TicketId, Ticket], dict[TicketId, str]]:
         """Every ticket file, checked (ADR 0005): only a regular file of at most
@@ -139,19 +153,22 @@ class GitStore:
         self._verdicts = verdicts
         return tickets, set_aside
 
-    def _claims(self, revision: Revision) -> list[ClaimFile]:
+    def _claims(self, revision: Revision) -> tuple[list[ClaimFile], list[TicketId]]:
         """Every claim file (ADR 0007), from the listing alone: an empty regular file whose
         path parses (`wire.claim_of`). Nothing in a claim file is read; any other path
-        under claims/ is an unknown file, preserved and never interpreted."""
+        under claims/ is an unknown file, preserved and never interpreted. Also the ticket
+        ids whose `claims/<id>` is not a folder."""
         listing = self._git("ls-tree", "-r", "-z", revision, "--", f"{wire.CLAIMS_DIR}/")
         empty = self._empty_blob()
-        claims = []
+        claims, not_folders = [], []
         for entry in _entries(listing):
-            if entry.mode == BLOB_MODE and entry.kind == "blob" and entry.oid == empty:
-                claim = wire.claim_of(entry.name.decode(errors="replace"))
-                if claim is not None:
-                    claims.append(claim)
-        return claims
+            path = entry.name.decode(errors="replace")
+            empty_file = entry.mode == BLOB_MODE and entry.kind == "blob" and entry.oid == empty
+            if empty_file and (claim := wire.claim_of(path)) is not None:
+                claims.append(claim)
+            elif (ticket_id := wire.claims_folder_of(path)) is not None:
+                not_folders.append(ticket_id)
+        return claims, not_folders
 
     def commit(
         self,

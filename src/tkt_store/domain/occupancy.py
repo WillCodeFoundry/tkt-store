@@ -37,17 +37,23 @@ from tkt_store.domain.ticket import (
     TicketState,
 )
 
+NOT_A_FOLDER = "its claims folder is not a folder"
+
 
 def assemble(
     revision: Revision | None,
     tickets: Mapping[TicketId, Ticket],
     set_aside: Mapping[TicketId, str],
     claim_files: Iterable[ClaimFile],
+    not_folders: Iterable[TicketId] = (),
 ) -> Snapshot:
     """The snapshot of `tickets` (all valid) and `claim_files` (every claim file whose
-    name parsed), with `set_aside` the ticket ids whose files failed their checks."""
+    name parsed), with `set_aside` the ticket ids whose files failed their checks and
+    `not_folders` the ids whose `claims/<id>` is not a folder: its ticket is held by a
+    set-aside claim (nothing in it can be read, so nothing can be known free), or, with
+    no ticket, the id is set aside."""
     aside: dict[ClaimFile, str] = {}
-    holding: dict[TicketId, str] = {}
+    holding: dict[TicketId, str] = dict.fromkeys(not_folders, NOT_A_FOLDER)
 
     def put_aside(claim: ClaimFile, why: str, *, holds: bool) -> None:
         aside.setdefault(claim, why)
@@ -80,6 +86,9 @@ def assemble(
     for claim in files:
         by_folder[claim.ticket_id].append(claim)
     set_aside = dict(set_aside)
+    for ticket_id in holding:
+        if ticket_id not in tickets:
+            set_aside.setdefault(ticket_id, NOT_A_FOLDER)
     fenced: dict[ClaimHash, str] = {}
     for ticket_id, folder in by_folder.items():  # step 3
         valid = [claim for claim in folder if claim not in aside]

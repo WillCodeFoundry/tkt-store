@@ -212,6 +212,28 @@ def test_add_does_not_remint_when_only_a_blocker_is_set_aside(
     assert ids.ticket_id() == "tkt-0002"  # only tkt-0001 was minted
 
 
+def test_a_claims_folder_that_is_a_file_holds_its_ticket(local: Path, bare_remote: Path) -> None:
+    """Nothing in it can be read, so nothing is known free: only cancel acts (ADR 0007)."""
+    write_files(bare_remote, {f"claims/{T1}": b"not a folder"})
+    snapshot = opened(local).snapshot()
+    assert snapshot.held_aside == {T1: "its claims folder is not a folder"}
+    tickets = service(opened(local))
+    claimed = tickets.claim(T1, A, TTL, claim_id=C1)
+    assert isinstance(claimed, Refused) and claimed.refusal.code is RefusalCode.SET_ASIDE
+    assert isinstance(tickets.cancel(T1), Committed)
+    assert show(bare_remote, f"claims/{T1}") == b"not a folder"  # preserved
+
+
+@pytest.mark.parametrize("name", ["tickets", "claims"])
+def test_a_store_folder_that_is_a_file_refuses_the_store(
+    clones: list[Path], bare_remote: Path, name: str
+) -> None:
+    service(opened(clones[0])).init()
+    write_files(bare_remote, {name: b"not a folder"})
+    with pytest.raises(StoreError, match=f"{name} is not a folder"):
+        opened(clones[0]).snapshot()
+
+
 def test_claims_are_empty_files_renamed_as_they_change(local: Path, bare_remote: Path) -> None:
     tickets = service(opened(local))
     tickets.claim(T1, A, TTL, claim_id=C1)

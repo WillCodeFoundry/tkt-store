@@ -108,7 +108,16 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     - "[rejected] (stale info)" comes from our own git client, whose lease check saw the
       branch move before anything was sent: a lost race, no round trip needed;
     - "[remote rejected] (...)" is the server's refusal of our update; one `ls-remote`
-      then says whether the branch moved.
+      then says whether the branch moved. If it already holds `new` (another writer
+      built the identical commit, or the server misreported a push that landed), `new`
+      is published and this returns normally, so a Conflict always means nothing of
+      ours became visible.
+
+    The `ls-remote` comes just after the rejection, so two rare overlaps are possible,
+    both safe: a push refused for another reason while someone else moves the branch is
+    taken for a lost race, and only becomes a StoreError on a retry whose window stays
+    quiet (or ends in RetriesExhausted); and a server whose `ls-remote` lags behind its
+    pushes would turn a lost race into a StoreError. Neither publishes anything.
 
     A failure without a status line (a timeout, a dropped connection) is the GitError
     itself, a StoreError that may hide a push that landed."""
@@ -130,6 +139,8 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
             raise StoreError(
                 f"push to {remote} {reasons}, and the branch could not be re-read: {check}"
             ) from error
+        if head == new:
+            return
         if head != base:
             raise Conflict(base, head) from error
         raise StoreError(f"push to {remote} {reasons}: {error.stderr.strip()}") from error

@@ -267,7 +267,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Retries exhausted | `RetriesExhausted(op)` | Caller re-runs `op` with the same ids (idempotent) |
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |
-| Remote moved since the snapshot | Push rejected, nothing published: by our own git client's lease check (`[rejected] (stale info)`) → `Conflict`; or by the server (`[remote rejected] (…)`, whatever the wording), after which one `ls-remote` shows whether the branch moved → `Conflict`, or not (refused for another reason: protection, a hook) → `StoreError` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
+| Remote moved since the snapshot | Push rejected, nothing published: by our own git client's lease check (`[rejected] (stale info)`) → `Conflict`; or by the server (`[remote rejected] (…)`, whatever the wording), after which one `ls-remote` shows whether the branch moved → `Conflict`, or not (refused for another reason: protection, a hook) → `StoreError`; if it already holds our commit, the push counts as published | Transaction re-decides on the fresh snapshot; a manual re-run converges |
 | Push landed, local update failed | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |
 | Holder dies | Lease lapses → `expired` status | After `SKEW_GRACE`, `reap` or a new `claim` takes over; old holder fenced by claim id |

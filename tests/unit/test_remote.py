@@ -71,6 +71,13 @@ def test_a_server_rejection_with_the_branch_unmoved_is_a_store_error(status: str
     assert not isinstance(exc.value, Conflict) and status in str(exc.value)
 
 
+@pytest.mark.parametrize("status", SERVER_WORDINGS[:2])
+def test_a_rejection_with_our_own_commit_already_there_is_published(status: str) -> None:
+    """Another writer built the identical commit, or the server misreported a push that
+    landed: `new` is the remote head, so it is published, not a Conflict."""
+    publish(FakeRemote(status, head=NEW), "origin", REF, NEW, BASE)
+
+
 def test_creating_the_store_refused_while_it_does_not_exist_is_a_store_error() -> None:
     with pytest.raises(StoreError) as exc:
         publish(FakeRemote("[remote rejected] (creation denied)", head=None), "origin",

@@ -331,3 +331,30 @@ def test_a_failing_gc_does_not_fail_the_commit(local: Path) -> None:
     store = GitStore(HookedRunner(local, broken_gc), remote="origin")
     outcome = TicketStore(store, FakeClock(NOW), SequentialIds()).add("Second", ticket_id=T2)
     assert isinstance(outcome, Committed)
+
+
+def test_a_server_side_lost_race_is_retried_on_real_git(
+    clones: list[Path], bare_remote: Path
+) -> None:
+    """The server's own compare-and-swap loses (an `update` hook moves the branch while our
+    push is being received, once): the push is rejected, one `ls-remote` sees the branch
+    moved, and the transaction retries and commits."""
+    tickets = service(opened(clones[0]))
+    tickets.init()
+    tickets.add("Expire tokens", ticket_id=T1)
+    hook = bare_remote / "hooks" / "update"
+    hook.write_text(
+        "#!/bin/sh\n"
+        '[ -e "$GIT_DIR/moved" ] && exit 0\n'
+        'touch "$GIT_DIR/moved"\n'
+        'tree=$(git rev-parse "$1^{tree}")\n'
+        'other=$(git -c user.name=other -c user.email=other@invalid commit-tree "$tree" '
+        '-p "$2" -m "another writer")\n'
+        'git update-ref "$1" "$other" "$2"\n'
+    )
+    hook.chmod(0o755)
+    runner = HookedRunner(clones[0])
+    outcome = service(GitStore(runner, remote="origin")).add("Second", ticket_id=T2)
+    assert isinstance(outcome, Committed) and (bare_remote / "moved").exists()
+    assert [args[0] for args in runner.calls].count("ls-remote") == 1
+    assert {t.id for t in opened(clones[1]).snapshot().tickets.values()} == {T1, T2}

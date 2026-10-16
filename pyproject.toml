@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tkt-store"
-version = "0.0.0"
+version = "0.1.0"
 description = "A git-backed ticket store for coordinating AI agents: atomic claims, leases, audit log."
 readme = "README.md"
 requires-python = ">=3.11"

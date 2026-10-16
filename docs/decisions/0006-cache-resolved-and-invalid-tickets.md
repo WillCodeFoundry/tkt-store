@@ -34,24 +34,37 @@ a blob id names exact content, so an entry is never stale:
   value read, ADR 0005), so it is not read and checked again on every op.
 
 Open tickets are not saved to the file: they are few and change on most ops. A
-long-running process keeps them in memory by blob id, as it does today.
+long-running process keeps them in an in-memory map by blob id.
 
 **Only what depends on the file's bytes alone is cached:** decoding and the size,
 schema, field and whole-ticket checks. Checks that relate a file to its path (the id
 matches the file name) or to other tickets (two tickets with the same claim hash,
 blockers) run on every snapshot over cached and freshly read tickets alike, as do
-derived values such as status.
+derived values such as status. No cached check reads the clock: time-dependent ones,
+such as a claim made in the future or the lease cap, live in the rules and run on every
+op, so a verdict never depends on when it was made.
 
 **A snapshot** lists `tickets/` with blob ids, takes the cached entries, and reads and
 checks the remaining files in one `cat-file --batch`. When it finds new resolved or
 invalid files, or the cache holds blob ids that are no longer listed, it rewrites the
-file: only the current listing's entries, to a temporary file renamed over the old one,
-so a crash never leaves a torn cache and the cache never holds more than the store.
+file: only the current listing's entries, to a temporary file with a unique name in the
+same directory, renamed over the old one. A crash never leaves a torn cache, and the
+cache never holds more than the store. If two processes share a clone anyway (against
+the one-clone-per-process rule), the last rename wins and a lost entry only costs a
+re-read.
 
-**The cache is a convenience, never the source of truth.** It records its format and
-the tkt-store version that wrote it; a cache from another version, or one that does not
-parse, is discarded, and the next snapshot rebuilds it with one full read. Deleting it
-is always safe. It is JSON, never pickle: loading a pickle can run code.
+**The cache is a convenience, never the source of truth.** It records a cache version,
+a constant bumped whenever the decoder or a cached check changes, and the tkt-store
+version that wrote it; a cache with either different, one that does not parse, or one
+whose entries have the wrong shape is discarded, and the next snapshot rebuilds it with
+one full read. Cached tickets are loaded through the same decoder as ticket files,
+without the field checks. Deleting the cache is always safe. It is JSON, never pickle:
+loading a pickle can run code.
+
+**The cache is trusted like the rest of the clone.** An entry is believed without reading
+its blob, so whoever can write the clone's git directory can make a forged ticket look
+valid. That adds no exposure: writing it already lets them change hooks or config and
+run code in that clone (ADR 0005).
 
 ## Alternatives rejected
 
@@ -76,7 +89,10 @@ is always safe. It is JSON, never pickle: loading a pickle can run code.
 - An op skips reading and checking resolved and invalid files. It still parses the cache
   (about as costly as decoding the same tickets without the checks), lists every file
   and rebuilds the `tickets/` tree, so its cost still grows with history, only more
-  slowly; accepted (design.md §9).
+  slowly; accepted (design.md §9). Expected at 20,000 tickets, mostly resolved: about
+  140 ms to parse the cache and 150 ms to build its tickets, plus listing and the tree
+  (~60 ms) and the few open files, so about 350 ms instead of ~700 ms today, and more
+  saved once 0.2.0's validation on read lands.
 - The first op in a new clone, and the first after an upgrade, reads every file once.
 - The cache grows with resolved tickets: about the size of their files.
 - The store format does not change; the cache is local to each clone and to the

@@ -139,5 +139,5 @@ anything.
 - Implemented in stages, each flipping its security tests: (1) field checks, limits,
   lease cap and `--`; (2) reading the store: set-aside tickets, size and type checks,
   tolerant history, the cache of resolved and invalid tickets (ADR 0006); (3) output:
-  escaping, clean errors, `list` without bodies; (4) identity from git and `tkt clone`, hashed claim ids, `holder`,
-  holder-only edits, `revoke`; (5) `tkt audit`.
+  escaping, clean errors, `list` without bodies; (4) identity from git and `tkt clone`,
+  hashed claim ids, `holder`, holder-only edits, `revoke`; (5) `tkt audit`.

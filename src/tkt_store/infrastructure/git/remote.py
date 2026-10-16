@@ -111,7 +111,7 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
         )  # fmt: skip
     except GitError as error:
         status = [line for line in error.stdout.decode().splitlines() if line.startswith("!")]
-        if any(_lost_race(line) for line in status):
+        if any(_lost_race(line) for line in status) or _lost_race_on_remote(status, error.stderr):
             raise Conflict(base, None) from error
         if status:  # declined for another reason: say why (git's status, the remote's words)
             reasons = "; ".join(line.split("\t")[-1] for line in status)
@@ -135,3 +135,19 @@ that could not be taken) stays a StoreError: re-running the op converges."""
 
 def _lost_race(line: str) -> bool:
     return LOST_RACE.search(line) is not None
+
+
+REMOTE_CAS_LOST = re.compile(r"cannot lock ref '[^']*': is at [0-9a-f]+ but expected [0-9a-f]+")
+"""A remote's compare-and-swap losing a concurrent update, as reported on its stderr."""
+
+
+def _lost_race_on_remote(status: list[str], stderr: str) -> bool:
+    """`git daemon` and plain receive-pack over SSH (observed with git 2.53) report a lost
+    race as the generic "[remote rejected] (failed to update ref)", with the reason only on
+    the remote's stderr ("remote: error: cannot lock ref '<ref>': is at <oid> but expected
+    <oid>"). Only that pair is a lost race: "(failed to update ref)" for any other reason
+    (a lock that could not be taken, a full disk) stays a StoreError."""
+    return (
+        any("(failed to update ref)" in line for line in status)
+        and REMOTE_CAS_LOST.search(stderr) is not None
+    )

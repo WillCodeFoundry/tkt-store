@@ -44,8 +44,10 @@ both are a `Conflict` and retried:
 
 - `[rejected] (stale info)`: the client's lease check saw the ref move before pushing;
 - `[remote rejected] (cannot lock ref '<ref>': is at <oid> but expected <oid>)`: GitHub's
-  own compare-and-swap lost a concurrent push. (A plain git remote says
-  `(incorrect old value provided)`.) Before this was recognised, contending agents got
+  own compare-and-swap lost a concurrent push. (Plain git says
+  `(incorrect old value provided)` over the local transport, and `(failed to update ref)`
+  with the "is at … but expected …" detail on the remote's stderr from `git daemon`.)
+  Before this was recognised, contending agents got
   store errors instead of retries.
 
 **Contention.** K agents, each in its own clone, drain K × 4 tickets with `claim-next`

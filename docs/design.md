@@ -267,7 +267,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Retries exhausted | `RetriesExhausted(op)` | Caller re-runs `op` with the same ids (idempotent) |
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |
-| Remote moved since the snapshot | Push rejected: the lease is stale (`[rejected]`), or the remote's own compare-and-swap lost a concurrent push (`[remote rejected] (incorrect old value provided)`) → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
+| Remote moved since the snapshot | Push rejected: the lease is stale (`[rejected]`), or the remote's own compare-and-swap lost a concurrent push, worded by the server: `[remote rejected] (incorrect old value provided)` (git, local transport), `(cannot lock ref '<ref>': is at <oid> but expected <oid>)` (GitHub), or `(failed to update ref)` with that same "is at … but expected …" on the remote's stderr (`git daemon`, receive-pack over SSH) → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
 | Push landed, local update failed | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
 | Store opened in the other mode (`--no-remote` on a remote-backed store, or vice versa) | `StoreError` on every snapshot; nothing written | Use the mode recorded in `tkt-store.json` |
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |

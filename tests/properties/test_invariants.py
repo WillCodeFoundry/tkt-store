@@ -152,6 +152,17 @@ def test_only_current_claim_id_can_finish(steps: list[tuple[Any, ...]]) -> None:
 
 @settings(max_examples=150, deadline=None)
 @given(scenarios)
+def test_what_an_op_reports_is_what_the_store_holds(steps: list[tuple[Any, ...]]) -> None:
+    """A committed op's tickets, each with its open claim, are exactly what a fresh
+    snapshot shows (injected commits never change tickets or claims)."""
+    for s in run(steps):
+        if isinstance(s.outcome, Committed):
+            for state in s.outcome.tickets:
+                assert s.after.state(state.ticket.id) == state
+
+
+@settings(max_examples=150, deadline=None)
+@given(scenarios)
 def test_every_applied_op_is_exactly_one_history_entry(steps: list[tuple[Any, ...]]) -> None:
     """Invariant 2: a committed op adds exactly one history entry; refused and unchanged
     ops add none (injected commits from the other writer are accounted separately)."""

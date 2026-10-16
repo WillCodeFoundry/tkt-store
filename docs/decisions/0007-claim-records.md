@@ -209,6 +209,8 @@ store.
   folders that changed.
 - An operator repairing a ticket finds all of its occupancy in `claims/<id>/`, readable
   through `tkt show`.
-- A forger can turn a genuine claim's re-runs into `SET_ASIDE`, e.g. by pushing a second
-  ended file for its hash; like deleting a claim file, that is within the power of
-  anyone with push access, and it never releases work early.
+- A forger with push access can change what claim files say, as they can delete them:
+  a second ended file for a claim that already ended turns its re-runs into
+  `SET_ASIDE`, which never releases work early; a forged ended file beside a genuine
+  open claim ends that claim (the ended file wins), freeing its ticket for another
+  agent, as deleting the open file would.

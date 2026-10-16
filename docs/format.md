@@ -152,8 +152,9 @@ appears anywhere can never claim again.
 blob is git's empty blob and its path matches the pattern above; anything else is an
 unknown file, preserved, and no part of it is used (renaming a claim file to anything
 else has the effect of deleting it). A `claims/<id>` that is not a folder holds its
-ticket by a set-aside claim, or sets the id aside when there is no ticket. The claims are then checked in this order, the same
-for every reader; a claim set aside still fences its hash (it can never claim again):
+ticket by a set-aside claim, or sets the id aside when there is no ticket. The claims
+are then checked in this order, the same for every reader; a claim set aside still
+fences its hash (it can never claim again):
 
 1. **Each file:** `claimed_at` after `lease_until` or `ended_at` → the claim is set aside.
 2. **Each hash:** in more than one folder → every file with it is set aside; ended more

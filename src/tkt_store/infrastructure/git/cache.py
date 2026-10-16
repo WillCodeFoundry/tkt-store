@@ -48,16 +48,20 @@ REASON_MAX = 200
 """The longest cached reason accepted: tkt's own are far shorter."""
 
 
-def _writer() -> str:
+def _writer() -> str | None:
     """The stamp every shard carries: the cache version, the installed tkt-store version,
-    and a hash of the modules whose rules decide a cached verdict."""
+    and a hash of the modules whose rules decide a cached entry. None if those modules'
+    source can't be read (a frozen install): then the cache is off."""
     try:
         tkt_store = version("tkt-store")
     except PackageNotFoundError:  # pragma: no cover - always installed in practice
         tkt_store = "unknown"
     rules = hashlib.sha256()
-    for module in (fields, ticket_module, wire):
-        rules.update(Path(module.__file__ or "").read_bytes())
+    try:
+        for module in (fields, ticket_module, wire):
+            rules.update(Path(module.__file__ or "").read_bytes())
+    except OSError:
+        return None
     return f"{CACHE_VERSION}/{tkt_store}/{rules.hexdigest()[:16]}"
 
 
@@ -83,20 +87,30 @@ class CloneCache:
         self._writer = _writer()
         self._saved: dict[str, set[str]] = {}
         """Each shard's keys as last loaded or saved: a shard is rewritten only when its
-        keys change."""
+        keys change, or when it could not be loaded (so it is not rejected again)."""
+        self._spoilt: set[str] = set()
+
+    @property
+    def spoilt(self) -> bool:
+        """True if a shard could not be loaded: the next save rewrites it."""
+        return bool(self._spoilt)
 
     def load(self) -> Cached:
         """Everything the trusted shards hold; a missing or untrusted shard holds nothing
         (another writer version, not JSON, an entry of the wrong shape)."""
         cached = Cached()
-        self._saved = {}
+        self._saved, self._spoilt = {}, set()
+        if self._writer is None:
+            return cached
         with suppress(OSError):
             for path in sorted(self.directory.glob("??.json")):
-                if (shard := self._load(path)) is not None:
-                    cached.tickets.update(shard.tickets)
-                    cached.invalid.update(shard.invalid)
-                    cached.folders.update(shard.folders)
-                    self._saved[path.stem] = shard.ids()
+                if (shard := self._load(path)) is None:
+                    self._spoilt.add(path.stem)
+                    continue
+                cached.tickets.update(shard.tickets)
+                cached.invalid.update(shard.invalid)
+                cached.folders.update(shard.folders)
+                self._saved[path.stem] = shard.ids()
         return cached
 
     def _load(self, path: Path) -> Cached | None:
@@ -114,8 +128,11 @@ class CloneCache:
         return shard if all(key[:2] == path.stem for key in shard.ids()) else None
 
     def save(self, cached: Cached) -> None:
-        """Make the shards hold exactly `cached`, rewriting only those whose keys changed.
-        A failure only costs a re-read next time, so it is ignored."""
+        """Make the shards hold exactly `cached`, rewriting only those whose keys changed
+        or that could not be loaded. A failure only costs a re-read next time, so it is
+        ignored."""
+        if self._writer is None:
+            return
         shards: dict[str, Cached] = defaultdict(Cached)
         for key, ticket in cached.tickets.items():
             shards[key[:2]].tickets[key] = ticket
@@ -123,10 +140,11 @@ class CloneCache:
             shards[key[:2]].invalid[key] = reason
         for key, names in cached.folders.items():
             shards[key[:2]].folders[key] = names
-        for name in {*shards, *self._saved}:
+        for name in {*shards, *self._saved, *self._spoilt}:
             shard = shards.get(name, Cached())
-            if shard.ids() != self._saved.get(name, set()):
+            if name in self._spoilt or shard.ids() != self._saved.get(name, set()):
                 self._write(name, shard)
+                self._spoilt.discard(name)
 
     def _write(self, name: str, shard: Cached) -> None:
         document = {

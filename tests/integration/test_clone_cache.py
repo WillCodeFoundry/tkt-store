@@ -155,10 +155,16 @@ def test_a_name_twice_in_one_tree_is_one_entry(clone: Path) -> None:
     assert store._claim_names(entry + entry) == ("name",)
 
 
-def test_a_tree_that_does_not_parse_is_a_store_error(clone: Path) -> None:
+@pytest.mark.parametrize(
+    "tree",
+    [b"garbage", b"+100644 name\0" + b"0" * 20, b"100_644 name\0" + b"0" * 20,
+     b"100644 name\0" + b"0" * 5],
+    ids=["garbage", "signed_mode", "underscored_mode", "short_id"],
+)  # fmt: skip
+def test_a_tree_that_does_not_parse_is_a_store_error(clone: Path, tree: bytes) -> None:
     store, _ = process(clone)
     with pytest.raises(StoreError):
-        store._claim_names(b"garbage")
+        store._claim_names(tree)
 
 
 def test_a_sha256_repository_works_with_the_cache(tmp_path: Path) -> None:
@@ -177,6 +183,16 @@ def test_a_sha256_repository_works_with_the_cache(tmp_path: Path) -> None:
     assert GitStore.at(local, remote="origin").snapshot() == expected and expected.ended
     ids = CloneCache(local / ".git" / "tkt-store" / "cache").load().ids()
     assert ids and all(len(key) == 64 for key in ids)
+
+
+def test_a_spoilt_shard_is_rewritten_not_rejected_again(clone: Path) -> None:
+    process(clone)[0].snapshot()
+    used = {path.stem for path in shards(clone)}
+    spare = next(f"{n:02x}" for n in range(256) if f"{n:02x}" not in used)
+    spoilt = cache_of(clone).directory / f"{spare}.json"
+    spoilt.write_bytes(b"not json")
+    process(clone)[0].snapshot()
+    assert json.loads(spoilt.read_bytes())["tickets"] == {}
 
 
 def test_deleting_the_cache_is_always_safe(clone: Path) -> None:

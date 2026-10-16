@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import suppress
 from typing import Any, TypeVar
 
 from tkt_store.application.errors import StoreError
@@ -155,6 +156,43 @@ def claims_folder_of(path: str) -> TicketId | None:
     if directory != CLAIMS_DIR or not slash or "/" in name or not TICKET_ID_RE.fullmatch(name):
         return None
     return TicketId(name)
+
+
+def claim_names(tree: bytes, empty: bytes) -> tuple[str, ...]:
+    """The names in a raw git tree object that may be claim files: regular, non-executable
+    files (mode 100644 once canonicalised, as `git ls-tree` shows it) whose blob is git's
+    empty blob (`empty`, its raw id), each name once, as git reads a tree that repeats one.
+    The names themselves are parsed by `claim_named`. Raises Invalid if the tree does not
+    parse. Part of what the clone cache keeps, so its rules are in this module."""
+    size, names, at = len(empty), [], 0
+    try:
+        while at < len(tree):
+            space = tree.index(b" ", at)
+            nul = tree.index(b"\0", space)
+            digits, name, oid = (
+                tree[at:space],
+                tree[space + 1 : nul],
+                tree[nul + 1 : nul + 1 + size],
+            )
+            if not digits.isdigit() or b"8" in digits or b"9" in digits or len(oid) != size:
+                raise ValueError("malformed tree entry")  # as strict as git's own reading
+            mode, at = int(digits, 8), nul + 1 + size
+            if mode & 0o170000 == 0o100000 and not mode & 0o100 and oid == empty:
+                with suppress(UnicodeDecodeError):
+                    names.append(name.decode())
+    except ValueError as error:
+        raise Invalid("not a tree") from error
+    return tuple(dict.fromkeys(names))
+
+
+def verdict(data: bytes) -> Ticket | str:
+    """A ticket file's content checked on its own: the ticket, or the check that failed.
+    What the clone cache keeps for a file, so its rules are in this module."""
+    try:
+        ticket = decode_ticket(data)
+    except Invalid as invalid:
+        return str(invalid)
+    return fields.ticket_problem(ticket) or ticket
 
 
 def encode_store_meta() -> bytes:

@@ -152,8 +152,8 @@ class GitStore:
             and resolved_ticket.is_terminal
         }
         fresh = Cached(tickets, invalid, resolved)
-        if fresh.ids() != self._cached.ids():
-            self._cache.save(fresh)  # rewrites only the shards whose keys changed
+        if fresh.ids() != self._cached.ids() or self._cache.spoilt:
+            self._cache.save(fresh)  # rewrites only the shards that changed or are spoilt
         self._cached = fresh
 
     def _check_layout(self, revision: Revision) -> None:
@@ -197,7 +197,7 @@ class GitStore:
         verdicts = {oid: self._verdicts[oid] for oid in to_check.values() if oid in self._verdicts}
         unseen = [oid for oid in dict.fromkeys(to_check.values()) if oid not in verdicts]
         for oid, data in zip(unseen, self._read_objects(unseen, "blob"), strict=True):
-            verdicts[oid] = _verdict(data)
+            verdicts[oid] = wire.verdict(data)
         tickets: dict[TicketId, Ticket] = {}
         for ticket_id, oid in to_check.items():
             match verdicts[oid]:
@@ -247,26 +247,12 @@ class GitStore:
         return claims, not_folders, folders
 
     def _claim_names(self, tree: bytes) -> tuple[str, ...]:
-        """The names in a raw git tree object that may be claim files: regular,
-        non-executable files (mode 100644 once git canonicalises it, as `ls-tree` shows
-        it) whose blob is git's empty blob; the names themselves are parsed by the caller.
-        A tree that does not parse is a StoreError."""
-        empty = bytes.fromhex(self._empty_blob())
-        size, names, at = len(empty), [], 0
+        """`wire.claim_names` of a raw tree, with this repository's empty blob; a tree that
+        does not parse is a StoreError."""
         try:
-            while at < len(tree):
-                space = tree.index(b" ", at)
-                nul = tree.index(b"\0", space)
-                mode = int(tree[at:space], 8)
-                name, oid = tree[space + 1 : nul], tree[nul + 1 : nul + 1 + size]
-                at = nul + 1 + size
-                regular = mode & 0o170000 == 0o100000 and not mode & 0o100
-                if regular and oid == empty:
-                    with suppress(UnicodeDecodeError):
-                        names.append(name.decode())
-        except ValueError as error:
-            raise StoreError("cannot parse a claims folder's tree") from error
-        return tuple(dict.fromkeys(names))  # a name twice is one entry, as git reads it
+            return wire.claim_names(tree, bytes.fromhex(self._empty_blob()))
+        except wire.Invalid as invalid:
+            raise StoreError("cannot parse a claims folder's tree") from invalid
 
     def commit(
         self,
@@ -414,15 +400,6 @@ class GitStore:
     def _mktree(self, entries: dict[bytes, _Entry]) -> str:
         listing = b"".join(e.line() for e in entries.values())
         return self._git("mktree", "-z", stdin=listing).decode().strip()
-
-
-def _verdict(data: bytes) -> Ticket | str:
-    """A ticket file's content checked on its own: the ticket, or the check that failed."""
-    try:
-        ticket = wire.decode_ticket(data)
-    except wire.Invalid as invalid:
-        return str(invalid)
-    return fields.ticket_problem(ticket) or ticket
 
 
 @dataclass(frozen=True)

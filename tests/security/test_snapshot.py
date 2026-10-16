@@ -1,6 +1,5 @@
 """Reading the store (GitStore.snapshot) after a compromised agent pushed forged content
-with plain git, what that content costs every honest commit, and how the store's remote
-name reaches git."""
+with plain git, and how the store's remote name reaches git."""
 
 from __future__ import annotations
 
@@ -10,27 +9,22 @@ from typing import Any
 
 import pytest
 
-from tests.gitkit import HookedRunner, git, write_files
+from tests.gitkit import write_files
 from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.domain.ticket import ClaimId, Snapshot, Ticket, TicketId
-from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.repo import GitStore
-from tkt_store.infrastructure.git.wire import DEFAULT_REF
-from tkt_store.infrastructure.ids import SequentialIds
 
 NOW = 1_000_000
 C1 = ClaimId("1" * 32)
 T1 = TicketId("tkt-1")
-T2 = TicketId("tkt-2")
 
 pytestmark = pytest.mark.git
 
 T9 = TicketId("tkt-9")
 T9_FILE = wire.ticket_path(T9)
 TA = TicketId("tkt-a")
-TREE = "040000"  # git mode of a directory entry
 
 
 def forged(ticket_id: TicketId, **fields: Any) -> dict[str, Any]:
@@ -191,68 +185,3 @@ def test_an_oversized_ticket_file_is_never_read_whole(
     """Refused or left out; never truncated, which the next honest commit would write back."""
     write_files(bare_remote, {T9_FILE: forged(T9, body="b" * 20_000_000)})
     assert refused_or_left_out(honest_clone, T9)
-
-
-def push_junk_entries(bare_remote: Path, count: int) -> None:
-    """Add `count` non-ticket entries to tickets/ on the remote, in one plumbing commit."""
-    head = git(bare_remote, "rev-parse", DEFAULT_REF).strip()
-    tickets = git(bare_remote, "rev-parse", f"{head}:tickets").strip()
-    blob = git(bare_remote, "hash-object", "-w", "--stdin", stdin=b"junk").strip()
-    junk = "".join(f"100644 blob {blob}\tjunk-{n:06d}.txt\n" for n in range(count))
-    new_tickets = git(bare_remote, "mktree", stdin=git(bare_remote, "ls-tree", tickets) + junk)
-    root = [
-        f"{TREE} tree {new_tickets.strip()}\ttickets" if line.endswith("\ttickets") else line
-        for line in git(bare_remote, "ls-tree", head).splitlines()
-    ]
-    new_root = git(bare_remote, "mktree", stdin="\n".join(root) + "\n").strip()
-    commit = git(bare_remote, "commit-tree", new_root, "-p", head, "-m", "junk").strip()
-    git(bare_remote, "update-ref", DEFAULT_REF, commit)
-
-
-def honest_add_mktree_bytes(clone: Path) -> int:
-    """Bytes an honest `add` feeds to `git mktree`; the add must commit."""
-    runner = HookedRunner(clone)
-    tickets = TicketStore(GitStore(runner, remote="origin"), FakeClock(), SequentialIds())
-    tickets.add("Honest", ticket_id=T2)
-    return sum(len(data) for data in runner.inputs_to("mktree"))
-
-
-@pytest.mark.security_design(
-    "junk entries in tickets/ are carried into every honest commit: each op does work ~N"
-)
-def test_junk_entries_are_not_carried_into_every_honest_commit(
-    honest_clone: Path, bare_remote: Path
-) -> None:
-    """The honest add still commits (refusing the store would take it down for everyone),
-    and its work does not grow with the junk."""
-    push_junk_entries(bare_remote, 50_000)
-    assert honest_add_mktree_bytes(honest_clone) < 1_000_000
-
-
-def push_valid_tickets(bare_remote: Path, count: int) -> None:
-    """Add `count` valid, open tickets on the remote in one commit, via git fast-import."""
-    head = git(bare_remote, "rev-parse", DEFAULT_REF).strip()
-    lines = [f"commit {DEFAULT_REF}", "committer spam <spam@invalid> 0 +0000", "data 4", "spam",
-             f"from {head}"]  # fmt: skip
-    for n in range(count):
-        ticket_id = TicketId(f"tkt-f{n:06x}")
-        data = json.dumps(forged(ticket_id, title=f"Spam {n}"))
-        lines += [
-            f"M 100644 inline {wire.ticket_path(ticket_id)}",
-            f"data {len(data.encode())}",
-            data,
-        ]
-    git(bare_remote, "fast-import", "--quiet", stdin="\n".join(lines) + "\n")
-
-
-@pytest.mark.security_design(
-    "every honest commit rewrites the whole tickets/ tree: spam tickets slow every op"
-)
-def test_many_valid_tickets_do_not_make_every_honest_commit_rewrite_them(
-    honest_clone: Path, bare_remote: Path
-) -> None:
-    """Git trees are flat, so a commit rewrites tickets/ whatever it holds: valid tickets
-    (pushed by hand, or `tkt add` spam) cost the same as junk. Fixing it means a different
-    layout (e.g. sharding tickets/), which is a format decision (design.md Q1)."""
-    push_valid_tickets(bare_remote, 20_000)
-    assert honest_add_mktree_bytes(honest_clone) < 1_000_000

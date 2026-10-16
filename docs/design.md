@@ -308,7 +308,9 @@ fetches the ref into a private ref (`refs/tkt-store-remotes/<remote>/…`) that 
 code writes, and takes its revision from that ref. It then catches the local ref up by
 compare-and-swap; a local ref with commits the remote lacks (made outside `tkt`) is a
 `StoreError` before anything is written. The remote is authoritative; local refs are a
-cache.
+cache. From 0.2.0 each clone also caches resolved and invalid tickets by blob id, in a
+file in its git directory, so a snapshot reads and checks only the other files
+(ADR 0006).
 
 Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
 preserved and ignored.
@@ -386,7 +388,7 @@ agent has its own git identity, which does not change while it runs.
 |---|---|
 | Code execution in other agents | No shell anywhere (argument lists only); git always gets the remote name after `--`; no checkout. Deployment: never a path remote shared across agents that do not fully trust each other (README) |
 | Prompt injection through stored text | Strict field rules (identifier allowlists, a PRECIS-style rule for free text, size limits; lengths in code points after NFC); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
-| Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached by blob id), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
+| Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached as invalid, ADR 0006), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
 | Acting as another agent's holder | Tickets and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
 | Locking a ticket forever | A lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable |
 
@@ -411,10 +413,11 @@ Hashed claim ids still prove that the agent acting on a claim is the one that to
 reduced, not prevented; confinement, guidance and narrow agent permissions do the rest.
 An agent with plain git and push access can forge well-formed tickets and history, or get
 a genuine held ticket set aside by pushing another ticket with the same claim hash
-(branch protection only stops rewrites). Junk files and spam tickets cost every commit
-until tickets are separated or sharded (Q1).
+(branch protection only stops rewrites). Junk files and spam tickets cost every op: every
+file under `tickets/` is listed and in every commit's tree, and spam open tickets are
+read each time (ADR 0006 caches only resolved and invalid ones).
 
-## 9. Open questions, accepted limitations and deferred work
+## 9. Accepted limitations and decided questions
 
 Accepted limitations (decided; revisit only if they cause trouble):
 
@@ -423,22 +426,22 @@ Accepted limitations (decided; revisit only if they cause trouble):
   ticket is cancelled.
 - Who acted is not authenticated: today the `--as` name, from 0.2.0 the git author
   identity (and the claim's `holder`, derived from it). It is trusted under the trust
-  model; commit signing could authenticate it (deferred).
-- Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
+  model; authenticating it (e.g. commit signing) is not planned.
+- Resolved tickets stay in `tickets/` for good. With the cache (ADR 0006) an op no
+  longer reads them, but it still lists every file and rebuilds the `tickets/` tree, so
+  its cost grows slowly with history.
 - `SKEW_GRACE` stays a fixed 60-second constant.
 - Phases and kinds are fixed enums; a new phase is a format change.
 
-Open questions:
+Decided questions:
 
-
-- Q1: Should resolved (done/cancelled) tickets be kept on the branch (current design) or moved to `archive/`?
-  Every op reads every ticket file, so a CLI op costs ~0.25 s at 5,000 tickets and ~1 s
-  at 20,000 on a local store (ADR 0001, *Store size*). Archiving would need blockers,
-  re-runs of `done` and claim-id fencing to work without reading archived tickets.
-- Q2: Project identity is the caller's concern. From 0.2.0 it must be `[owner/]repo`
+- Q1 (ADR 0006): resolved tickets stay in `tickets/`, neither moved nor sharded; from
+  0.2.0 each clone caches resolved and invalid tickets by blob id, so an op reads and
+  checks only open and changed files.
+- Q2: project identity is the caller's concern; from 0.2.0 it must be `[owner/]repo`
   (§8), which a root-commit hash or an `owner/repo` name fits and a remote URL does not.
-- Q3: Should `claim_next` (pick highest-priority claimable) be an op (atomic choice) — current design — or a read + claim?
-- Q4: Lease units: integer seconds since epoch (current) vs ISO timestamps in files.
-- Deferred: `claim-next` choosing randomly among the top candidates to spread contention.
+- Q3: `claim-next` stays an op (an atomic choice), not a read plus a claim.
+- Q4: leases and times stay integer seconds since the epoch.
+- Dropped: `claim-next` choosing randomly among the top candidates to spread contention.
   On one ref any two concurrent writes conflict, whichever ticket they touch, so this
   only pays off with one ref per ticket (ADR 0001).

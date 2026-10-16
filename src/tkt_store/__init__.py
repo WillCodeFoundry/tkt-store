@@ -48,16 +48,15 @@ def open_store(
     repo: Path,
     *,
     ref: str = DEFAULT_REF,
-    remote: str | None = "origin",
+    remote: str = "origin",
     clock: Clock | None = None,
     ids: IdSource | None = None,
 ) -> TicketStore:
     """Open a ticket store with the production wiring: a GitStore at `repo`, the
     system clock, random ids, and jittered exponential backoff between lost races.
 
-    `remote` defaults to "origin" (the CLI has no default: it requires --remote or
-    --no-remote); pass None to choose a local-only
-    store explicitly (single machine, tests). `clock` and `ids` can be overridden
+    `remote` is the shared remote's name, "origin" by default (the CLI has no default:
+    it requires --remote). `clock` and `ids` can be overridden
     (e.g. for simulations) but default to the real implementations. This is the
     composition root — the one place that names concrete adapters.
     """

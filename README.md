@@ -61,13 +61,24 @@ safe. See `docs/cli.md`.
 
 ## Deploying
 
-Keep the store in its own repository; `tkt` uses only the `tkt-store` branch. We
-recommend one process per clone: give each agent its own clone of the store repository.
-Requires git 2.29 or later.
+Keep the store in its own repository; `tkt` uses only the `tkt-store` branch. Requires
+git 2.29 or later.
+
+**One clone per process.** Give every process that runs `tkt` its own clone of the store
+repository, and never let two processes use the same clone, for example by mounting one
+clone into several containers.
+
+The remote's repository is shared by all clones, so it needs the same care. A remote
+given as a file path (a bare repository) is only safe when every clone is on the same
+machine, with the same filesystem. If clones live in VMs or sandboxes (Docker Desktop,
+Docker Sandboxes) or on other machines, don't mount the remote's directory into them:
+git's locking may not hold across that boundary, and two agents could both get the same
+claim. Serve it over the network instead (a hosting service, SSH, or `git daemon`), so
+that only its own machine writes to it.
 
 **Any git server works as the remote:** a hosting service such as GitHub, a bare
-repository over SSH, or `git daemon`. Every `tkt` write is one fetch and one push. The
-server must:
+repository over SSH or `git daemon`, or, when every clone is on its machine, a bare
+repository's path. Every `tkt` write is one fetch and one push. The server must:
 
 - **accept direct pushes to `tkt-store`:** no pull-request, status-check or
   signed-commit requirement on that branch (store commits are unsigned);
@@ -96,11 +107,6 @@ refused, and restores the branch if either was accepted:
 ```sh
 uv run python scripts/check_remote.py --repo /work/tasks --remote origin
 ```
-
-**Limitation: the mode is fixed when the store is created.** A store created with
-`--no-remote` can never be used with a remote. If agents may ever run on more than one
-machine, create it remote-backed: a bare repository on the same machine works as the
-remote, and moving the remote later only changes its URL in each clone.
 
 ## Layout
 

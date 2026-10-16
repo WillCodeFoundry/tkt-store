@@ -29,12 +29,6 @@ def memstore() -> MemStore:
 
 
 @pytest.fixture
-def gitstore(tmp_path: Path) -> GitStore:
-    """A local-only GitStore in a fresh repository."""
-    return GitStore.at(new_repo(tmp_path / "store"), remote=None)
-
-
-@pytest.fixture
 def bare_remote(tmp_path: Path) -> Path:
     """An empty bare repository acting as the shared remote."""
     return new_repo(tmp_path / "remote.git", bare=True)
@@ -47,6 +41,6 @@ def clones(tmp_path: Path, bare_remote: Path) -> list[Path]:
 
 
 @pytest.fixture
-def remote_gitstore(clones: list[Path]) -> GitStore:
-    """A remote-backed GitStore in a clone of `bare_remote`."""
+def gitstore(clones: list[Path]) -> GitStore:
+    """A GitStore in a clone of `bare_remote`."""
     return GitStore.at(clones[0], remote="origin")

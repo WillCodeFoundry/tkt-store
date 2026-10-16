@@ -106,14 +106,11 @@ def test_is_ticket_path(path: str, expected: bool) -> None:
 
 
 def test_store_meta_round_trip() -> None:
-    assert wire.encode_store_meta("local") == b'{\n  "mode": "local",\n  "protocol": 1\n}\n'
-    assert wire.decode_store_meta(wire.encode_store_meta("remote")) == (1, "remote")
+    assert wire.encode_store_meta() == b'{\n  "protocol": 1\n}\n'
+    assert wire.decode_store_meta(wire.encode_store_meta()) == 1
 
 
-@pytest.mark.parametrize(
-    "meta",
-    [b"{}", b"nope", b'{"mode": "shared", "protocol": 1}', b'{"mode": "local", "protocol": 2}'],
-)
+@pytest.mark.parametrize("meta", [b"{}", b"nope", b"[]", b'{"protocol": "1"}', b'{"protocol": 2}'])
 def test_bad_store_meta_is_store_error(meta: bytes) -> None:
     with pytest.raises(StoreError):
         wire.decode_store_meta(meta)

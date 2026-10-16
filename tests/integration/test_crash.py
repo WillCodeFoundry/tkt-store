@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.gitkit import HookedRunner, head, new_repo, once
+from tests.gitkit import HookedRunner, head, once
 from tests.unit.builders import C1, NOW, T1, TTL, A
 from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
@@ -42,11 +42,10 @@ def fail() -> None:
 def service(
     repo: Path,
     *,
-    remote: str | None = "origin",
     hook: Hook = lambda a: None,
     after: Hook = lambda a: None,
 ) -> TicketStore:
-    store = GitStore(HookedRunner(repo, hook, after), remote=remote)
+    store = GitStore(HookedRunner(repo, hook, after), remote="origin")
     return TicketStore(store, FakeClock(NOW), SequentialIds())
 
 
@@ -72,17 +71,6 @@ def test_crash_before_publish_leaves_only_unreachable_objects(
         service(repo, hook=once(step, crash)).claim(T1, A, TTL, claim_id=C1)
     assert (head(repo), head(bare_remote)) == before
     assert isinstance(service(repo).claim(T1, A, TTL, claim_id=C1), Committed)
-
-
-def test_crash_before_local_cas_in_a_local_only_store(tmp_path: Path) -> None:
-    repo = new_repo(tmp_path / "local")
-    service(repo, remote=None).init()
-    service(repo, remote=None).add("Expire tokens", ticket_id=T1)
-    before = head(repo)
-    with pytest.raises(Crash):
-        service(repo, remote=None, hook=once("update-ref", crash)).claim(T1, A, TTL, claim_id=C1)
-    assert head(repo) == before
-    assert isinstance(service(repo, remote=None).claim(T1, A, TTL, claim_id=C1), Committed)
 
 
 def test_crash_after_push_before_local_update_converges_on_next_op(

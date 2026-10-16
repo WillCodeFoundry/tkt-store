@@ -1,19 +1,16 @@
 """The Store, implemented on git plumbing (ADR 0001).
 
 No worktree, no index: a crash can only ever leave unreachable objects behind.
-One process per clone is assumed (design.md §7); the local ref is only a cache of the
-remote.
+The remote is authoritative; the local ref is only a cache of it. One process per clone
+(design.md §7).
 
 snapshot():
-    [remote] remote.fetch -> remote head (the snapshot's revision; read from the private
-             ref the fetch wrote, never from the local ref or FETCH_HEAD)
-    [remote] remote.fast_forward_local(remote head)
-    [local]  git rev-parse --verify <ref>    -> revision (None if unborn)
+    remote.fetch                             -> remote head (the snapshot's revision; read
+                                                from the private ref the fetch wrote, never
+                                                from the local ref or FETCH_HEAD)
+    remote.fast_forward_local(remote head)
     git cat-file <revision>:tkt-store.json   -> wire.decode_store_meta; StoreError if
-                                                missing on a born ref, a newer protocol,
-                                                or a mode that is not this store's (a
-                                                remote-backed store opened with remote=None,
-                                                or a local-only one opened with a remote)
+                                                missing on a born ref or a newer protocol
     git ls-tree -r <revision> tickets/       -> blob ids of wire.is_ticket_path entries only
     git cat-file --batch                     -> contents (bytes) of the blobs this store has
                                                 not decoded before (decoded tickets are
@@ -23,20 +20,16 @@ snapshot():
 commit(base, changes, record):
     git hash-object -w --stdin                (one per changed ticket)
     git mktree                                (base tree with replaced entries; when base
-                                               is None, also wire.encode_store_meta(mode)
-                                               as tkt-store.json in the root commit, mode
-                                               "remote" or "local" by self._remote)
+                                               is None, also wire.encode_store_meta() as
+                                               tkt-store.json in the root commit)
     git commit-tree <tree> [-p <base>] -F -   (message = wire.encode_message(record))
-    [remote] remote.publish(new, base)        -> push with --force-with-lease=<ref>:<base>;
+    remote.publish(new, base)                 -> push with --force-with-lease=<ref>:<base>;
                                                rejected: Conflict if the branch moved,
                                                StoreError if not; nothing published
-    [remote] git update-ref <ref> <new> <base> best-effort: once published, any failure
+    git update-ref <ref> <new> <base>         best-effort: once published, any failure
                                                (ref moved, cannot lock ref, ...) is ignored
                                                and commit returns `new`; the next snapshot
                                                repairs the cache
-    [local]  git update-ref <ref> <new> <base> -> Conflict if the ref moved: here update-ref
-                                               IS the compare-and-swap
-                                               (for an unborn store: old value = zero id)
     git gc --auto                             (housekeeping: plumbing never triggers it)
 """
 
@@ -48,31 +41,30 @@ from itertools import islice
 from pathlib import Path
 from types import MappingProxyType
 
-from tkt_store.application.errors import Conflict, StoreError
+from tkt_store.application.errors import StoreError
 from tkt_store.application.store import HistoryEntry
 from tkt_store.domain.outcomes import Change, OpRecord
 from tkt_store.domain.ticket import Revision, Snapshot, Ticket, TicketId
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.runner import GitError, GitRunner, git_runner
-from tkt_store.infrastructure.git.wire import DEFAULT_REF, StoreMode
+from tkt_store.infrastructure.git.wire import DEFAULT_REF
 
 TREE_MODE = "040000"
 BLOB_MODE = "100644"
 
 
 class GitStore:
-    """A Store backed by one ref in one git repository.
+    """A Store backed by one ref, published to a remote and cached in a clone.
 
-    `remote` has no default: name the shared remote (normally "origin"), or pass None
-    to choose a local-only store explicitly. It is never a silent fallback.
+    `remote` is the shared remote's name (normally "origin"); it has no default here.
     """
 
     def __init__(
         self,
         git: GitRunner,
         *,
-        remote: str | None,
+        remote: str,
         ref: str = DEFAULT_REF,
     ) -> None:
         self._git = git
@@ -84,13 +76,9 @@ class GitStore:
         has not seen. Pruned to the latest snapshot's tickets, so it stays bounded."""
 
     @classmethod
-    def at(cls, repo: Path, *, remote: str | None, ref: str = DEFAULT_REF) -> GitStore:
+    def at(cls, repo: Path, *, remote: str, ref: str = DEFAULT_REF) -> GitStore:
         """Convenience constructor using git_runner(repo)."""
         return cls(git_runner(repo), remote=remote, ref=ref)
-
-    @property
-    def mode(self) -> StoreMode:
-        return "local" if self._remote is None else "remote"
 
     def snapshot(self) -> Snapshot:
         revision = self._head()
@@ -131,19 +119,10 @@ class GitStore:
         new = Revision(
             self._git("commit-tree", tree, *parents, "-F", "-", stdin=message).decode().strip()
         )
-        if self._remote is not None:
-            sync.publish(self._git, self._remote, self._ref, new, base)
-            # published: the local ref is only a cache, repaired by the next snapshot
-            with suppress(GitError):
-                self._git("update-ref", self._ref, new, base or "")
-        else:
-            try:
-                self._git("update-ref", self._ref, new, base or "")
-            except GitError as error:
-                actual = sync.local_head(self._git, self._ref)
-                if actual != base:
-                    raise Conflict(base, actual) from error
-                raise
+        sync.publish(self._git, self._remote, self._ref, new, base)
+        # published: the local ref is only a cache, repaired by the next snapshot
+        with suppress(GitError):
+            self._git("update-ref", self._ref, new, base or "")
         self._housekeeping()
         return new
 
@@ -180,10 +159,8 @@ class GitStore:
         return islice(entries(), limit)
 
     def _head(self) -> Revision | None:
-        """The store's current revision: the remote head (bringing the local cache up to
-        it) when remote-backed, the local ref when local-only."""
-        if self._remote is None:
-            return sync.local_head(self._git, self._ref)
+        """The store's current revision: the remote head, bringing the local cache up to
+        it."""
         head = sync.fetch(self._git, self._remote, self._ref)
         if head is not None:
             sync.fast_forward_local(self._git, self._ref, head)
@@ -196,10 +173,7 @@ class GitStore:
             raise StoreError(
                 f"{self._ref} at {revision} has no {wire.STORE_META_PATH}: not a tkt store"
             ) from error
-        _protocol, mode = wire.decode_store_meta(data)
-        if mode != self.mode:
-            how = "with --no-remote" if self._remote is None else f"with remote {self._remote}"
-            raise StoreError(f"this is a {mode} store; it cannot be opened {how}")
+        wire.decode_store_meta(data)
 
     def _read_blobs(self, oids: list[str]) -> list[bytes]:
         """Contents of `oids`, in order, from one `cat-file --batch`. Sizes are bytes.
@@ -226,7 +200,7 @@ class GitStore:
         a name that is not UTF-8 survives too)."""
         root = {} if base is None else _by_name(self._git("ls-tree", "-z", f"{base}^{{tree}}"))
         if base is None:
-            meta = self._hash(wire.encode_store_meta(self.mode))
+            meta = self._hash(wire.encode_store_meta())
             name = wire.STORE_META_PATH.encode()
             root[name] = _Entry(BLOB_MODE, "blob", meta, name)
         tickets_dir = wire.TICKETS_DIR.encode()

@@ -64,25 +64,23 @@ def _ids(values: Sequence[str] | None) -> tuple[TicketId, ...]:
     return tuple(TicketId(v) for v in values or ())
 
 
-STORE_OPTIONS = ("--repo", "--remote", "--no-remote")
+STORE_OPTIONS = ("--repo", "--remote")
 """Required on every store command (not on `mint`), anywhere after the command name."""
 
 MINT_KINDS = ("claim-id", "ticket-id")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """One subcommand per TicketStore method, each with the store options (--repo, and
-    exactly one of --remote/--no-remote) and its handler stored as `run`; plus the local
-    `mint`, whose handler is stored as `local`."""
+    """One subcommand per TicketStore method, each with the store options (--repo and
+    --remote) and its handler stored as `run`; plus the local `mint`, whose handler is
+    stored as `local`."""
     parser = argparse.ArgumentParser(
         prog="tkt",
         description="Ticket store for coordinating agents (docs/cli.md).",
     )
     store_options = argparse.ArgumentParser(add_help=False)
     store_options.add_argument("--repo", required=True, help="store repository (a clone)")
-    remote = store_options.add_mutually_exclusive_group(required=True)
-    remote.add_argument("--remote", help="the shared remote, e.g. origin")
-    remote.add_argument("--no-remote", action="store_true", help="local-only store")
+    store_options.add_argument("--remote", required=True, help="the shared remote, e.g. origin")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
     def command(
@@ -402,7 +400,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if hasattr(args, "local"):
         print(args.local(args))
         return ExitCode.OK
-    store = open_store(Path(args.repo), remote=None if args.no_remote else args.remote)
+    store = open_store(Path(args.repo), remote=args.remote)
     try:
         result = args.run(store, args)  # complete before anything is printed
     except TktError as error:

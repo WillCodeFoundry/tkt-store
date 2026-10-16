@@ -1,7 +1,7 @@
 """ONE contract suite, run against every Store implementation (store.py docstring).
 
-If MemStore and GitStore ever differ, a test here must fail. GitStore runs both
-local-only and remote-backed (a clone of a bare remote).
+If MemStore and GitStore ever differ, a test here must fail. GitStore runs in a clone of
+a bare remote.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from tkt_store.domain.ticket import Revision, TicketId
 STORES = [
     "memstore",
     pytest.param("gitstore", marks=pytest.mark.git),
-    pytest.param("remote_gitstore", marks=pytest.mark.git),
 ]
 
 

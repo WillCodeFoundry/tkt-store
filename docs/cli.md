@@ -16,7 +16,7 @@ unchanged, and there is nothing implicit to get wrong.
 | Option | Meaning |
 |---|---|
 | `--repo PATH` | The store repository: this agent's clone of the store repository (one process per clone). |
-| `--remote NAME` or `--no-remote` | Exactly one. `--remote` names the shared remote (normally `origin`); if it is not configured, every command fails with a store error. `--no-remote` selects a local-only store (single machine, tests). A store records its mode when it is created; using the other mode is refused. |
+| `--remote NAME` | The shared remote (normally `origin`); if it is not configured, every command fails with a store error. |
 
 They may appear anywhere after the command name:
 `tkt claim tkt-7f3a91c2 --as coder-7 … --repo /work/tasks --remote origin`. Every command

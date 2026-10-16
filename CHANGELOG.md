@@ -8,8 +8,9 @@
   SSH, whose lost races were store errors in 0.1.0.
 - The store keeps itself packed (`git gc --auto` after each commit) and caches decoded
   tickets by blob id, so a long-lived store reads only tickets that changed.
-- README: a *Deploying* section (what a remote must do, one process per clone, the
-  mode limitation).
+- Every store has a remote: `--no-remote` is removed, and `tkt-store.json` records only
+  the protocol version. For a single machine, use a bare repository on it as the remote.
+- README: a *Deploying* section (one clone per process, what a remote must do).
 - `scripts/check_remote.py` checks that a store's remote refuses a non-fast-forward push
   and a deletion of the store branch, restoring the branch if either is accepted.
 - `scripts/bench_github.py` is now `scripts/bench.py`, for any remote; it refuses to run

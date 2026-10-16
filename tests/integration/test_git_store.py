@@ -1,5 +1,7 @@
 """Real git: behaviour specific to the git adapter (format marker, file layout, the local
-cache, local-only mode). Shared Store semantics live in tests/contract/."""
+cache, the remote). Shared Store semantics live in tests/contract/.
+
+Edits "by hand" are commits made directly on the bare remote, the store's truth."""
 
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.gitkit import HookedRunner, git, head, new_repo, paths, show, write_files
+from tests.gitkit import HookedRunner, git, head, paths, show, write_files
 from tests.unit.builders import C1, NOW, T1, T2, TTL, A, tkt
 from tkt_store import open_store
 from tkt_store.application.errors import Conflict, StoreError
@@ -36,22 +38,28 @@ def service(store: GitStore) -> TicketStore:
 
 
 @pytest.fixture
-def local(tmp_path: Path) -> Path:
-    """A local-only store, initialised, with one ticket."""
-    repo = new_repo(tmp_path / "local")
-    tickets = service(GitStore.at(repo, remote=None))
+def local(clones: list[Path]) -> Path:
+    """A clone of an initialised store holding one ticket."""
+    tickets = service(GitStore.at(clones[0], remote="origin"))
     tickets.init()
     tickets.add("Expire tokens", ticket_id=T1)
-    return repo
+    return clones[0]
 
 
-@pytest.mark.parametrize("mode", ["remote", "local"])
-def test_init_writes_store_meta(mode: str, clones: list[Path]) -> None:
-    """The root commit contains tkt-store.json = {"mode": mode, "protocol": 1}."""
-    repo = clones[0]
-    service(GitStore.at(repo, remote="origin" if mode == "remote" else None)).init()
-    assert json.loads(show(repo, "tkt-store.json")) == {"mode": mode, "protocol": 1}
-    assert git(repo, "rev-list", "--count", REF).strip() == "1"
+def opened(clone: Path) -> GitStore:
+    return GitStore.at(clone, remote="origin")
+
+
+def test_init_writes_store_meta(clones: list[Path], bare_remote: Path) -> None:
+    """The root commit contains tkt-store.json = {"protocol": 1}."""
+    service(opened(clones[0])).init()
+    assert json.loads(show(bare_remote, "tkt-store.json")) == {"protocol": 1}
+    assert git(bare_remote, "rev-list", "--count", REF).strip() == "1"
+
+
+def test_unknown_keys_in_store_meta_are_ignored(local: Path, bare_remote: Path) -> None:
+    write_files(bare_remote, {"tkt-store.json": b'{"future": true, "protocol": 1}'})
+    assert opened(local).snapshot().get(T1) is not None
 
 
 def test_remote_store_publishes_and_other_clones_see_it(
@@ -64,26 +72,6 @@ def test_remote_store_publishes_and_other_clones_see_it(
     view = b.view(T1)
     assert view is not None and view.ticket.title == "Expire tokens"
     assert head(clones[1]) == head(bare_remote)  # the reader's cache was brought up
-
-
-@pytest.mark.parametrize("opened_as", ["local_on_remote_store", "remote_on_local_store"])
-def test_opening_in_the_other_mode_is_refused(
-    opened_as: str, clones: list[Path], bare_remote: Path
-) -> None:
-    """A store opened in the mode it was not created with → StoreError, nothing written,
-    so a stray --no-remote can never diverge a clone."""
-    repo = clones[0]
-    if opened_as == "local_on_remote_store":
-        service(GitStore.at(repo, remote="origin")).init()
-        wrong = GitStore.at(repo, remote=None)
-    else:
-        service(GitStore.at(repo, remote=None)).init()
-        git(repo, "push", "--quiet", "origin", REF)
-        wrong = GitStore.at(repo, remote="origin")
-    before = head(repo), head(bare_remote)
-    with pytest.raises(StoreError, match="cannot be opened"):
-        service(wrong).add("Expire tokens", ticket_id=T1)
-    assert (head(repo), head(bare_remote)) == before
 
 
 def test_publish_uses_force_with_lease_on_base(clones: list[Path]) -> None:
@@ -106,17 +94,17 @@ def test_publish_uses_force_with_lease_on_base(clones: list[Path]) -> None:
 
 
 @pytest.mark.parametrize("meta", ["missing", "newer", "malformed"])
-def test_snapshot_rejects_bad_store_meta(meta: str, local: Path) -> None:
+def test_snapshot_rejects_bad_store_meta(meta: str, local: Path, bare_remote: Path) -> None:
     """→ StoreError on every snapshot, never a silent misread."""
-    data = {"missing": None, "newer": b'{"mode": "local", "protocol": 99}', "malformed": b"{"}
-    write_files(local, {"tkt-store.json": data[meta]})
-    store = GitStore.at(local, remote=None)
+    data = {"missing": None, "newer": b'{"protocol": 99}', "malformed": b"{"}
+    write_files(bare_remote, {"tkt-store.json": data[meta]})
+    store = opened(local)
     for _ in range(2):
         with pytest.raises(StoreError):
             store.snapshot()
 
 
-def test_stray_files_are_ignored_and_preserved(local: Path) -> None:
+def test_stray_files_are_ignored_and_preserved(local: Path, bare_remote: Path) -> None:
     """tickets/README.md, tickets/foo.json, and root files are never decoded and survive
     later commits."""
     stray = {
@@ -125,41 +113,38 @@ def test_stray_files_are_ignored_and_preserved(local: Path) -> None:
         "tickets/sub/tkt-9.json": b"nested",
         "NOTES.txt": b"root file\n",
     }
-    write_files(local, stray)
-    tickets = service(GitStore.at(local, remote=None))
+    write_files(bare_remote, stray)
+    tickets = service(opened(local))
     tickets.add("Second", ticket_id=T2)
     assert [v.ticket.id for v in tickets.list()] == [T1, T2]
-    assert paths(local) >= {*stray, "tkt-store.json", wire.ticket_path(T1), wire.ticket_path(T2)}
-    assert all(show(local, path) == data for path, data in stray.items())
+    assert paths(bare_remote) >= {
+        *stray,
+        "tkt-store.json",
+        wire.ticket_path(T1),
+        wire.ticket_path(T2),
+    }
+    assert all(show(bare_remote, path) == data for path, data in stray.items())
 
 
-def test_foreign_commits_are_skipped_by_history(local: Path) -> None:
-    write_files(local, {"NOTES.txt": b"x"}, message="Add notes by hand\n")
-    tickets = service(GitStore.at(local, remote=None))
+def test_foreign_commits_are_skipped_by_history(local: Path, bare_remote: Path) -> None:
+    write_files(bare_remote, {"NOTES.txt": b"x"}, message="Add notes by hand\n")
+    tickets = service(opened(local))
     assert [e.record.op for e in tickets.log()] == [OpName.ADD, OpName.INIT]
 
 
-def test_filename_must_match_id(local: Path) -> None:
+def test_filename_must_match_id(local: Path, bare_remote: Path) -> None:
     """tickets/tkt-0001.json whose id is tkt-0002 → StoreError."""
-    write_files(local, {"tickets/tkt-0001.json": wire.encode_ticket(tkt(TicketId("tkt-0002")))})
+    write_files(
+        bare_remote, {"tickets/tkt-0001.json": wire.encode_ticket(tkt(TicketId("tkt-0002")))}
+    )
     with pytest.raises(StoreError, match="tkt-0001"):
-        GitStore.at(local, remote=None).snapshot()
+        opened(local).snapshot()
 
 
-def test_corrupt_ticket_fails_the_whole_snapshot(local: Path) -> None:
-    write_files(local, {wire.ticket_path(T2): b'{"id": "tkt-2"'})
+def test_corrupt_ticket_fails_the_whole_snapshot(local: Path, bare_remote: Path) -> None:
+    write_files(bare_remote, {wire.ticket_path(T2): b'{"id": "tkt-2"'})
     with pytest.raises(StoreError, match=wire.ticket_path(T2)):
-        GitStore.at(local, remote=None).snapshot()
-
-
-def test_local_only_stale_base_is_conflict(local: Path) -> None:
-    """remote=None: update-ref is the compare-and-swap; a moved ref → Conflict."""
-    store = GitStore.at(local, remote=None)
-    stale = store.snapshot().revision
-    moved = write_files(local, {"NOTES.txt": b"x"})
-    with pytest.raises(Conflict) as exc:
-        store.commit(stale, (WriteTicket(tkt(T2)),), OpRecord(OpName.ADD, at=NOW, ticket_ids=(T2,)))
-    assert exc.value.actual == moved and head(local) == moved
+        opened(local).snapshot()
 
 
 def test_fast_forward_local_is_a_noop_when_equal(clones: list[Path]) -> None:
@@ -220,16 +205,16 @@ def test_rejection_by_a_remote_hook_is_store_error_not_conflict(
     assert not isinstance(exc.value.__cause__, Conflict)
 
 
-def test_non_utf8_file_names_are_preserved(local: Path) -> None:
+def test_non_utf8_file_names_are_preserved(local: Path, bare_remote: Path) -> None:
     """git allows any bytes in a file name; tkt neither decodes nor drops them."""
     name = b"notes-\xff.txt"
-    write_files(local, {name: b"latin"})
-    write_files(local, {b"tickets/" + name: b"also"})
-    tickets = service(GitStore.at(local, remote=None))
+    write_files(bare_remote, {name: b"latin"})
+    write_files(bare_remote, {b"tickets/" + name: b"also"})
+    tickets = service(opened(local))
     tickets.add("Second", ticket_id=T2)
     assert [v.ticket.id for v in tickets.list()] == [T1, T2]
     listing = subprocess.run(
-        ["git", "-C", str(local), "ls-tree", "-r", "-z", "--name-only", REF],
+        ["git", "-C", str(bare_remote), "ls-tree", "-r", "-z", "--name-only", REF],
         capture_output=True, check=True,
     ).stdout.split(b"\0")  # fmt: skip
     assert {name, b"tickets/" + name} <= set(listing)
@@ -252,7 +237,7 @@ class CannedCatFile:
 )
 def test_unexpected_cat_file_output_is_store_error(output: bytes, local: Path) -> None:
     with pytest.raises(StoreError, match="cannot read blob"):
-        GitStore(CannedCatFile(local, output), remote=None).snapshot()
+        GitStore(CannedCatFile(local, output), remote="origin").snapshot()
 
 
 def test_remote_is_required_for_git_store() -> None:
@@ -266,7 +251,7 @@ def test_remote_is_required_for_git_store() -> None:
 
 def test_non_ascii_title_round_trips(local: Path) -> None:
     """cat-file --batch sizes are bytes: a non-ASCII title is decoded correctly."""
-    tickets = service(GitStore.at(local, remote=None))
+    tickets = service(opened(local))
     tickets.add("Ünïcödé — 日本語 ✓", ticket_id=T2)
     tickets.add("After", ticket_id=TicketId("tkt-3"))
     view = tickets.view(T2)
@@ -274,9 +259,9 @@ def test_non_ascii_title_round_trips(local: Path) -> None:
     assert [v.ticket.title for v in tickets.list()][-1] == "After"
 
 
-def test_committed_revision_is_the_ref(local: Path) -> None:
-    outcome = service(GitStore.at(local, remote=None)).add("Second", ticket_id=T2)
-    assert isinstance(outcome, Committed) and outcome.revision == head(local)
+def test_committed_revision_is_the_ref(local: Path, bare_remote: Path) -> None:
+    outcome = service(opened(local)).add("Second", ticket_id=T2)
+    assert isinstance(outcome, Committed) and outcome.revision == head(bare_remote)
 
 
 class BlobCountingRunner:
@@ -294,31 +279,35 @@ class BlobCountingRunner:
         return self._run(*args, stdin=stdin)
 
 
-def test_snapshots_read_only_ticket_files_they_have_not_seen(local: Path) -> None:
+def test_snapshots_read_only_ticket_files_they_have_not_seen(
+    local: Path, bare_remote: Path
+) -> None:
     """Decoded tickets are cached by blob id: unchanged files are not read again, and
     tickets this store just wrote are not read back."""
     runner = BlobCountingRunner(local)
-    store = GitStore(runner, remote=None)
+    store = GitStore(runner, remote="origin")
     tickets = TicketStore(store, FakeClock(NOW), SequentialIds())
     tickets.add("Second", ticket_id=T2)  # snapshot reads T1; the commit writes T2
     assert runner.batches == [1]
     assert {v.ticket.id for v in tickets.list()} == {T1, T2}
     assert runner.batches == [1]  # T2 came from the commit, T1 from the cache
-    write_files(local, {wire.ticket_path(T1): wire.encode_ticket(tkt(T1, title="Edited"))})
+    write_files(bare_remote, {wire.ticket_path(T1): wire.encode_ticket(tkt(T1, title="Edited"))})
     view = tickets.view(T1)
     assert view is not None and view.ticket.title == "Edited"
     assert runner.batches == [1, 1]  # only the changed file
 
 
-def test_a_cached_store_sees_the_same_tickets_as_a_fresh_one(local: Path) -> None:
-    cached = TicketStore(GitStore.at(local, remote=None), FakeClock(NOW), SequentialIds())
+def test_a_cached_store_sees_the_same_tickets_as_a_fresh_one(
+    local: Path, bare_remote: Path
+) -> None:
+    cached = TicketStore(opened(local), FakeClock(NOW), SequentialIds())
     for n in range(3, 6):
         cached.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
     cached.claim(T1, A, TTL, claim_id=C1)
-    write_files(local, {wire.ticket_path(T2): wire.encode_ticket(tkt(T2, title="By hand"))})
-    fresh = GitStore.at(local, remote=None).snapshot()
+    write_files(bare_remote, {wire.ticket_path(T2): wire.encode_ticket(tkt(T2, title="By hand"))})
+    fresh = opened(local).snapshot()
     assert cached.view(T1) is not None
-    assert GitStore.at(local, remote=None).snapshot() == fresh
+    assert opened(local).snapshot() == fresh
     assert {v.ticket.id: v.ticket for v in cached.list()} == dict(fresh.tickets)
 
 
@@ -327,7 +316,7 @@ def test_every_commit_runs_gc_auto(local: Path) -> None:
     commit. (Whether it packs is git's decision: it estimates loose objects by sampling, so
     a test-sized store would not reliably cross the threshold.)"""
     runner = BlobCountingRunner(local)
-    tickets = TicketStore(GitStore(runner, remote=None), FakeClock(NOW), SequentialIds())
+    tickets = TicketStore(GitStore(runner, remote="origin"), FakeClock(NOW), SequentialIds())
     for n in range(2, 5):
         tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
     tickets.view(T1)  # reads never run it
@@ -339,6 +328,6 @@ def test_a_failing_gc_does_not_fail_the_commit(local: Path) -> None:
         if args[0] == "gc":
             raise GitError(args, 128, b"", "fatal: gc is broken")
 
-    store = GitStore(HookedRunner(local, broken_gc), remote=None)
+    store = GitStore(HookedRunner(local, broken_gc), remote="origin")
     outcome = TicketStore(store, FakeClock(NOW), SequentialIds()).add("Second", ticket_id=T2)
     assert isinstance(outcome, Committed)

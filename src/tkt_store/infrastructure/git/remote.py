@@ -1,4 +1,4 @@
-"""Remote synchronisation for a remote-backed git store.
+"""Remote synchronisation for the git store.
 
 The remote is authoritative; local refs are a cache (design.md §6). Everything
 here goes through a GitRunner, so nothing in this module touches the git binary

@@ -4,7 +4,7 @@ Pre-1.0, while no store is deployed, format changes keep protocol 1 when documen
 here (AGENTS.md). Protocol 1 includes `phase`/`resolution` (which replaced `stage`;
 phases are the nine-value set below, without `development`), `ended_claim_ids`,
 `claim.claimed_at`, `content_version`, the `move` op with its `tkt-phase` trailer, and
-`tkt-store.json` with the store's `mode`.
+`tkt-store.json`.
 
 ## Branch layout
 
@@ -19,11 +19,9 @@ tickets/
   tkt-91c20b4e.json
 ```
 
-- `tkt-store.json` records the format version and the store's mode,
-  `{"mode": "remote", "protocol": 1}` (`mode` is `remote` or `local`, fixed for the
-  store's life; opening it in the other mode is refused). `init` writes it into
-  the root commit; every snapshot checks it and fails (`StoreError`) if it is missing or
-  newer than the client supports.
+- `tkt-store.json` records the format version, `{"protocol": 1}`; other keys are
+  ignored. `init` writes it into the root commit; every snapshot checks it and fails
+  (`StoreError`) if it is missing or newer than the client supports.
 - One file per ticket, `tickets/tkt-<hex>.json`; the id is both the filename stem and the
   `id` field (a mismatch is an error).
 - Files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline

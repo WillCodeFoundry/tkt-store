@@ -7,8 +7,8 @@
   matching each server's wording. This also covers `git daemon` and receive-pack over
   SSH, whose lost races were store errors in 0.1.0.
 - The store keeps itself packed (`git gc --auto` after each commit) and caches decoded
-  tickets by blob id, so a long-lived store reads only tickets that changed (the cache
-  goes again in 0.2.0, ADR 0006).
+  tickets by blob id, so a long-lived store reads only tickets that changed (from
+  0.2.0, resolved and invalid ones are also saved to a file per clone, ADR 0006).
 - Every store has a remote: `--no-remote` is removed, and `tkt-store.json` records only
   the protocol version. For a single machine, use a bare repository on it as the remote.
 - README: a *Deploying* section (one clone per process, what a remote must do).
@@ -24,10 +24,10 @@
   agents confined to `tkt`; everything read validated and invalid tickets set aside;
   strict field rules and limits; escaped output; hashed claim ids; holder-only edits
   while held; `revoke`; identity from git (no `--as`); `tkt clone`; `tkt audit`.
-- Resolved tickets to be archived in 0.2.0 (ADR 0006): `archive/<resolution>/<xx>/`,
-  sharded by the SHA-256 of the id, so an op reads only open tickets; ended claim
-  hashes indexed so fencing stays global; the in-memory ticket cache goes. Q3
-  (`claim-next` stays one op) and Q4 (integer seconds) decided.
+- Store size decided (ADR 0006): from 0.2.0 each clone caches resolved and invalid
+  tickets in a file in its git directory, so an op reads and checks only the others;
+  tickets are neither moved nor sharded. Q3 (`claim-next` stays one op) and Q4 (integer
+  seconds) decided.
 - README: agents use only `tkt`, never git, on the store; the risks of path remotes
   (code execution in other agents) and `git daemon` (no authentication).
 

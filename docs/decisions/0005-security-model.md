@@ -49,12 +49,12 @@ or commit signing could expose.
 - A ticket file is at most 256 KiB. Reads check the size before reading; writes refuse an
   op whose encoded file would exceed it (`INVALID`), so `tkt` never writes what it would
   refuse to read.
-- An invalid ticket is set aside and reported; it never fails the whole store. A partial
-  view is safe: a set-aside blocker counts as not done, and the worst case is
-  `claim-next` choosing a less urgent ticket. `add` of an id whose file is set aside is
-  `DUPLICATE_ID`. A malformed commit is skipped and reported by history. Only regular
-  files at `tickets/tkt-<hex>.json` (and, by path, the archive of ADR 0006) are read;
-  other files are preserved, as before.
+- An invalid ticket is set aside and reported (cached as invalid, ADR 0006); it never
+  fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
+  and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
+  file is set aside is `DUPLICATE_ID`. A malformed commit is skipped and reported by
+  history. Only regular files at `tickets/tkt-<hex>.json` are read; other files are
+  preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
   `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable (and reads expired).
 
@@ -133,10 +133,11 @@ anything.
 - An agent with plain git and push access can still forge well-formed tickets and
   history, or get a genuine held ticket set aside by pushing a duplicate claim hash;
   branch protection keeps history from being rewritten, nothing more.
-- Spam open tickets and junk files under `tickets/` still cost every commit; archiving
-  resolved tickets (ADR 0006) bounds history, not abuse.
+- Junk files and spam tickets still cost every op: every file under `tickets/` is listed
+  and in every commit's tree, and spam open tickets are read each time (only resolved and
+  invalid ones are cached, ADR 0006).
 - Implemented in stages, each flipping its security tests: (1) field checks, limits,
   lease cap and `--`; (2) reading the store: set-aside tickets, size and type checks,
-  tolerant history; (3) output: escaping, clean errors, `list`
-  without bodies; (4) identity from git and `tkt clone`, hashed claim ids, `holder`,
+  tolerant history, the cache of resolved and invalid tickets (ADR 0006); (3) output:
+  escaping, clean errors, `list` without bodies; (4) identity from git and `tkt clone`, hashed claim ids, `holder`,
   holder-only edits, `revoke`; (5) `tkt audit`.

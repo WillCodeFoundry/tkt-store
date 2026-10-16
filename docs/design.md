@@ -255,13 +255,14 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | add | `NOT_INITIALISED`, `INVALID` (a field rule, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
 | edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (a field rule, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
 | claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent (until 0.2.0) → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
-| claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only; from 0.2.0 a candidate it cannot write is skipped) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
+| claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only; from 0.2.0 a ticket held by a set-aside claim is passed over, ADR 0007) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |
-| reap | — | no claim past the grace | every claim past the grace cleared, one record (from 0.2.0 an invalid ticket is left out) |
+| reap | — | no claim past the grace | every claim past the grace cleared, one record (from 0.2.0 set-aside claims and claims on set-aside tickets are left alone, ADR 0007) |
 
 `validate_op` (shape checks, `INVALID`) runs before all of these. From 0.2.0 every ticket
 an Apply would write is checked after them: `INVALID` if it breaks a field rule or its
-file cap (*Changes in 0.2.0*).
+file cap (*Changes in 0.2.0*). `SET_ASIDE` (from 0.2.0, ADR 0007) comes after `INVALID`
+and `NOT_INITIALISED` and before every refusal above, in the order ADR 0007 gives.
 
 ### Changes in 0.2.0 (ADR 0005, §8)
 
@@ -421,8 +422,8 @@ agent has its own git identity, which does not change while it runs.
 **A partial view is acceptable.** Setting an invalid ticket aside means a snapshot may
 miss tickets. That is safe because a missing blocker counts as not done (nothing is
 claimed too early) and the worst case is `claim-next` choosing a less urgent ticket, far
-better than one bad file stopping every agent. A claim hash found in more than one claim
-record has all of them set aside, and stays fenced (ADR 0007).
+better than one bad file stopping every agent. A claim hash found in more than one
+folder has all of its claim files set aside, and stays fenced (ADR 0007).
 
 **Identity.** `tkt` uses the author identity git would put on the commit (`git var
 GIT_AUTHOR_IDENT`: the `GIT_AUTHOR_*` variables, then the clone's config, then global and
@@ -439,7 +440,7 @@ Hashed claim ids still prove that the agent acting on a claim is the one that to
 **Not defended.** The agent that works a ticket reads its body, so prompt injection is
 reduced, not prevented; confinement, guidance and narrow agent permissions do the rest.
 An agent with plain git and push access can forge well-formed tickets and history, or get
-a genuine claim set aside by pushing another record with its claim hash (branch
+a genuine claim set aside by pushing another claim file with its hash (branch
 protection only stops rewrites). Junk files and spam tickets cost every op: every
 file under `tickets/` is listed and in every commit's tree, and spam open tickets are
 read each time (ADR 0006 caches only resolved and invalid ones).

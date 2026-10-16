@@ -162,13 +162,14 @@ anything.
 - Prompt injection is reduced, not prevented: the agent that works a ticket reads its
   body. The defences are confinement, guidance and narrow permissions for agents.
 - An agent with plain git and push access can still forge well-formed tickets and
-  history, or get a genuine claim set aside by pushing another record with its claim
+  history, or get a genuine claim set aside by pushing another claim file with its
   hash; branch protection keeps history from being rewritten, nothing more.
 - Junk files and spam tickets still cost every op: every file under `tickets/` is listed
   and in every commit's tree, and spam open tickets are read each time (only resolved and
   invalid ones are cached, ADR 0006).
 - Implemented in stages, each flipping its security tests: (1) field checks, limits,
-  lease cap and `--`; (2a) claim files and hashed claim ids (ADR 0007), protocol 2,
+  lease cap and `--`; (2a) claim files and hashed claim ids, so the library stops
+  minting claim ids and `show` cannot print one (ADR 0007), protocol 2,
   reading the store: set-aside tickets and claims, `SET_ASIDE`, size and type checks,
   tolerant history; (2b) the cache of resolved and invalid tickets (ADR 0006); (3)
   output: escaping, clean errors, `list` without bodies; (4) identity from git and

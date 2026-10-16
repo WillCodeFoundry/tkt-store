@@ -15,6 +15,8 @@ from tkt_store.domain.ticket import AgentId, TicketId
 T1 = TicketId("tkt-1")
 T2 = TicketId("tkt-2")
 
+pytestmark = pytest.mark.git
+
 
 def malformed(phase: str) -> str:
     """A tkt commit message whose tkt-phase is not a phase: decode_message raises for it."""
@@ -22,9 +24,6 @@ def malformed(phase: str) -> str:
         "release tkt-1: x\n\ntkt-protocol: 1\ntkt-op: release\ntkt-time: 1\n"
         f"tkt-id: tkt-1\ntkt-phase: {phase}\n"
     )
-
-
-pytestmark = pytest.mark.git
 
 
 @pytest.mark.security_bug(

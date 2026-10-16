@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -36,6 +35,10 @@ C1 = ClaimId("1" * 32)
 T1 = TicketId("tkt-1")
 T2 = TicketId("tkt-2")
 
+REF = wire.DEFAULT_REF
+
+pytestmark = pytest.mark.git
+
 
 def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
     """A plain open ticket; `fields` override."""
@@ -43,11 +46,6 @@ def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
         id=ticket_id, title="Expire tokens", created=0, updated=0, phase=Phase.IMPLEMENTATION
     )
     return replace(base, **fields)
-
-
-pytestmark = pytest.mark.git
-
-REF = wire.DEFAULT_REF
 
 
 def service(store: GitStore) -> TicketStore:
@@ -230,10 +228,7 @@ def test_non_utf8_file_names_are_preserved(local: Path, bare_remote: Path) -> No
     tickets = service(opened(local))
     tickets.add("Second", ticket_id=T2)
     assert [v.ticket.id for v in tickets.list()] == [T1, T2]
-    listing = subprocess.run(
-        ["git", "-C", str(bare_remote), "ls-tree", "-r", "-z", "--name-only", REF],
-        capture_output=True, check=True,
-    ).stdout.split(b"\0")  # fmt: skip
+    listing = git(bare_remote, "ls-tree", "-r", "-z", "--name-only", REF, raw=True).split(b"\0")
     assert {name, b"tickets/" + name} <= set(listing)
 
 
@@ -327,7 +322,7 @@ def test_every_commit_runs_gc_auto(local: Path) -> None:
     for n in range(2, 5):
         tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
     tickets.view(T1)  # reads never run it
-    assert len(runner.inputs_to("gc")) == 3
+    assert runner.count("gc") == 3
 
 
 def test_a_failing_gc_does_not_fail_the_commit(local: Path) -> None:

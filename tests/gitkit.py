@@ -8,7 +8,7 @@ import os
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 from tkt_store.infrastructure.git.runner import GitRunner, git_runner
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
@@ -21,14 +21,34 @@ LOCAL_CONFIG = {
 """Per-repository config, so tests never depend on (or sign with) the developer's."""
 
 
+@overload
 def git(
     repo: Path,
     *args: str,
     env: Mapping[str, str] | None = None,
     stdin: str | bytes | None = None,
     check: bool = True,
-) -> str:
-    """Run git in `repo` for test setup and inspection; returns its output as text."""
+    raw: Literal[False] = False,
+) -> str: ...
+@overload
+def git(
+    repo: Path,
+    *args: str,
+    env: Mapping[str, str] | None = None,
+    stdin: str | bytes | None = None,
+    check: bool = True,
+    raw: Literal[True],
+) -> bytes: ...
+def git(
+    repo: Path,
+    *args: str,
+    env: Mapping[str, str] | None = None,
+    stdin: str | bytes | None = None,
+    check: bool = True,
+    raw: bool = False,
+) -> str | bytes:
+    """Run git in `repo` for test setup and inspection; returns its output as text, or as
+    bytes when `raw` (file contents, `-z` listings with non-UTF-8 names)."""
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         input=stdin.encode() if isinstance(stdin, str) else stdin,
@@ -36,7 +56,7 @@ def git(
         check=check,
         env=None if env is None else {**os.environ, **env},
     )
-    return result.stdout.decode()
+    return result.stdout if raw else result.stdout.decode()
 
 
 def configure(repo: Path) -> Path:
@@ -52,9 +72,7 @@ def new_repo(path: Path, *, bare: bool = False) -> Path:
 
 
 def clone(remote: Path, path: Path) -> Path:
-    subprocess.run(
-        ["git", "clone", "--quiet", str(remote), str(path)], capture_output=True, check=True
-    )
+    git(path.parent, "clone", "--quiet", str(remote), str(path))
     return configure(path)
 
 
@@ -63,9 +81,7 @@ def head(repo: Path, ref: str = DEFAULT_REF) -> str:
 
 
 def show(repo: Path, path: str, ref: str = DEFAULT_REF) -> bytes:
-    return subprocess.run(
-        ["git", "-C", str(repo), "show", f"{ref}:{path}"], capture_output=True, check=True
-    ).stdout
+    return git(repo, "show", f"{ref}:{path}", raw=True)
 
 
 def paths(repo: Path, ref: str = DEFAULT_REF) -> set[str]:
@@ -110,9 +126,12 @@ def write_files(
 
 
 class HookedRunner:
-    """A real git_runner that records every call (`calls`, `inputs`), calls `hook(args)`
-    before every command, and `after(args)` after every successful one. A hook may raise to
-    simulate a failure or a crash, or run another writer to interleave deterministically."""
+    """A real git_runner that records every call, calls `hook(args)` before every command,
+    and `after(args)` after every successful one. A hook may raise to simulate a failure or
+    a crash, or run another writer to interleave deterministically.
+
+    `calls` holds each call's arguments, and `inputs` what it got on standard input (b""
+    for none); `count` and `inputs_to` query them by command."""
 
     def __init__(
         self,
@@ -124,7 +143,10 @@ class HookedRunner:
         self.hook, self.after = hook, after
         self.calls: list[tuple[str, ...]] = []
         self.inputs: list[bytes] = []
-        """What each call in `calls` was given on standard input (b"" for none)."""
+
+    def count(self, *command: str) -> int:
+        """How many calls started with `command` (e.g. "gc")."""
+        return sum(args[: len(command)] == command for args in self.calls)
 
     def inputs_to(self, *command: str) -> list[bytes]:
         """What each call starting with `command` (e.g. "mktree") got on standard input."""

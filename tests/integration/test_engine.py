@@ -107,11 +107,7 @@ def test_conflict_triggers_retry_with_fresh_snapshot(store: MemStore) -> None:
 
 
 def test_retry_rechecks_rules(store: MemStore) -> None:
-    taken = tkt(
-        T1,
-        title="Expire tokens",
-        claim=Claim(agent=B, claim_id=C2, lease_until=NOW + 600, claimed_at=NOW),
-    )
+    taken = tkt(T1, claim=Claim(agent=B, claim_id=C2, lease_until=NOW + 600, claimed_at=NOW))
     store.before_next_commit(lambda: other_writer(store, taken))
     outcome = transact(store, ClaimOp(T1, A, C1, TTL), FakeClock(NOW))
     assert isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.ALREADY_CLAIMED

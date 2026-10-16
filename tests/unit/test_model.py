@@ -15,6 +15,7 @@ from tkt_store.domain.status import (
     why_not_claimable,
 )
 from tkt_store.domain.ticket import (
+    LEASE_CAP_MARGIN,
     MAX_TTL,
     SKEW_GRACE,
     AgentId,
@@ -90,11 +91,11 @@ def test_claim_takeable_only_after_grace() -> None:
 
 
 def test_a_lease_beyond_the_cap_reads_expired_and_is_takeable() -> None:
-    """The cap is relative to now: MAX_TTL + SKEW_GRACE ahead is the furthest an honest
-    lease can reach on any clock within the grace; one second more is forged."""
-    furthest = held(lease_until=NOW + MAX_TTL + SKEW_GRACE)
+    """The cap is relative to now: MAX_TTL + LEASE_CAP_MARGIN ahead is the furthest an
+    honest lease can reach from a clock up to the margin fast; one second more is forged."""
+    furthest = held(lease_until=NOW + MAX_TTL + LEASE_CAP_MARGIN)
     assert furthest.is_live(NOW) and not furthest.is_takeable(NOW)
-    forged = held(lease_until=NOW + MAX_TTL + SKEW_GRACE + 1)
+    forged = held(lease_until=NOW + MAX_TTL + LEASE_CAP_MARGIN + 1)
     assert not forged.is_live(NOW) and forged.is_takeable(NOW)
     ticket = tkt(claim=forged)
     assert derive_status(snap(ticket), ticket, NOW) is Status.EXPIRED

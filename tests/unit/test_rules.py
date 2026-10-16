@@ -80,6 +80,16 @@ def written(decision: Decision, ticket_id: TicketId = T1) -> Ticket:
     return {change.ticket.id: change.ticket for change in decision.changes}[ticket_id]
 
 
+def sized(size: int, ticket_id: TicketId = T1, **fields_: object) -> Ticket:
+    """A valid ticket whose encoded file is exactly `size` bytes, padded with a body of
+    4-byte emoji."""
+    base = tkt(ticket_id, **fields_)
+    room = size - len(base.encoded())
+    ticket = replace(base, body="\U0001f600" * (room // 4) + "x" * (room % 4))
+    assert len(ticket.encoded()) == size
+    return ticket
+
+
 def refused(decision: Decision, code: RefusalCode) -> Refusal:
     assert isinstance(decision, Refusal), decision
     assert decision.code is code, decision
@@ -437,26 +447,40 @@ class TestValidation:
         decision = decide(snap(tkt()), EditOp(T1, expected_version, title="X"), NOW)
         refused(decision, RefusalCode.INVALID)
 
-    def test_edit_checks_only_the_fields_it_sets(self) -> None:
-        """A stored value that breaks a field rule does not block edits of other fields."""
+    def test_a_stored_value_that_breaks_a_rule_blocks_every_write_of_the_ticket(self) -> None:
+        """tkt never writes an invalid ticket, whichever field the op changes."""
         ticket = tkt(title="written before the rules ")
-        assert isinstance(decide(snap(ticket), EditOp(T1, 1, priority=5), NOW), Apply)
+        refused(decide(snap(ticket), EditOp(T1, 1, priority=5), NOW), RefusalCode.INVALID)
+        refused(decide(snap(ticket), ClaimOp(T1, A, C1, TTL), NOW), RefusalCode.INVALID)
 
-    def test_a_write_over_the_file_cap_is_invalid(self) -> None:
-        """Each field within its limit, the file over 256 KiB: refused, whichever op."""
-        over = "\U0001f600" * (fields.BODY_MAX // 2)  # 4 bytes each in UTF-8
-        refused(decide(snap(tkt()), AddOp(T2, "T", body=over * 2), NOW), RefusalCode.INVALID)
-        room = fields.TICKET_FILE_MAX - len(tkt().encoded()) - 10
-        near_cap = tkt(body="\U0001f600" * (room // 4) + "x" * (room % 4))
-        assert len(near_cap.encoded()) == fields.TICKET_FILE_MAX - 10
-        claim = decide(snap(near_cap), ClaimOp(T1, A, C1, TTL), NOW)
-        refused(claim, RefusalCode.INVALID)
+    def test_add_and_edit_may_fill_only_the_content_budget(self) -> None:
+        big = sized(fields.CONTENT_FILE_MAX + 1, ticket_id=T2).body
+        refused(decide(snap(tkt()), AddOp(T2, "Expire tokens", body=big), NOW), RefusalCode.INVALID)
+        refused(decide(snap(tkt()), EditOp(T1, 1, body=big), NOW), RefusalCode.INVALID)
+        fits = sized(fields.CONTENT_FILE_MAX - 100, ticket_id=T2).body  # add differs slightly
+        assert isinstance(decide(snap(tkt()), AddOp(T2, "Expire tokens", body=fits), NOW), Apply)
+
+    def test_a_full_ticket_refuses_claims_but_can_still_be_ended(self) -> None:
+        full = sized(fields.CLAIM_FILE_MAX - 10)
+        refused(decide(snap(full), ClaimOp(T1, A, C1, TTL), NOW), RefusalCode.FULL)
+        assert isinstance(decide(snap(full), CancelOp(T1), NOW), Apply)
+        held_full = sized(fields.CLAIM_FILE_MAX, claim=held())
+        ending: list[Op] = [ReleaseOp(T1, C1), DoneOp(T1, C1), CancelOp(T1)]
+        for op in ending:
+            assert isinstance(decide(snap(held_full), op, NOW), Apply), op
 
     def test_validation_wins_over_every_other_outcome(self) -> None:
         refused(decide(snap(), RenewOp(T1, ClaimId("bad"), TTL), NOW), RefusalCode.INVALID)
 
 
 class TestClaimNext:
+    def test_skips_a_ticket_it_cannot_claim(self) -> None:
+        """An invalid or full ticket at the top never stops claim-next for everyone."""
+        invalid = tkt(T1, priority=0, title=" written before the rules")
+        full = sized(fields.CLAIM_FILE_MAX - 10, ticket_id=T2, priority=0)
+        decision = decide(snap(invalid, full, tkt(T3, priority=50)), ClaimNextOp(A, C1, TTL), NOW)
+        assert isinstance(decision, Apply) and decision.changes[0].ticket.id == T3
+
     def test_picks_highest_priority_then_oldest(self) -> None:
         tickets = snap(
             tkt(T1, priority=None, created=1),
@@ -526,6 +550,13 @@ class TestReap:
 
     def test_nothing_expired_is_noop(self) -> None:
         noop(decide(snap(tkt(claim=held())), ReapOp(), NOW))
+
+    def test_leaves_out_a_ticket_it_cannot_write(self) -> None:
+        """One invalid ticket never stops every other claim being reaped."""
+        invalid = tkt(T1, claim=held(C1, A, TAKEABLE), title=" written before the rules")
+        tickets = snap(invalid, tkt(T2, claim=held(C2, B, TAKEABLE)))
+        decision = decide(tickets, ReapOp(), NOW)
+        assert isinstance(decision, Apply) and decision.record.ticket_ids == (T2,)
 
 
 class TestEdit:

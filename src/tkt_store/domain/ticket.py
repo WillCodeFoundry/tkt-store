@@ -54,6 +54,12 @@ MAX_TTL: Duration = 2 * 60 * 60
 """Upper bound on a lease TTL (claim, claim-next, renew). Without it a huge TTL would be
 a permanent lock that neither reap nor takeover can clear."""
 
+LEASE_CAP_MARGIN: Duration = 10 * 60
+"""How far a writer's clock may run ahead before its longest lease looks forged: a lease
+ending more than MAX_TTL + LEASE_CAP_MARGIN after now is beyond the cap
+(`Claim.is_beyond_cap`). Generous for clocks kept in time; a forged lease can lock a
+ticket for at most that long."""
+
 
 class Kind(StrEnum):
     STORY = "story"
@@ -121,12 +127,12 @@ class Claim:
         return now >= self.lease_until + SKEW_GRACE or self.is_beyond_cap(now)
 
     def is_beyond_cap(self, now: Timestamp) -> bool:
-        """A lease ending more than MAX_TTL + SKEW_GRACE after now, which no honest
-        writer sets (claim and renew cap it at now + MAX_TTL, and clocks agree within
-        the grace). Such a claim reads expired and is takeable, so a forged lease cannot
-        lock a ticket. The cap is relative to now, never to claimed_at, so an honestly
-        renewed claim is never beyond it."""
-        return self.lease_until > now + MAX_TTL + SKEW_GRACE
+        """A lease ending more than MAX_TTL + LEASE_CAP_MARGIN after now, which no honest
+        writer sets (claim and renew cap it at the writer's now + MAX_TTL, and clocks
+        agree within the margin). Such a claim reads expired and is takeable, so a forged
+        lease cannot lock a ticket. The cap is relative to now, never to claimed_at, so an
+        honestly renewed claim is never beyond it."""
+        return self.lease_until > now + MAX_TTL + LEASE_CAP_MARGIN
 
     def to_dict(self) -> dict[str, Any]:
         """The claim as plain data, as it appears in the ticket file (docs/format.md)."""

@@ -107,13 +107,16 @@ flags (`…`) may be given several times.
   is live, and renew it if it lapsed (nobody took it over), so a restarted agent gets a
   live claim back.
 - **Values** follow the field rules in `docs/format.md`, or the command is refused
-  `INVALID`: ids are 8 to 32 lowercase letters, digits and single hyphens; `--title`
-  and `--reason` are one line (at most 256 characters) without leading or trailing
-  whitespace, `--body` at most 65,536; none holds control or invisible characters (a
-  body may hold newlines and tabs); `--as` is like a GitHub username; `--tag` like a
-  GitHub topic (at most 20, no duplicates); `--project` is `[owner/]repo`; `--priority`
-  is 0 to 100; at most 20 `--blocked-by`. A write whose ticket file would exceed 256 KiB
-  is refused too.
+  `INVALID`: ids, `--as` and `--tag` are lowercase slugs (letters and digits joined by
+  single hyphens; ids 8 to 32, `--as` at most 39, at most 20 tags of at most 50);
+  `--project` is `[owner/]repo`, lowercase; `--title` and `--reason` are one line (at
+  most 256 characters) without leading or trailing whitespace, `--body` at most 65,536;
+  none holds control or invisible characters (a body may hold newlines and tabs);
+  `--priority` is 0 to 100; at most 20 `--blocked-by`. `add` and `edit` may fill at
+  most 192 KiB of the ticket file.
+- **Full tickets.** A claim on a ticket whose claim history fills its file (255 KiB) is
+  refused `FULL`; the ticket can still be released, finished or cancelled. `claim-next`
+  skips full and invalid tickets.
 - **Actor.** `--as` on `add`, `edit` and `cancel` is optional and only recorded in the
   audit trailer (`tkt-agent`).
 

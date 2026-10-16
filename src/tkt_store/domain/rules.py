@@ -68,19 +68,46 @@ from tkt_store.domain.ticket import (
 def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
     """Dispatch to the rule for this op type. Exhaustive over `Op`.
 
-    `validate_op` runs first; its refusal (INVALID) wins over every other outcome. An
-    Apply that would write a ticket file over `fields.TICKET_FILE_MAX` is refused INVALID
-    instead (a body near its limit, or a long claim history), so tkt never writes a file
-    it would refuse to read.
+    `validate_op` runs first; its refusal (INVALID) wins over every other outcome. Then
+    every ticket an Apply would write must be writable (`_unwritable`), or the op is
+    refused instead, so tkt never writes an invalid ticket or a file it would refuse to
+    read.
     """
     if (invalid := validate_op(op)) is not None:
         return invalid
     decision = _decide(snapshot, op, now)
     if isinstance(decision, Apply):
         for change in decision.changes:
-            if problem := fields.ticket_file_problem(change.ticket.encoded()):
-                return _invalid(f"{change.ticket.id}: {problem}")
+            if refusal := _unwritable(change.ticket, op):
+                return refusal
     return decision
+
+
+def _unwritable(ticket: Ticket, op: Op) -> Refusal | None:
+    """Why `op` may not write `ticket`, if it may not: INVALID if a field breaks its rule
+    (`fields.ticket_problem`) or the file exceeds the op's budget: `add` and `edit` up to
+    fields.CONTENT_FILE_MAX, the ops that end a claim up to fields.TICKET_FILE_MAX; FULL
+    if a claim would grow it past fields.CLAIM_FILE_MAX (the claim history fills it)."""
+    if problem := fields.ticket_problem(ticket):
+        return _invalid(f"{ticket.id}: {problem}")
+    size = len(ticket.encoded())
+    match op:
+        case AddOp() | EditOp():
+            if size > fields.CONTENT_FILE_MAX:
+                kib = fields.CONTENT_FILE_MAX // 1024
+                return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
+        case ClaimOp() | ClaimNextOp():
+            if size > fields.CLAIM_FILE_MAX:
+                return Refusal(
+                    RefusalCode.FULL,
+                    f"{ticket.id} is full: its claim history fills the ticket file; "
+                    "cancel it and add a new ticket",
+                )
+        case _:
+            if size > fields.TICKET_FILE_MAX:
+                kib = fields.TICKET_FILE_MAX // 1024
+                return _invalid(f"{ticket.id}: the ticket file would exceed {kib} KiB")
+    return None
 
 
 def _decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
@@ -249,7 +276,9 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
     NOT_HOLDER if op.claim_id is in any ticket's ended_claim_ids;
     choose min(sort_key_for_next) among tickets for which `status.claimable` is true and
       that match the filters (project, kind, phase; a project filter matches that exact
-      value only, never a null project), then apply as decide_claim;
+      value only, never a null project), then apply as decide_claim; a candidate the
+      claim cannot be written to (an invalid or full ticket, `_unwritable`) is skipped,
+      so one bad ticket never stops claim-next for everyone;
     NOTHING_CLAIMABLE if there is none."""
     for ticket in snapshot.tickets.values():
         if ticket.claim is not None and ticket.claim.claim_id == op.claim_id:
@@ -264,10 +293,11 @@ def decide_claim_next(snapshot: Snapshot, op: ClaimNextOp, now: Timestamp) -> De
         and (op.phase is None or ticket.phase is op.phase)
         and claimable(snapshot, ticket, now)
     ]
-    if not candidates:
-        return Refusal(RefusalCode.NOTHING_CLAIMABLE, "no claimable ticket matches the filters")
-    chosen = min(candidates, key=sort_key_for_next)
-    return _claim(snapshot, chosen, op.name, op.agent, op.claim_id, op.ttl, now)
+    for candidate in sorted(candidates, key=sort_key_for_next):
+        decision = _claim(snapshot, candidate, op.name, op.agent, op.claim_id, op.ttl, now)
+        if not isinstance(decision, Apply) or not _unwritable(decision.changes[0].ticket, op):
+            return decision
+    return Refusal(RefusalCode.NOTHING_CLAIMABLE, "no claimable ticket matches the filters")
 
 
 def decide_renew(snapshot: Snapshot, op: RenewOp, now: Timestamp) -> Decision:
@@ -405,12 +435,15 @@ def decide_cancel(snapshot: Snapshot, op: CancelOp, now: Timestamp) -> Decision:
 def decide_reap(snapshot: Snapshot, op: ReapOp, now: Timestamp) -> Decision:
     """Occupancy op. Apply: claim = None, with the reaped claim's id appended to
     ended_claim_ids, on every ticket whose claim is takeable (`Claim.is_takeable`: past
-    lease_until + SKEW_GRACE), blocked or not; one record listing them all. NoOp: none
-    is past the grace period. Safe to run from any writer on a schedule (idempotent)."""
+    lease_until + SKEW_GRACE, or beyond the cap), blocked or not; one record listing them
+    all. A ticket reap cannot write (`_unwritable`: an invalid ticket) is left out, so it
+    never stops the others being reaped. NoOp: none is past the grace period. Safe to run
+    from any writer on a schedule (idempotent)."""
     reaped = [
-        _end_claim(ticket, now)
+        ended
         for ticket in sorted(snapshot.tickets.values(), key=lambda t: t.id)
         if ticket.claim is not None and ticket.claim.is_takeable(now)
+        if not _unwritable(ended := _end_claim(ticket, now), op)
     ]
     if not reaped:
         return NoOp("no claim is past the grace period")

@@ -12,8 +12,8 @@ from tkt_store.domain.operations import ClaimOp, Op, ReapOp
 from tkt_store.domain.outcomes import Apply, NoOp, Refusal, RefusalCode
 from tkt_store.domain.rules import decide
 from tkt_store.domain.ticket import (
+    LEASE_CAP_MARGIN,
     MAX_TTL,
-    SKEW_GRACE,
     AgentId,
     Claim,
     ClaimId,
@@ -49,15 +49,16 @@ FORGED_LEASE = Claim(agent=A, claim_id=C1, lease_until=NOW + 100 * MAX_TTL, clai
     "op", [ClaimOp(T1, B, C2, TTL), ReapOp()], ids=["claim by another agent", "reap"]
 )
 def test_a_forged_far_future_lease_does_not_lock_a_ticket(op: Op) -> None:
-    """Past the longest lease an honest writer could have set (MAX_TTL plus the grace),
-    the claim can be taken over or reaped, however far its lease_until claims to run."""
-    later = NOW + MAX_TTL + SKEW_GRACE + 1
+    """Past the longest lease an honest writer could have set (MAX_TTL plus the cap's
+    clock margin), the claim can be taken over or reaped, however far its lease_until
+    claims to run."""
+    later = NOW + MAX_TTL + LEASE_CAP_MARGIN + 1
     assert isinstance(
         decide(Snapshot(Revision("r1"), {T1: tkt(T1, claim=FORGED_LEASE)}), op, later), Apply
     )
 
 
-RENEWED_AT = NOW + MAX_TTL + SKEW_GRACE + 1
+RENEWED_AT = NOW + MAX_TTL + LEASE_CAP_MARGIN + 1
 HONESTLY_RENEWED = Claim(agent=A, claim_id=C1, lease_until=RENEWED_AT + TTL, claimed_at=NOW)
 """Claimed at NOW and renewed for longer than MAX_TTL: renew keeps claimed_at."""
 

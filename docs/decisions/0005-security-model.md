@@ -28,24 +28,27 @@ or commit signing could expose.
 
 **Everything read from the branch is treated as hostile and validated:**
 
-- One set of field checks, used on write (`validate_op`) and on read:
-  - ticket id: 8 to 32 lowercase letters, digits and single hyphens, starting and
-    ending with a letter or digit (`tkt-1234`; minted ids are `tkt-` + 8 hex);
-  - `holder` (below): the GitHub username rule (letters, digits, single hyphens, no
-    hyphen at either end, at most 39);
-  - tags: the GitHub topic rule (lowercase letters, digits, hyphens; at most 20 tags of
-    at most 50);
-  - project: `[owner/]repo`, each segment `[A-Za-z0-9._-]` of at most 100;
+- One set of field checks, used on write and on read. On write, `validate_op` checks
+  the op's values and `decide` checks every ticket the op would write, whole, so `tkt`
+  never writes an invalid ticket:
+  - identifiers are lowercase *slugs* (letters and digits in runs joined by single
+    hyphens, no hyphen at either end), so no comparison ever depends on case: a ticket
+    id is a slug of 8 to 32 (`tkt-1234`; minted ids are `tkt-` + 8 hex), a tag one of
+    at most 50 (at most 20 tags, each a valid GitHub topic), `holder` (below) one of at
+    most 39 (a lowercase GitHub username);
+  - project: `[owner/]repo`, a slug owner of at most 39 and a repo of at most 100
+    lowercase letters, digits, `.`, `_` and `-`, starting and ending with a letter or
+    digit (never `..`, `.git` or an option);
   - free text (title, body, reason): Unicode Assignables (RFC 9839: no controls but
     newline and tab, in the body only; no surrogates or noncharacters), and no
-    private-use characters or characters from a fixed list of invisible, reordering and
-    line-breaking ones (bidi controls, zero-width characters, line and paragraph
-    separators, tag characters, fillers). Every refused character is in a fixed range,
-    so the rule is the same on every Python and Unicode version: nothing is normalised
-    and comparisons are exact. Title and reason are single-line, without leading or
-    trailing whitespace, and the title is never empty; a body may start and end with
-    whitespace (indented code, a trailing newline). Title at most 256, reason 256, body
-    65,536;
+    private-use characters or characters from a fixed list of invisible, reordering,
+    line-breaking and hidden-data ones (listed in `docs/format.md`), nor two variation
+    selectors in a row. Every refused character, and the whitespace trimmed, is a fixed
+    code point, so the rule is the same on every Python and Unicode version: nothing is
+    normalised and comparisons are exact. Title and reason are single-line, without
+    leading or trailing whitespace, and the title is never empty; a body may start and
+    end with whitespace (indented code, a trailing newline). Title at most 256, reason
+    256, body 65,536;
   - priority 0–100; blockers at most 20, no duplicates, no self-block; tags no
     duplicates;
   - lengths count code points.
@@ -54,9 +57,12 @@ or commit signing could expose.
 - Whole-ticket and cross-ticket checks on read (e.g. no claim on a resolved ticket; a
   claim hash current on one ticket only: if two tickets carry it, both are set aside).
 - A strict schema: a ticket with keys outside it is invalid; `tkt-store.json` too.
-- A ticket file is at most 256 KiB. Reads check the size before reading; writes refuse an
-  op whose encoded file would exceed it (`INVALID`), so `tkt` never writes what it would
-  refuse to read.
+- A ticket file is at most 256 KiB. Reads check the size before reading, and writes stay
+  within budgets: `add` and `edit` may fill 192 KiB (`INVALID` beyond), a claim 255 KiB,
+  and the ops that end a claim the full 256 KiB. `ended_claim_ids` is kept whole until
+  the ticket is full: a claim that would pass 255 KiB is refused `FULL`, and the ticket
+  can still be released, finished or cancelled. `claim-next` and `reap` skip a ticket
+  they cannot write (invalid or full), so one ticket never stops them for everyone.
 - An invalid ticket is set aside and reported (cached as invalid, ADR 0006); it never
   fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
   and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
@@ -64,7 +70,9 @@ or commit signing could expose.
   history. Only regular files at `tickets/<id>.json` are read; other files are
   preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
-  `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable (and reads expired).
+  `MAX_TTL` + `LEASE_CAP_MARGIN` (10 minutes) after now is treated as takeable (and reads
+  expired). The margin lets a writer's clock run up to 10 minutes fast without its
+  longest lease looking forged; a forged lease locks a ticket for at most that long.
 
 **Output carries no surprises:** all non-ASCII is escaped; errors never echo values read
 from the store (they name the file and the field); `list` never prints a ticket's body
@@ -87,12 +95,12 @@ removed). `tkt` uses the author identity git would put on the commit (`git var
 GIT_AUTHOR_IDENT`), run with `user.useConfigOnly=true` so git never invents one from the
 OS account and host name, and refuses to write if none is configured. The commit author
 records who did each op, and `tkt log` shows its name and email, unverified; the
-`tkt-agent` trailer goes. A claim stores `holder`, the git name mapped to an identifier:
-accents folded (NFKD, then combining marks dropped), each run of characters outside
-`[A-Za-z0-9]` (hyphens included) replaced by one `-`, cut to 39, then hyphens trimmed
-from both ends; refused if nothing is left (so a name in a non-Latin script needs an
-ASCII `user.name`). `show` and `list` say who is working on what; `list --holder NAME`
-maps its argument the same way and matches ignoring case, as GitHub does. A re-run of a
+`tkt-agent` trailer goes. A claim stores `holder`, the git name mapped to a slug with
+ASCII only, the same on every Python: lowercased, each run of characters outside
+`[a-z0-9]` (hyphens and non-ASCII letters included) replaced by one `-`, cut to 39, then
+hyphens trimmed from both ends; refused if nothing is left (so a name with no ASCII
+letters or digits needs an ASCII `user.name`). `show` and `list` say who is working on
+what; `list --holder NAME` maps its argument the same way and matches exactly. A re-run of a
 claim keeps its `holder`. `tkt clone URL DIR` makes the clone without a checkout and
 prints the identity and the holder name; every write reports them. Documentation
 recommends a GitHub noreply address per agent: the store's history is readable by
@@ -115,7 +123,15 @@ anything.
   16) would disagree, and once tickets are validated on read one would be set aside for
   some agents and not others. NFC is not version-stable either for characters the
   writer's Python does not know. No comparison needs it: a re-run repeats its input
-  exactly.
+  exactly. Folding git names with NFKD for `holder` was rejected for the same reason.
+- **Mixed-case identifiers** (GitHub usernames and repository names keep case): exact
+  comparisons would tell `Coder-7` from `coder-7`, and case-insensitive ones need case
+  folding; lowercase slugs need neither.
+- **Truncating `ended_claim_ids`:** a re-run of a claim that has fallen off the list
+  could claim the ticket again. The list stays whole until the ticket is full, and the
+  budget can be raised if tickets ever fill up.
+- **A wide lease-cap margin** (e.g. 2 × `MAX_TTL`): it only lengthens how long a forged
+  lease locks a ticket; 10 minutes covers clocks that are kept in time.
 - **Preserving unknown keys for forward compatibility:** a deployed format change bumps
   the protocol, which older clients already refuse; the keys were only an injection
   channel.

@@ -5,9 +5,12 @@ refused; these tests pin what must stay accepted and where each limit falls."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from tkt_store.domain import fields
+from tkt_store.domain.ticket import AgentId, Claim, ClaimId, ProjectId, Ticket, TicketId
 
 ACCEPTED_TEXT = {
     "plain": "Fix tests",
@@ -81,13 +84,26 @@ def test_reason_is_single_line_and_bounded() -> None:
     assert fields.reason_problem("a\nb") is not None
 
 
-@pytest.mark.parametrize("agent", ["coder-7", "A", "a1-b2-c3", "x" * fields.AGENT_MAX])
+@pytest.mark.parametrize("agent", ["coder-7", "a", "a1-b2-c3", "x" * fields.AGENT_MAX])
 def test_agents_accepted(agent: str) -> None:
     assert fields.agent_problem(agent) is None
 
 
 @pytest.mark.parametrize(
-    "agent", ["", "-a", "a-", "a--b", "a_b", "a.b", "a b", "\u00e9", "x" * (fields.AGENT_MAX + 1)]
+    "agent",
+    [
+        "",
+        "A",
+        "Coder-7",
+        "-a",
+        "a-",
+        "a--b",
+        "a_b",
+        "a.b",
+        "a b",
+        "\u00e9",
+        "x" * (fields.AGENT_MAX + 1),
+    ],
 )
 def test_agents_refused(agent: str) -> None:
     assert fields.agent_problem(agent) is not None
@@ -96,30 +112,49 @@ def test_agents_refused(agent: str) -> None:
 def test_tags() -> None:
     assert fields.tags_problem(("auth", "auth")) is not None
     assert fields.tags_problem(()) is None
-    assert fields.tags_problem(("auth", "0day", "a-b-", "t" * fields.TAG_MAX)) is None
+    assert fields.tags_problem(("auth", "0day", "a-b", "t" * fields.TAG_MAX)) is None
     assert fields.tags_problem(tuple(f"t{n}" for n in range(fields.TAGS_MAX))) is None
     assert fields.tags_problem(tuple(f"t{n}" for n in range(fields.TAGS_MAX + 1))) is not None
 
 
-@pytest.mark.parametrize("tag", ["", "Auth", "-a", "a_b", "a b", "t" * (fields.TAG_MAX + 1)])
+@pytest.mark.parametrize(
+    "tag", ["", "Auth", "-a", "a-", "a--b", "a_b", "a b", "t" * (fields.TAG_MAX + 1)]
+)
 def test_tags_refused(tag: str) -> None:
     assert fields.tags_problem((tag,)) is not None
 
 
-SEGMENT = "p" * fields.PROJECT_SEGMENT_MAX
+OWNER = "o" * fields.OWNER_MAX
+REPO = "r" * fields.REPO_MAX
 
 
 @pytest.mark.parametrize(
     "project",
-    ["tkt-store", "WillCodeFoundry/tkt-store", "a.b_c-d", "9" * 40, f"{SEGMENT}/{SEGMENT}"],
+    ["tkt-store", "willcodefoundry/tkt-store", "a.b_c-d", "x/a..b", "9" * 40, f"{OWNER}/{REPO}"],
 )
 def test_projects_accepted(project: str) -> None:
     assert fields.project_problem(project) is None
 
 
-@pytest.mark.parametrize(
-    "project", ["", "/repo", "owner/", "a/b/c", "github.com/org/repo", "a b", SEGMENT + "p"]
-)
+PROJECTS_REFUSED = {
+    "empty": "",
+    "no owner": "/repo",
+    "no repo": "owner/",
+    "three parts": "a/b/c",
+    "a URL path": "github.com/org/repo",
+    "space": "a b",
+    "uppercase": "WillCodeFoundry/tkt-store",
+    "dot dot": "..",
+    "dot git": ".git",
+    "an option": "-x",
+    "trailing hyphen": "x-",
+    "owner with a dot": "a.b/c",
+    "owner too long": f"{OWNER}o/repo",
+    "repo too long": f"owner/{REPO}r",
+}
+
+
+@pytest.mark.parametrize("project", PROJECTS_REFUSED.values(), ids=PROJECTS_REFUSED)
 def test_projects_refused(project: str) -> None:
     assert fields.project_problem(project) is not None
 
@@ -176,9 +211,41 @@ def test_absent_optional_values_pass() -> None:
     assert fields.agent_problem(None) is None
 
 
-def test_ticket_file_cap() -> None:
-    assert fields.ticket_file_problem(b"x" * fields.TICKET_FILE_MAX) is None
-    assert fields.ticket_file_problem(b"x" * (fields.TICKET_FILE_MAX + 1)) is not None
+def test_presentation_selectors_one_at_a_time() -> None:
+    assert fields.title_problem("ok \u2764\ufe0f") is None
+    assert fields.title_problem("ok \u2764\ufe0f\ufe0f") is not None
+    assert fields.title_problem("ok \ufe0e\ufe0f") is not None
+
+
+@pytest.mark.parametrize("space", ["\u00a0", "\u2003", "\u3000", "\u1680"])
+def test_unicode_whitespace_at_either_end_of_a_title_is_refused(space: str) -> None:
+    assert fields.title_problem(f"{space}title") is not None
+    assert fields.title_problem(f"title{space}") is not None
+    assert fields.title_problem(f"ti{space}tle") is None
+
+
+@pytest.mark.parametrize("code_point", [0xE0080, 0xE01F0, 0xE0FFF, 0xFFF0, 0xFFF8])
+def test_unassigned_invisible_ranges_are_refused(code_point: int) -> None:
+    assert fields.title_problem(f"a{chr(code_point)}b") is not None
+
+
+def test_ticket_problem_checks_every_stored_field() -> None:
+    ticket = Ticket(id=TicketId("tkt-0001"), title="Fix it", created=0, updated=0)
+    assert fields.ticket_problem(ticket) is None
+    broken = {
+        "title": replace(ticket, title=" Fix it"),
+        "body": replace(ticket, body="a\u202eb"),
+        "project": replace(ticket, project=ProjectId("A/B")),
+        "priority": replace(ticket, priority=101),
+        "self block": replace(ticket, blocked_by=(ticket.id,)),
+        "tags": replace(ticket, tags=("Auth",)),
+        "claim agent": replace(
+            ticket, claim=Claim(AgentId("Coder"), ClaimId("1" * 32), lease_until=1, claimed_at=0)
+        ),
+        "ended claim": replace(ticket, ended_claim_ids=(ClaimId("short"),)),
+    }
+    for name, value in broken.items():
+        assert fields.ticket_problem(value) is not None, name
 
 
 def test_problems_never_echo_the_value() -> None:

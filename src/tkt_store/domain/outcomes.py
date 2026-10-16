@@ -33,9 +33,13 @@ class RefusalCode(StrEnum):
     TERMINAL = "TERMINAL"  # the ticket is already resolved (done/cancelled): final
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
     # malformed op: bad id, a field rule (domain/fields.py), ttl out of bounds,
-    # expected_version < 1, unknown/self blocker, dependency cycle
+    # expected_version < 1, unknown/self blocker, dependency cycle; or the ticket it would
+    # write breaks a field rule or exceeds its file budget
     INVALID = "INVALID"
     STALE = "STALE"  # edit based on an older content_version; re-read and retry
+    # a claim would grow the ticket file past fields.CLAIM_FILE_MAX: its claim history
+    # fills it; the ticket can still be released, finished or cancelled
+    FULL = "FULL"
 
 
 @dataclass(frozen=True)

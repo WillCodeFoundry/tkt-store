@@ -38,8 +38,8 @@ long-running process keeps them in an in-memory map by blob id.
 
 **Only what depends on the file's bytes alone is cached:** decoding and the size,
 schema, field and whole-ticket checks. Checks that relate a file to its path (the id
-matches the file name) or to other tickets (two tickets with the same claim hash,
-blockers) run on every snapshot over cached and freshly read tickets alike, as do
+matches the file name), to other tickets (blockers) or to claims (ADR 0007) run on
+every snapshot over cached and freshly read tickets alike, as do
 derived values such as status. No cached check reads the clock: time-dependent ones,
 such as a claim made in the future or the lease cap, live in the rules and run on every
 op, so a verdict never depends on when it was made.
@@ -95,5 +95,7 @@ run code in that clone (ADR 0005).
   saved once 0.2.0's validation on read lands.
 - The first op in a new clone, and the first after an upgrade, reads every file once.
 - The cache grows with resolved tickets: about the size of their files.
-- The store format does not change; the cache is local to each clone and to the
-  GitStore adapter.
+- The cache changes no format: it is local to each clone and to the GitStore adapter.
+- Claims (ADR 0007) need no cache: their state is in file names, so a snapshot only
+  lists them. They add to the listing and tree figures above (about three times as many
+  entries at 20,000 tickets with three claims each), which stage 2a measures.

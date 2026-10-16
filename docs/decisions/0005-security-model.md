@@ -1,7 +1,10 @@
 # 0005 — Security model: agents confined to tkt, everything read is validated
 
 **Status:** accepted; implemented in stages for 0.2.0 (tests/security marks what is
-still missing)
+still missing). Where claims are stored is decided by ADR 0007: empty claim files whose
+names hold the claim's state, which replace the ticket's `claim` and `ended_claim_ids`,
+the file budgets and `FULL`, and the cross-ticket duplicate-claim check below; claim-id
+hashing moves to stage 2a with them.
 
 ## Context
 
@@ -54,20 +57,16 @@ or commit signing could expose.
   - lengths count code points.
 - Writes still refuse unknown blockers; on read, a blocker that is missing or set aside
   counts as not done.
-- Whole-ticket and cross-ticket checks on read (e.g. no claim on a resolved ticket; a
-  claim hash current on one ticket only: if two tickets carry it, both are set aside).
+- Whole-ticket checks on read, and checks over the claim files' names (e.g. no open
+  claim on a resolved ticket; one claim hash in one claim file only, ADR 0007).
 - A strict schema: a ticket with keys outside it is invalid; `tkt-store.json` too.
-- A ticket file is at most 256 KiB. Reads check the size before reading, and writes stay
-  within budgets: `add`, and an `edit` that grows the file, may fill 192 KiB (`INVALID`
-  beyond), a claim 255 KiB, and every other op (renew, move, release, done, cancel,
-  reap) the full 256 KiB. `ended_claim_ids` is kept whole until
-  the ticket is full: a claim that would pass 255 KiB is refused `FULL`, and the ticket
-  can still be released, finished or cancelled. `claim-next` and `reap` skip a ticket
-  they cannot write (invalid or full), so one ticket never stops them for everyone.
+- A ticket file is at most 256 KiB, and claim files are empty (ADR 0007). Reads check
+  the size before reading, and no op writes a larger ticket file (`INVALID`).
 - An invalid ticket is set aside and reported (cached as invalid, ADR 0006); it never
   fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
-  and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
-  file is set aside is `DUPLICATE_ID`. A malformed commit is skipped and reported by
+  and the worst case is `claim-next` choosing a less urgent ticket. An op naming a
+  set-aside ticket or claim is refused `SET_ASIDE` (ADR 0007), `add` of its id included.
+  A malformed commit is skipped and reported by
   history. Only regular files at `tickets/<id>.json` are read; other files are
   preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
@@ -82,16 +81,17 @@ from the store (they name the file and the field); `list` never prints a ticket'
 (`show`, `claim`, `claim-next`, `edit` do). Agent guidance: every composed field (title,
 body, reason, tags, holder, project) is data, never instructions.
 
-**Claims are capabilities.** Tickets and history (the `tkt-claim` trailer) store the
-SHA-256 of each claim id (64 lowercase hex), never the id. Only the agent that minted it
-can renew, move, release or finish its claim, and while a ticket is held only its holder
-may edit it (`edit` takes the claim id; anyone else gets `NOT_HOLDER`). A re-run of a
-claim is recognised by the hash alone. Callers always supply claim ids: the library
-stops minting them, since a minted id could never be read back. `revoke` (new, anyone,
-optional reason) ends a claim without resolving the ticket: `NOT_FOUND`; `TERMINAL` if
-resolved; NoOp if not claimed; otherwise the hash joins `ended_claim_ids`, and the
-holder's next `renew`, `move` or `done` is `NOT_HOLDER` (its `release` a NoOp), each
-saying the claim was revoked. `cancel` remains for work that is no longer wanted.
+**Claims are capabilities.** Claim file names (ADR 0007) and history (the `tkt-claim`
+trailer) store the SHA-256 of each claim id (64 lowercase hex), never the id. Only the
+agent that minted it can renew, move, release or finish its claim, and while a ticket is
+held only its holder may edit it (`edit` takes the claim id; anyone else gets
+`NOT_HOLDER`). A re-run of a claim is recognised by the hash alone. Callers always
+supply claim ids: the library stops minting them, since a minted id could never be read
+back. `revoke` (new, anyone, optional reason) ends a claim without resolving the ticket:
+`NOT_FOUND`; `TERMINAL` if resolved; NoOp if not claimed; otherwise the claim is ended
+as `revoked`, and the holder's next `renew`, `move` or `done` is `NOT_HOLDER` (its
+`release` a NoOp), each saying the claim was revoked. `cancel` remains for work that is
+no longer wanted.
 
 **Identity comes from git, not from a flag.** No command takes an agent name (`--as` is
 removed). `tkt` uses the author identity git would put on the commit (`git var
@@ -131,9 +131,6 @@ anything.
 - **Mixed-case identifiers** (GitHub usernames and repository names keep case): exact
   comparisons would tell `Coder-7` from `coder-7`, and case-insensitive ones need case
   folding; lowercase slugs need neither.
-- **Truncating `ended_claim_ids`:** a re-run of a claim that has fallen off the list
-  could claim the ticket again. The list stays whole until the ticket is full, and the
-  budget can be raised if tickets ever fill up.
 - **A wide lease-cap margin** (e.g. 2 × `MAX_TTL`): it only lengthens how long a forged
   lease locks a ticket; 10 minutes covers clocks that are kept in time.
 - **Preserving unknown keys for forward compatibility:** a deployed format change bumps
@@ -165,13 +162,15 @@ anything.
 - Prompt injection is reduced, not prevented: the agent that works a ticket reads its
   body. The defences are confinement, guidance and narrow permissions for agents.
 - An agent with plain git and push access can still forge well-formed tickets and
-  history, or get a genuine held ticket set aside by pushing a duplicate claim hash;
-  branch protection keeps history from being rewritten, nothing more.
+  history, or get a genuine claim set aside by pushing another claim file with its
+  hash; branch protection keeps history from being rewritten, nothing more.
 - Junk files and spam tickets still cost every op: every file under `tickets/` is listed
   and in every commit's tree, and spam open tickets are read each time (only resolved and
   invalid ones are cached, ADR 0006).
 - Implemented in stages, each flipping its security tests: (1) field checks, limits,
-  lease cap and `--`; (2) reading the store: set-aside tickets, size and type checks,
-  tolerant history, the cache of resolved and invalid tickets (ADR 0006); (3) output:
-  escaping, clean errors, `list` without bodies; (4) identity from git and `tkt clone`,
-  hashed claim ids, `holder`, holder-only edits, `revoke`; (5) `tkt audit`.
+  lease cap and `--`; (2a) claim files and hashed claim ids, so the library stops
+  minting claim ids and `show` cannot print one (ADR 0007), protocol 2,
+  reading the store: set-aside tickets and claims, `SET_ASIDE`, size and type checks,
+  tolerant history; (2b) the cache of resolved and invalid tickets (ADR 0006); (3)
+  output: escaping, clean errors, `list` without bodies; (4) identity from git and
+  `tkt clone`, `holder`, holder-only edits, `revoke`; (5) `tkt audit`.

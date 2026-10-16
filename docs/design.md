@@ -267,7 +267,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   hash alone (no agent comparison). Callers always supply claim ids (the CLI already
   does; the library stops minting them), since a minted id could not be read back.
 - **The holder is recorded, not declared.** No op takes an agent name. A claim records
-  `holder`: the claimer's git name, mapped to an identifier (accents folded; each run of
+  `holder`: the claimer's git name, mapped to an identifier (accents folded: NFKD, then combining marks dropped; each run of
   characters outside `[A-Za-z0-9]`, hyphens included, becomes one `-`; cut to 39; then
   hyphens trimmed; refused if nothing is left). A re-run keeps the claim's `holder`;
   `list --holder` maps its argument the same way and ignores case. Who did each op is
@@ -401,8 +401,9 @@ GIT_AUTHOR_IDENT`: the `GIT_AUTHOR_*` variables, then the clone's config, then g
 system), run with `user.useConfigOnly=true` so git never invents one from the OS account
 and host name; it refuses to write if none is configured. The commit author is the record of who
 did each op; `tkt log` shows its name and email, unverified. A claim also stores
-`holder`, the git name mapped to an identifier (accents folded, each run of characters
-outside `[A-Za-z0-9]` to one `-`, cut to 39, hyphens trimmed; a name with no Latin
+`holder`, the git name mapped to an identifier (accents folded: NFKD, then combining marks
+dropped; each run of characters outside `[A-Za-z0-9]` to one `-`; cut to 39; then
+hyphens trimmed from both ends; a name with no Latin
 letters or digits is refused), so `show` and `list` say who is working on what. `tkt clone` prints the identity and the holder name; every write reports them.
 Hashed claim ids still prove that the agent acting on a claim is the one that took it.
 

@@ -80,15 +80,15 @@ GIT_AUTHOR_IDENT`), run with `user.useConfigOnly=true` so git never invents one 
 OS account and host name, and refuses to write if none is configured. The commit author
 records who did each op, and `tkt log` shows its name and email, unverified; the
 `tkt-agent` trailer goes. A claim stores `holder`, the git name mapped to an identifier:
-accents folded with NFKD, each run of characters outside `[A-Za-z0-9]` (hyphens
-included) replaced by one `-`, cut to 39, then hyphens trimmed from both ends; refused
-if nothing is left (so a name in a non-Latin script needs an ASCII `user.name`). `show`
-and `list` say who is working on what; `list --holder NAME` maps its argument the same
-way and matches ignoring case, as GitHub does. A re-run of a claim keeps its `holder`.
-`tkt clone URL DIR` makes the clone without a checkout and prints the identity and the
-holder name; every write reports them. Documentation recommends a GitHub noreply address
-per agent: the store's history is readable by everyone with access, and GitHub can
-refuse pushes that expose a private address.
+accents folded (NFKD, then combining marks dropped), each run of characters outside
+`[A-Za-z0-9]` (hyphens included) replaced by one `-`, cut to 39, then hyphens trimmed
+from both ends; refused if nothing is left (so a name in a non-Latin script needs an
+ASCII `user.name`). `show` and `list` say who is working on what; `list --holder NAME`
+maps its argument the same way and matches ignoring case, as GitHub does. A re-run of a
+claim keeps its `holder`. `tkt clone URL DIR` makes the clone without a checkout and
+prints the identity and the holder name; every write reports them. Documentation
+recommends a GitHub noreply address per agent: the store's history is readable by
+everyone with access, and GitHub can refuse pushes that expose a private address.
 
 **Small additions:** git always receives the remote name after `--`; `tkt audit`
 (read-only) reports set-aside tickets and malformed commits.

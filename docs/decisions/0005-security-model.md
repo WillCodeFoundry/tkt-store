@@ -49,8 +49,7 @@ or commit signing could expose.
 - A ticket file is at most 256 KiB. Reads check the size before reading; writes refuse an
   op whose encoded file would exceed it (`INVALID`), so `tkt` never writes what it would
   refuse to read.
-- An invalid ticket is set aside and reported (cached as invalid by blob id); it never
-  fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
+- An invalid ticket is set aside and reported; it never fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
   and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
   file is set aside is `DUPLICATE_ID`. A malformed commit is skipped and reported by
   history. Only regular files at `tickets/tkt-<hex>.json` are read; other files are
@@ -116,8 +115,8 @@ anything.
   spaces and any text, so the stored `holder` is a mapped identifier.
 - **Failing on a git name that is not an identifier:** mapping it is friendlier and
   loses nothing, since the commit keeps the exact name.
-- **SSH commit signing now:** it would authenticate names, at the cost of a key per agent
-  and a trusted-keys list kept outside the store. Deferred.
+- **SSH commit signing:** it would authenticate names, at the cost of a key per agent and
+  a trusted-keys list kept outside the store. Not planned.
 
 ## Consequences
 
@@ -132,10 +131,10 @@ anything.
 - An agent with plain git and push access can still forge well-formed tickets and
   history, or get a genuine held ticket set aside by pushing a duplicate claim hash;
   branch protection keeps history from being rewritten, nothing more.
-- Junk entries and spam tickets still cost every commit until tickets are separated or
-  sharded (design.md §9, Q1).
+- Spam open tickets and junk files under `tickets/` still cost every commit; archiving
+  resolved tickets (ADR 0006) bounds history, not abuse.
 - Implemented in stages, each flipping its security tests: (1) field checks, limits,
   lease cap and `--`; (2) reading the store: set-aside tickets, size and type checks,
-  tolerant history, caching invalid tickets; (3) output: escaping, clean errors, `list`
+  tolerant history; (3) output: escaping, clean errors, `list`
   without bodies; (4) identity from git and `tkt clone`, hashed claim ids, `holder`,
   holder-only edits, `revoke`; (5) `tkt audit`.

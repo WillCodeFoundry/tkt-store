@@ -40,11 +40,10 @@ file's git history.
   is 6 pushes per minute per repository" ([repository limits](https://docs.github.com/en/repositories/creating-and-managing-repositories/repository-limits)).
   Every write is a push, including renewals and pushes that lose a race.
 - **Store size.** An op reads every ticket file, so its local cost grows linearly with
-  the number of tickets: it matters on local and self-hosted stores from about a
-  thousand, on GitHub (seconds of network per op) only at tens of thousands. The store
-  keeps itself packed (`git gc --auto`) and a long-lived store caches decoded tickets;
-  what would make each CLI call independent of history is archiving resolved tickets
-  (design.md §9, Q1).
+  the number of tickets: it matters when the remote is on the same machine or
+  self-hosted from about a thousand, on GitHub (seconds of network per op) only at tens
+  of thousands. The store keeps itself packed (`git gc --auto`); from 0.2.0 resolved
+  tickets are archived, so an op reads only open ones (ADR 0006).
 - **Budget:** pushes per minute ≈ agents × (pushes per ticket ÷ minutes per ticket + 1 ÷
   renew interval in minutes), plus lost races. With 10 agents, about 5 pushes per
   ticket and renewals every 20 minutes, tasks of 20 minutes need about 3 pushes per

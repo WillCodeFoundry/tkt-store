@@ -17,7 +17,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 
 | Term | Meaning |
 |---|---|
-| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding `tickets/<id>.json`, published to a shared remote (normally `origin`) and cached in each agent's clone. The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
+| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding the open tickets as `tickets/<id>.json` (from 0.2.0, resolved ones are archived under `archive/`, ADR 0006), published to a shared remote (normally `origin`) and cached in each agent's clone. The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
 | **Ticket** | A unit of work. Its fields fall into five groups, each changed one way (see *Data model* below). |
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
@@ -282,6 +282,11 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   taken, and the file is evidence.
 - **Blockers:** writes still refuse unknown or self blockers; on reading, a blocker that
   is missing or set aside counts as not done.
+- **Archive (ADR 0006):** `done` and `cancel` move the file to
+  `archive/<resolution>/<xx>/` (`<xx>` from the SHA-256 of the id) in the same commit;
+  snapshots read only open tickets, and archived ones are looked up by path (blockers,
+  `add`'s duplicate check, `show`/`log`, re-runs on a resolved ticket). "An ended claim
+  never claims again" is checked against open tickets only.
 - **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
   takeable (and reads expired); honest leases never are, since the cap is relative to
   now.
@@ -310,7 +315,8 @@ compare-and-swap; a local ref with commits the remote lacks (made outside `tkt`)
 `StoreError` before anything is written. The remote is authoritative; local refs are a
 cache.
 
-Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
+Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read (from 0.2.0 also
+`archive/<done|cancelled>/<xx>/tkt-<hex>.json`, by path, ADR 0006); any other path is
 preserved and ignored.
 The store's format version lives in `tkt-store.json` at the tree root and is checked on
 every snapshot. The push states its
@@ -386,7 +392,7 @@ agent has its own git identity, which does not change while it runs.
 |---|---|
 | Code execution in other agents | No shell anywhere (argument lists only); git always gets the remote name after `--`; no checkout. Deployment: never a path remote shared across agents that do not fully trust each other (README) |
 | Prompt injection through stored text | Strict field rules (identifier allowlists, a PRECIS-style rule for free text, size limits; lengths in code points after NFC); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
-| Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached by blob id), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
+| Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported, never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
 | Acting as another agent's holder | Tickets and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
 | Locking a ticket forever | A lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable |
 
@@ -411,10 +417,10 @@ Hashed claim ids still prove that the agent acting on a claim is the one that to
 reduced, not prevented; confinement, guidance and narrow agent permissions do the rest.
 An agent with plain git and push access can forge well-formed tickets and history, or get
 a genuine held ticket set aside by pushing another ticket with the same claim hash
-(branch protection only stops rewrites). Junk files and spam tickets cost every commit
-until tickets are separated or sharded (Q1).
+(branch protection only stops rewrites). Archiving (ADR 0006) bounds what history costs,
+not abuse: spam open tickets and junk files under `tickets/` still cost every commit.
 
-## 9. Open questions, accepted limitations and deferred work
+## 9. Accepted limitations and decided questions
 
 Accepted limitations (decided; revisit only if they cause trouble):
 
@@ -423,22 +429,16 @@ Accepted limitations (decided; revisit only if they cause trouble):
   ticket is cancelled.
 - Who acted is not authenticated: today the `--as` name, from 0.2.0 the git author
   identity (and the claim's `holder`, derived from it). It is trusted under the trust
-  model; commit signing could authenticate it (deferred).
-- Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
+  model; authenticating it (e.g. commit signing) is not planned.
 - `SKEW_GRACE` stays a fixed 60-second constant.
 - Phases and kinds are fixed enums; a new phase is a format change.
 
-Open questions:
+Decided questions:
 
-
-- Q1: Should resolved (done/cancelled) tickets be kept on the branch (current design) or moved to `archive/`?
-  Every op reads every ticket file, so a CLI op costs ~0.25 s at 5,000 tickets and ~1 s
-  at 20,000 on a local store (ADR 0001, *Store size*). Archiving would need blockers,
-  re-runs of `done` and claim-id fencing to work without reading archived tickets.
-- Q2: Project identity is the caller's concern. From 0.2.0 it must be `[owner/]repo`
+- Q1 (ADR 0006): resolved tickets are archived, from 0.2.0, under
+  `archive/<resolution>/<xx>/`, sharded by the SHA-256 of the id; snapshots read only open
+  tickets. Until then they stay in `tickets/` and every op reads them.
+- Q2: project identity is the caller's concern; from 0.2.0 it must be `[owner/]repo`
   (§8), which a root-commit hash or an `owner/repo` name fits and a remote URL does not.
-- Q3: Should `claim_next` (pick highest-priority claimable) be an op (atomic choice) — current design — or a read + claim?
-- Q4: Lease units: integer seconds since epoch (current) vs ISO timestamps in files.
-- Deferred: `claim-next` choosing randomly among the top candidates to spread contention.
-  On one ref any two concurrent writes conflict, whichever ticket they touch, so this
-  only pays off with one ref per ticket (ADR 0001).
+- Q3: `claim-next` stays an op (an atomic choice), not a read plus a claim.
+- Q4: leases and times stay integer seconds since the epoch.

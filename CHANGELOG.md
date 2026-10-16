@@ -23,6 +23,9 @@
   agents confined to `tkt`; everything read validated and invalid tickets quarantined;
   strict field rules and limits; escaped output; hashed claim ids; holder-only edits
   while held; `revoke`; identity from git (no `--as`); `tkt clone`; `tkt audit`.
+- Resolved tickets to be archived in 0.2.0 (ADR 0006): `archive/<resolution>/<xx>/`,
+  sharded by the SHA-256 of the id, so an op reads only open tickets; the in-memory
+  ticket cache goes. Q3 (`claim-next` stays one op) and Q4 (integer seconds) decided.
 - README: agents use only `tkt`, never git, on the store; the risks of path remotes
   (code execution in other agents) and `git daemon` (no authentication).
 

@@ -16,6 +16,7 @@ ACCEPTED_TEXT = {
     "shell characters": "quotes ' \" and $(not a shell)",
     "decomposed (never normalised)": "Cafe\u0301",
     "emoji with variation selector": "ship it \u2705\ufe0f \U0001f680",
+    "text presentation selector": "\u2764\ufe0e",
     "no-break space inside": "a\u00a0b",
     "unassigned today (allowed: the rule never depends on Unicode data)": "x \U0002fffd y",
 }
@@ -39,6 +40,11 @@ TITLES_REFUSED = {
     "plane noncharacter": "non \U0001fffe char",
     "soft hyphen": "in\u00advisible",
     "variation selector supplement": "a\U000e0101b",
+    "variation selectors 1-14": "a\ufe00\ufe01\ufe02",
+    "mongolian variation selector": "a\u180bb",
+    "braille blank": "a\u2800b",
+    "shorthand format control": "a\U0001bca0b",
+    "zero-width non-joiner": "a\u200cb",
 }
 
 

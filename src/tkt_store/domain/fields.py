@@ -46,43 +46,51 @@ _SEGMENT = rf"[A-Za-z0-9._-]{{1,{PROJECT_SEGMENT_MAX}}}"
 PROJECT_RE = re.compile(rf"(?:{_SEGMENT}/)?{_SEGMENT}")
 """`[owner/]repo`, each segment at most PROJECT_SEGMENT_MAX of `[A-Za-z0-9._-]`."""
 
-_REFUSED_RANGES = (
-    (0x0000, 0x001F),  # C0 controls (a body may hold newline and tab)
+_C0 = (0x0000, 0x001F)
+"""C0 controls, newline and tab included."""
+_C0_BUT_NEWLINE_AND_TAB = ((0x0000, 0x0008), (0x000B, 0x001F))
+"""C0 controls a body may not hold: all but tab (U+0009) and newline (U+000A)."""
+
+_REFUSED_BEYOND_C0 = (
     (0x007F, 0x009F),  # DEL and C1 controls (U+0085 is a line break)
     (0x00AD, 0x00AD),  # soft hyphen: invisible
     (0x034F, 0x034F),  # combining grapheme joiner: invisible
     (0x061C, 0x061C),  # arabic letter mark: bidi
     (0x115F, 0x1160),  # hangul fillers: render blank
     (0x17B4, 0x17B5),  # khmer inherent vowels: invisible
-    (0x180E, 0x180E),  # mongolian vowel separator: invisible
+    (0x180B, 0x180F),  # mongolian variation selectors and vowel separator: hidden data
     (0x200B, 0x200F),  # zero-width characters, left/right-to-left marks
     (0x2028, 0x202E),  # line and paragraph separators, bidi embeddings and overrides
     (0x2060, 0x206F),  # word joiner, invisible operators, bidi isolates, deprecated formats
+    (0x2800, 0x2800),  # braille blank: renders as empty space
     (0x3164, 0x3164),  # hangul filler
     (0xD800, 0xDFFF),  # surrogates
     (0xE000, 0xF8FF),  # private use
     (0xFDD0, 0xFDEF),  # noncharacters
+    (0xFE00, 0xFE0D),  # variation selectors 1-14: can smuggle hidden data (FE0E/FE0F allowed)
     (0xFEFF, 0xFEFF),  # zero-width no-break space (byte order mark)
     (0xFFA0, 0xFFA0),  # halfwidth hangul filler
     (0xFFF9, 0xFFFB),  # interlinear annotation controls
+    (0x13430, 0x1343F),  # egyptian hieroglyph format controls
+    (0x1BCA0, 0x1BCA3),  # shorthand format controls: invisible
     (0x1D173, 0x1D17A),  # musical symbol formatting controls
     (0xE0000, 0xE007F),  # tag characters: invisible to people, read by LLMs
     (0xE0100, 0xE01EF),  # variation selectors supplement: can smuggle hidden data
     (0xF0000, 0x10FFFF),  # private use planes 15 and 16
     *((plane + 0xFFFE, plane + 0xFFFF) for plane in range(0, 0xF0000, 0x10000)),
 )
-"""Code points free text never holds. Fixed ranges only: they never change with the
-Unicode version. Visible spaces, emoji and their variation selector U+FE0F stay allowed."""
+"""Code points free text never holds, besides C0 controls. Fixed ranges only: they never
+change with the Unicode version. Visible spaces, emoji and the text and emoji
+presentation selectors U+FE0E and U+FE0F stay allowed; zero-width joiners (U+200C, U+200D)
+do not, which rules out some Persian and Indic spellings and joined emoji sequences."""
 
 
 def _class(ranges: tuple[tuple[int, int], ...]) -> re.Pattern[str]:
     return re.compile("[" + "".join(f"\\U{lo:08x}-\\U{hi:08x}" for lo, hi in ranges) + "]")
 
 
-_REFUSED = _class(_REFUSED_RANGES)
-_REFUSED_IN_BODY = _class(
-    ((0x0000, 0x0008), (0x000B, 0x001F), *_REFUSED_RANGES[1:])
-)  # newline (U+000A) and tab (U+0009) allowed
+_REFUSED = _class((_C0, *_REFUSED_BEYOND_C0))
+_REFUSED_IN_BODY = _class((*_C0_BUT_NEWLINE_AND_TAB, *_REFUSED_BEYOND_C0))
 
 
 def text_problem(field: str, value: str, *, max_len: int, multiline: bool = False) -> str | None:

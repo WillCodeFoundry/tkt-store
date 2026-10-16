@@ -22,7 +22,8 @@ tickets/
 - `tkt-store.json` records the format version, `{"protocol": 1}`; other keys are
   ignored. `init` writes it into the root commit; every snapshot checks it and fails
   (`StoreError`) if it is missing or newer than the client supports.
-- One file per ticket, `tickets/<id>.json`; the id is both the filename stem and the
+- One file per ticket, `tickets/<id>.json`: any file there whose name without `.json`
+  follows the id rule (below) is a ticket file. The id is both the filename stem and the
   `id` field (a mismatch is an error).
 - Files are canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline
   (stable diffs, byte-identical round trips).
@@ -76,7 +77,10 @@ a long claim history). Lengths count code points. Free text (`title`, `body`,
 noncharacters, private-use characters, or the invisible, reordering and line-breaking
 characters listed in `domain/fields.py` (bidi controls, zero-width characters, line and
 paragraph separators, tag characters, fillers); everything else, including emoji and
-characters not yet assigned, is allowed. Nothing is normalised. Title and reason must
+characters not yet assigned, is allowed; zero-width joiners (U+200C, U+200D) are not,
+which rules out some Persian and Indic spellings and joined emoji such as family
+emoji. Line ends are newlines only: a body with Windows line ends (`\r\n`) is refused.
+Nothing is normalised. Title and reason must
 not start or end with whitespace; a body may. Files are not yet checked against these
 rules when read; that comes with the rest of protocol 2 (ADR 0005).
 

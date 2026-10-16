@@ -74,7 +74,8 @@ flags (`…`) may be given several times.
 
 ## Rules worth knowing
 
-- **Ids.** The caller supplies every id: ticket ids match `^tkt-[0-9a-f]+$`; claim ids
+- **Ids.** The caller supplies every id: ticket ids are 8 to 32 lowercase letters, digits and
+  single hyphens (`docs/format.md`); claim ids
   are exactly 32 lowercase hex characters. Re-running a command with the same ids
   converges (`unchanged`) instead of creating a second ticket or claim. A claim id is
   single-use and names one claim on one ticket; after its claim ends it is refused

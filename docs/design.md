@@ -203,10 +203,11 @@ never a fresh read (lesson from balls' bl-cdec G1).
     It counts content edits only (`add` sets 1, each `edit` adds 1), so claims
     and renewals never make an edit stale. Edits to different fields compose: an edit
     only writes the fields it names, and every retry re-decides on fresh state.
-12. **Validated input.** Ticket ids match `^tkt-[0-9a-f]+$` (they are file names), claim ids
-    are exactly 32 lowercase hex characters, `agent`/`reason`/`title` contain no control
-    characters (they are written into the commit message), TTLs are within bounds, and
-    an edit's `expected_version` is at least 1.
+12. **Validated input.** Every value an op writes follows the field rules
+    (`domain/fields.py`, `docs/format.md`): ticket ids (they are file names) and claim
+    ids, identifiers, free text without controls or invisible characters (it reaches
+    commit messages and other agents), sizes; TTLs are within bounds, and an edit's
+    `expected_version` is at least 1.
     Otherwise `INVALID`.
 
 ### Holder ops (`renew`, `move`, `release`, `done`)

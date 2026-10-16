@@ -12,6 +12,7 @@ silently means something different depending on what a run collects."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             if (found := item.get_closest_marker(marker)) is None:
                 continue
             if not item.path.is_relative_to(HERE):
-                suite = HERE.relative_to(item.config.rootpath)
+                suite = os.path.relpath(HERE, item.config.rootpath)
                 raise pytest.UsageError(f"{item.nodeid}: @pytest.mark.{marker} is only for {suite}")
             if len(found.args) != 1 or not isinstance(found.args[0], str):
                 raise pytest.UsageError(f"{item.nodeid}: @pytest.mark.{marker} needs a reason")

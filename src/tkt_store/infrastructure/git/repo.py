@@ -62,8 +62,9 @@ from tkt_store.infrastructure.git.cache import Cached, CloneCache
 from tkt_store.infrastructure.git.runner import GitError, GitRunner, git_runner
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
 
-CACHE_PATH = "tkt-store/cache.json"
-"""Where the clone cache lives, relative to the clone's git directory (ADR 0006)."""
+CACHE_PATH = "tkt-store/cache"
+"""Where the clone cache's shard files live, relative to the clone's git directory
+(ADR 0006)."""
 TREE_MODE = "040000"
 BLOB_MODE = "100644"
 
@@ -151,11 +152,8 @@ class GitStore:
             and resolved_ticket.is_terminal
         }
         fresh = Cached(tickets, invalid, resolved)
-        old = self._cached
-        if (fresh.tickets.keys(), fresh.invalid.keys(), fresh.folders.keys()) != (
-            old.tickets.keys(), old.invalid.keys(), old.folders.keys()
-        ):  # fmt: skip
-            self._cache.save(fresh)
+        if fresh.ids() != self._cached.ids():
+            self._cache.save(fresh)  # rewrites only the shards whose keys changed
         self._cached = fresh
 
     def _check_layout(self, revision: Revision) -> None:
@@ -249,19 +247,26 @@ class GitStore:
         return claims, not_folders, folders
 
     def _claim_names(self, tree: bytes) -> tuple[str, ...]:
-        """The names in a raw git tree object that may be claim files: mode 100644 entries
-        whose blob is git's empty blob (the names themselves are parsed by the caller)."""
+        """The names in a raw git tree object that may be claim files: regular,
+        non-executable files (mode 100644 once git canonicalises it, as `ls-tree` shows
+        it) whose blob is git's empty blob; the names themselves are parsed by the caller.
+        A tree that does not parse is a StoreError."""
         empty = bytes.fromhex(self._empty_blob())
         size, names, at = len(empty), [], 0
-        while at < len(tree):
-            space = tree.index(b" ", at)
-            nul = tree.index(b"\0", space)
-            mode, name, oid = tree[at:space], tree[space + 1 : nul], tree[nul + 1 : nul + 1 + size]
-            at = nul + 1 + size
-            if mode == BLOB_MODE.encode() and oid == empty:
-                with suppress(UnicodeDecodeError):
-                    names.append(name.decode())
-        return tuple(names)
+        try:
+            while at < len(tree):
+                space = tree.index(b" ", at)
+                nul = tree.index(b"\0", space)
+                mode = int(tree[at:space], 8)
+                name, oid = tree[space + 1 : nul], tree[nul + 1 : nul + 1 + size]
+                at = nul + 1 + size
+                regular = mode & 0o170000 == 0o100000 and not mode & 0o100
+                if regular and oid == empty:
+                    with suppress(UnicodeDecodeError):
+                        names.append(name.decode())
+        except ValueError as error:
+            raise StoreError("cannot parse a claims folder's tree") from error
+        return tuple(dict.fromkeys(names))  # a name twice is one entry, as git reads it
 
     def commit(
         self,

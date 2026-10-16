@@ -25,8 +25,10 @@ never changes.
 **The layout stays as it is:** one `tickets/` directory, one file per ticket, wherever
 its state. Nothing moves when a ticket is resolved.
 
-**Each clone keeps a cache file** at `tkt-store/cache.json` in the clone's git directory
-(`git rev-parse --absolute-git-dir`; never pushed). Its entries are keyed by blob id, and
+**Each clone keeps a cache** in `tkt-store/cache/` in the clone's git directory (`git
+rev-parse --absolute-git-dir`; never pushed), spread over 256 shard files by the first
+two digits of each entry's object id, so resolving a ticket rewrites one or two small
+files, never the whole cache. Its entries are keyed by blob id, and
 a blob id names exact content, so an entry is never stale:
 
 - a valid resolved ticket: the ticket;
@@ -53,18 +55,21 @@ cache never holds more than the store. If two processes share a clone anyway (ag
 the one-clone-per-process rule), the last rename wins and a lost entry only costs a
 re-read.
 
-**The cache is a convenience, never the source of truth.** It records a cache version,
-a constant bumped whenever the decoder or a cached check changes, and the tkt-store
-version that wrote it; a cache with either different, one that does not parse, or one
-whose entries have the wrong shape is discarded, and the next snapshot rebuilds it with
-one full read. Cached tickets are loaded through the same decoder as ticket files,
+**The cache is a convenience, never the source of truth.** Each shard records a cache
+version, the tkt-store version that wrote it, and a hash of the source of the decoder and
+the field rules, so a changed rule, even in an editable install, never keeps an old
+verdict; a shard with any of them different, one that does not parse, one whose entries
+have the wrong shape or belong to another shard, or one whose cached reason does not look
+like one of tkt's own (short printable ASCII) is ignored, and the next snapshot rebuilds
+it. Cached tickets are loaded through the same decoder as ticket files,
 without the field checks. Deleting the cache is always safe. It is JSON, never pickle:
 loading a pickle can run code.
 
 **The cache is trusted like the rest of the clone.** An entry is believed without reading
 its blob, so whoever can write the clone's git directory can make a forged ticket look
-valid. That adds no exposure: writing it already lets them change hooks or config and
-run code in that clone (ADR 0005).
+valid, or a forged folder entry hide or add a claim, on any ticket. That adds no
+exposure: writing it already lets them change hooks or config and run code in that clone
+(ADR 0005).
 
 ## Alternatives rejected
 
@@ -98,12 +103,15 @@ run code in that clone (ADR 0005).
   is mostly decoding the cached tickets and parsing claim names.
 - The first op in a new clone, and the first after an upgrade, reads every file once.
 - The cache grows with resolved tickets: about the size of their files (about 17 MB at
-  20,000 tickets with short bodies).
+  20,000 tickets with short bodies). Saving after a resolution rewrites one or two shards
+  (about 20 ms at that size; the whole cache would take about 300 ms).
 - The cache changes no format: it is local to each clone and to the GitStore adapter.
 - Claims (ADR 0007) have no content to cache, but listing and parsing their names cost
   about 430 ms per op at that size (measured in stage 2a). So the cache also keeps each
   resolved ticket's claim file names by the id of its `claims/<id>/` tree (names only,
   never verdicts, which depend on the ticket), and a process keeps every folder it read
   by tree id in memory: a snapshot lists `claims/` without recursing and reads only the
-  folders it does not know, together, in one batch. Assembling the snapshot looks at
-  repeated hashes only, and is about 170 ms at that size.
+  folders it does not know, together, in one batch, as raw trees read the way `git
+  ls-tree` reads them (a regular file's mode canonicalised, a repeated name once).
+  Assembling the snapshot looks at repeated hashes only, and is about 170 ms at that
+  size.

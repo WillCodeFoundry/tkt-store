@@ -20,7 +20,8 @@ fast-forward push), never with a worktree or index.
 - Throughput is limited: every write is serialised on one ref, and against a hosted
   remote each op costs a fetch and a push. Measured below; the binding limit on GitHub
   is its push-rate guidance, not git.
-- Queries are file scans; acceptable at thousands of tickets, revisit beyond.
+- Queries are file scans, so an op's local cost grows with every ticket on the branch,
+  resolved ones included (measured below, *Store size*).
 - Alternatives considered: Postgres (better at scale, needs a server), object storage
   with conditional writes (no history, multi-object updates awkward).
 
@@ -94,3 +95,26 @@ push guidance. It does not hold for many short tasks.
    lease per ref for multi-ticket ops: removes races between different tickets, but not
    the per-repository push guidance, and weakens cross-ticket checks;
 3. a database behind the same `Store` port; the rules and the CLI do not change.
+
+## Store size (measured 2026-10-16)
+
+A snapshot lists and decodes every ticket file and a commit rewrites the `tickets/` tree,
+so an op's local cost grows linearly with the number of tickets. One writer, local-only
+store (`claim-next` and `release`, ms per op):
+
+| Tickets | Loose objects (before) | Packed, new store per op (the CLI) | Packed, long-lived store (library) |
+|---|---|---|---|
+| 1,000 | 162 | 76 | 35 |
+| 5,000 | 849 | 254 | 74 |
+| 20,000 | 2,529 | 900–1,200 | 210–255 |
+
+- Plumbing never triggers git's housekeeping, so a store accumulated loose objects; the
+  store now runs `git gc --auto` after each commit (packs in the background).
+- `GitStore` caches decoded tickets by blob id, so a long-lived store reads only files
+  whose content changed. Each CLI invocation is a new process and gets no benefit; an
+  on-disk cache in the git directory would help it partly (deferred).
+- Against GitHub an op is ~4 s of network, so store size matters there only at tens of
+  thousands of tickets; on local and self-hosted stores it matters from about a thousand.
+- The lever that makes the CLI's cost independent of history is archiving resolved
+  tickets (design.md §8, Q1). Sharding `tickets/` would only remove the tree rewrite,
+  about 6% of a packed op at 20,000 tickets.

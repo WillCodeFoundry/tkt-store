@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from tests.gitkit import HookedRunner, git, head, new_repo, paths, show, write_files
-from tests.unit.builders import NOW, T1, T2, tkt
+from tests.unit.builders import C1, NOW, T1, T2, TTL, A, tkt
 from tkt_store import open_store
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.application.service import TicketStore
@@ -23,7 +23,7 @@ from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.repo import GitStore
-from tkt_store.infrastructure.git.runner import git_runner
+from tkt_store.infrastructure.git.runner import GitError, git_runner
 from tkt_store.infrastructure.ids import SequentialIds
 
 pytestmark = pytest.mark.git
@@ -277,3 +277,68 @@ def test_non_ascii_title_round_trips(local: Path) -> None:
 def test_committed_revision_is_the_ref(local: Path) -> None:
     outcome = service(GitStore.at(local, remote=None)).add("Second", ticket_id=T2)
     assert isinstance(outcome, Committed) and outcome.revision == head(local)
+
+
+class BlobCountingRunner:
+    """A real runner that records how many blobs each `cat-file --batch` was asked for."""
+
+    def __init__(self, repo: Path) -> None:
+        self._run = git_runner(repo)
+        self.batches: list[int] = []
+        self.commands: list[str] = []
+
+    def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
+        self.commands.append(args[0])
+        if args[:2] == ("cat-file", "--batch"):
+            self.batches.append(len((stdin or b"").split()))
+        return self._run(*args, stdin=stdin)
+
+
+def test_snapshots_read_only_ticket_files_they_have_not_seen(local: Path) -> None:
+    """Decoded tickets are cached by blob id: unchanged files are not read again, and
+    tickets this store just wrote are not read back."""
+    runner = BlobCountingRunner(local)
+    store = GitStore(runner, remote=None)
+    tickets = TicketStore(store, FakeClock(NOW), SequentialIds())
+    tickets.add("Second", ticket_id=T2)  # snapshot reads T1; the commit writes T2
+    assert runner.batches == [1]
+    assert {v.ticket.id for v in tickets.list()} == {T1, T2}
+    assert runner.batches == [1]  # T2 came from the commit, T1 from the cache
+    write_files(local, {wire.ticket_path(T1): wire.encode_ticket(tkt(T1, title="Edited"))})
+    view = tickets.view(T1)
+    assert view is not None and view.ticket.title == "Edited"
+    assert runner.batches == [1, 1]  # only the changed file
+
+
+def test_a_cached_store_sees_the_same_tickets_as_a_fresh_one(local: Path) -> None:
+    cached = TicketStore(GitStore.at(local, remote=None), FakeClock(NOW), SequentialIds())
+    for n in range(3, 6):
+        cached.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
+    cached.claim(T1, A, TTL, claim_id=C1)
+    write_files(local, {wire.ticket_path(T2): wire.encode_ticket(tkt(T2, title="By hand"))})
+    fresh = GitStore.at(local, remote=None).snapshot()
+    assert cached.view(T1) is not None
+    assert GitStore.at(local, remote=None).snapshot() == fresh
+    assert {v.ticket.id: v.ticket for v in cached.list()} == dict(fresh.tickets)
+
+
+def test_every_commit_runs_gc_auto(local: Path) -> None:
+    """Plumbing never triggers git's housekeeping, so the store runs `gc --auto` after each
+    commit. (Whether it packs is git's decision: it estimates loose objects by sampling, so
+    a test-sized store would not reliably cross the threshold.)"""
+    runner = BlobCountingRunner(local)
+    tickets = TicketStore(GitStore(runner, remote=None), FakeClock(NOW), SequentialIds())
+    for n in range(2, 5):
+        tickets.add(f"Ticket {n}", ticket_id=TicketId(f"tkt-{n}"))
+    tickets.view(T1)  # reads never run it
+    assert runner.commands.count("gc") == 3
+
+
+def test_a_failing_gc_does_not_fail_the_commit(local: Path) -> None:
+    def broken_gc(args: tuple[str, ...]) -> None:
+        if args[0] == "gc":
+            raise GitError(args, 128, b"", "fatal: gc is broken")
+
+    store = GitStore(HookedRunner(local, broken_gc), remote=None)
+    outcome = TicketStore(store, FakeClock(NOW), SequentialIds()).add("Second", ticket_id=T2)
+    assert isinstance(outcome, Committed)

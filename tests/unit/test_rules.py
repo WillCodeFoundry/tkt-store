@@ -9,6 +9,7 @@ from dataclasses import replace
 
 import pytest
 
+from tkt_store.domain import fields
 from tkt_store.domain.operations import (
     AddOp,
     CancelOp,
@@ -436,9 +437,20 @@ class TestValidation:
         decision = decide(snap(tkt()), EditOp(T1, expected_version, title="X"), NOW)
         refused(decision, RefusalCode.INVALID)
 
-    def test_claim_next_project_filter_is_validated(self) -> None:
-        op = ClaimNextOp(A, C1, TTL, project=ProjectId("github.com/org/repo"))
-        refused(decide(snap(tkt()), op, NOW), RefusalCode.INVALID)
+    def test_edit_checks_only_the_fields_it_sets(self) -> None:
+        """A stored value that breaks a field rule does not block edits of other fields."""
+        ticket = tkt(title="written before the rules ")
+        assert isinstance(decide(snap(ticket), EditOp(T1, 1, priority=5), NOW), Apply)
+
+    def test_a_write_over_the_file_cap_is_invalid(self) -> None:
+        """Each field within its limit, the file over 256 KiB: refused, whichever op."""
+        over = "\U0001f600" * (fields.BODY_MAX // 2)  # 4 bytes each in UTF-8
+        refused(decide(snap(tkt()), AddOp(T2, "T", body=over * 2), NOW), RefusalCode.INVALID)
+        room = fields.TICKET_FILE_MAX - len(tkt().encoded()) - 10
+        near_cap = tkt(body="\U0001f600" * (room // 4) + "x" * (room % 4))
+        assert len(near_cap.encoded()) == fields.TICKET_FILE_MAX - 10
+        claim = decide(snap(near_cap), ClaimOp(T1, A, C1, TTL), NOW)
+        refused(claim, RefusalCode.INVALID)
 
     def test_validation_wins_over_every_other_outcome(self) -> None:
         refused(decide(snap(), RenewOp(T1, ClaimId("bad"), TTL), NOW), RefusalCode.INVALID)

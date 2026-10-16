@@ -24,6 +24,7 @@ from tkt_store.domain.ticket import (
     Resolution,
     Ticket,
     TicketId,
+    canonical_json,
 )
 
 PROTOCOL_VERSION = 1
@@ -79,13 +80,9 @@ def is_ticket_path(path: str) -> bool:
     return directory == TICKETS_DIR and stem != name and TICKET_ID_RE.fullmatch(stem) is not None
 
 
-def _canonical(value: object) -> bytes:
-    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
-
-
 def encode_store_meta() -> bytes:
     """The tkt-store.json written by init: canonical JSON {"protocol": PROTOCOL_VERSION}."""
-    return _canonical({"protocol": PROTOCOL_VERSION})
+    return canonical_json({"protocol": PROTOCOL_VERSION})
 
 
 def decode_store_meta(data: bytes) -> int:
@@ -112,7 +109,7 @@ def _check_protocol(protocol: int) -> None:
 def encode_ticket(ticket: Ticket) -> bytes:
     """Canonical JSON: UTF-8, sorted keys, 2-space indent, trailing newline.
     `extra` keys are merged back at top level. Round-trips byte-identically."""
-    return _canonical(ticket.to_dict())
+    return ticket.encoded()
 
 
 def decode_ticket(data: bytes) -> Ticket:

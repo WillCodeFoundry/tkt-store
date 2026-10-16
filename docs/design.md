@@ -284,7 +284,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   is missing or set aside counts as not done.
 - **Field rules** (`domain/fields.py`, `docs/format.md`): every value an op writes is
   checked by `validate_op` (`INVALID`): identifiers like GitHub names, PRECIS-style free
-  text, size limits, priority 0 to 100, at most 20 blockers without duplicates.
+  text, size limits, priority 0 to 100, at most 20 blockers and tags without
+  duplicates; and `decide` refuses an Apply whose ticket file would exceed 256 KiB.
 - **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
   takeable (and reads expired); honest leases never are, since the cap is relative to
   now.

@@ -7,6 +7,7 @@ Status is NOT here — it is derived in `domain.status`.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -220,6 +221,16 @@ class Ticket:
             "ended_claim_ids": list(self.ended_claim_ids),
             "updated": self.updated,
         }
+
+    def encoded(self) -> bytes:
+        """The ticket file's bytes: `to_dict` in the canonical encoding."""
+        return canonical_json(self.to_dict())
+
+
+def canonical_json(value: object) -> bytes:
+    """The on-branch file encoding (docs/format.md): UTF-8 JSON, sorted keys, 2-space
+    indent, trailing newline. Stable diffs and byte-identical round trips."""
+    return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
 
 
 @dataclass(frozen=True)

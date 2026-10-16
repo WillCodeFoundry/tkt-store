@@ -3,7 +3,8 @@
 PURE module. One set of checks for every value written to a ticket or a commit
 trailer; the rules apply them to ops (`rules.validate_op`), and reading the store will
 apply them to what it reads. Each check returns a problem (a short message naming the
-field, never echoing the value) or None.
+field, and the position in a list, never echoing the value) or None; None also stands
+for an absent optional value (no project, no priority, no agent).
 
 Identifiers follow GitHub's rules, since the values usually are GitHub names: a holder
 (today the acting agent) is a username, a tag is a topic, a project is `[owner/]repo`.
@@ -18,6 +19,11 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from tkt_store.domain.ticket import CLAIM_ID_RE, TICKET_ID_RE
+
+TICKET_FILE_MAX = 256 * 1024
+"""Bytes in an encoded ticket file. Writes that would exceed it are refused, so tkt never
+writes a file it would refuse to read."""
 TITLE_MAX = 256
 BODY_MAX = 65_536
 REASON_MAX = 256
@@ -77,7 +83,21 @@ def reason_problem(reason: str) -> str | None:
     return text_problem("reason", reason, max_len=REASON_MAX)
 
 
-def agent_problem(agent: str) -> str | None:
+def ticket_id_problem(ticket_id: str) -> str | None:
+    if not TICKET_ID_RE.fullmatch(ticket_id):
+        return "ticket id must be tkt- followed by lowercase hex"
+    return None
+
+
+def claim_id_problem(claim_id: str) -> str | None:
+    if not CLAIM_ID_RE.fullmatch(claim_id):
+        return "claim id must be 32 lowercase hex characters"
+    return None
+
+
+def agent_problem(agent: str | None) -> str | None:
+    if agent is None:
+        return None
     if len(agent) > AGENT_MAX or not AGENT_RE.fullmatch(agent):
         return (
             f"agent must be a GitHub-style username: letters, digits and single hyphens, "
@@ -89,17 +109,19 @@ def agent_problem(agent: str) -> str | None:
 def tags_problem(tags: tuple[str, ...]) -> str | None:
     if len(tags) > TAGS_MAX:
         return f"at most {TAGS_MAX} tags"
-    for tag in tags:
+    for position, tag in enumerate(tags, 1):
         if len(tag) > TAG_MAX or not TAG_RE.fullmatch(tag):
             return (
-                f"a tag must be lowercase letters, digits and hyphens, starting with a "
-                f"letter or digit, at most {TAG_MAX}"
+                f"tag {position} must be lowercase letters, digits and hyphens, starting "
+                f"with a letter or digit, at most {TAG_MAX}"
             )
+    if len(set(tags)) != len(tags):
+        return "tags list a tag twice"
     return None
 
 
-def project_problem(project: str) -> str | None:
-    if not PROJECT_RE.fullmatch(project):
+def project_problem(project: str | None) -> str | None:
+    if project is not None and not PROJECT_RE.fullmatch(project):
         return (
             f"project must be [owner/]repo, each part letters, digits, '.', '_' or '-', "
             f"at most {PROJECT_SEGMENT_MAX}"
@@ -107,8 +129,8 @@ def project_problem(project: str) -> str | None:
     return None
 
 
-def priority_problem(priority: int) -> str | None:
-    if not PRIORITY_MIN <= priority <= PRIORITY_MAX:
+def priority_problem(priority: int | None) -> str | None:
+    if priority is not None and not PRIORITY_MIN <= priority <= PRIORITY_MAX:
         return f"priority must be between {PRIORITY_MIN} and {PRIORITY_MAX}"
     return None
 
@@ -116,6 +138,15 @@ def priority_problem(priority: int) -> str | None:
 def blockers_problem(blocked_by: tuple[str, ...]) -> str | None:
     if len(blocked_by) > BLOCKERS_MAX:
         return f"at most {BLOCKERS_MAX} blockers"
+    for position, blocker in enumerate(blocked_by, 1):
+        if ticket_id_problem(blocker):
+            return f"blocker {position} must be tkt- followed by lowercase hex"
     if len(set(blocked_by)) != len(blocked_by):
         return "blocked_by lists a ticket twice"
+    return None
+
+
+def ticket_file_problem(encoded: bytes) -> str | None:
+    if len(encoded) > TICKET_FILE_MAX:
+        return f"the ticket file would exceed {TICKET_FILE_MAX // 1024} KiB"
     return None

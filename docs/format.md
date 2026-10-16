@@ -61,7 +61,7 @@ tickets/
 | `project` | string \| null | `[owner/]repo`: one or two parts of 1 to 100 of `[A-Za-z0-9._-]`, joined by `/` (e.g. `WillCodeFoundry/tkt-store`, or a root-commit hash); never interpreted; null = no project; a `--project` filter matches that exact value only |
 | `priority` | int \| null | 0 to 100, lower = more urgent; null sorts last |
 | `blocked_by` | list[string] | at most 20 ticket ids (same pattern as `id`), no duplicates, never the ticket itself, each an existing ticket when written; they must be `done` before claiming |
-| `tags` | list[string] | at most 20, each like a GitHub topic: lowercase letters, digits and hyphens, starting with a letter or digit, 1 to 50 characters |
+| `tags` | list[string] | at most 20, no duplicates, each like a GitHub topic: lowercase letters, digits and hyphens, starting with a letter or digit, 1 to 50 characters |
 | `claim` | object \| null | present ⇒ held (possibly expired): `agent` (like a GitHub username: letters, digits and single hyphens, no hyphen at either end, 1 to 39 characters), `claim_id` (exactly 32 lowercase hex characters), `lease_until`, `claimed_at` (unix seconds; renew keeps it). A `lease_until` more than `MAX_TTL` + `SKEW_GRACE` (2 h + 60 s) after now, which no honest writer sets, reads expired and may be taken over or reaped |
 | `phase` | `"triage" \| "specification" \| "implementation" \| "cleanup" \| "architecture" \| "hardening" \| "qa" \| "review" \| "release"` | workflow position (which role the ticket waits for); moved only by the holder's `move` |
 | `resolution` | `"done" \| "cancelled"` \| null | null while open; set once by `done`/`cancel`; non-null means terminal (final) |
@@ -70,7 +70,8 @@ tickets/
 | `content_version` | int | optimistic concurrency for content: 1 when added, incremented only by `edit`; an edit must name it (`STALE` otherwise) |
 
 **Field rules.** Writes are refused (`INVALID`) when a value breaks the rules in the
-table. Lengths count Unicode code points. Free text (`title`, `body`, `tkt-reason`)
+table, or when the ticket file it writes would exceed 256 KiB (a body near its limit, or
+a long claim history). Lengths count Unicode code points. Free text (`title`, `body`, `tkt-reason`)
 must be in Unicode NFC, must not start or end with whitespace, and must not contain
 control characters (category `Cc`; a body may hold newlines and tabs), format characters
 (`Cf`: bidi controls, zero-width characters, tag characters), private-use, surrogate or

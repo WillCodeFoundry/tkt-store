@@ -18,9 +18,9 @@ this ticket", and "held by another claim".
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from tkt_store.domain import fields
 from tkt_store.domain.operations import (
@@ -38,6 +38,7 @@ from tkt_store.domain.operations import (
     ReleaseOp,
     RenewOp,
     Unset,
+    UnsetType,
 )
 from tkt_store.domain.outcomes import (
     Apply,
@@ -50,9 +51,7 @@ from tkt_store.domain.outcomes import (
 )
 from tkt_store.domain.status import claimable, sort_key_for_next, why_not_claimable
 from tkt_store.domain.ticket import (
-    CLAIM_ID_RE,
     MAX_TTL,
-    TICKET_ID_RE,
     AgentId,
     Claim,
     ClaimId,
@@ -69,10 +68,22 @@ from tkt_store.domain.ticket import (
 def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
     """Dispatch to the rule for this op type. Exhaustive over `Op`.
 
-    `validate_op` runs first; its refusal (INVALID) wins over every other outcome.
+    `validate_op` runs first; its refusal (INVALID) wins over every other outcome. An
+    Apply that would write a ticket file over `fields.TICKET_FILE_MAX` is refused INVALID
+    instead (a body near its limit, or a long claim history), so tkt never writes a file
+    it would refuse to read.
     """
     if (invalid := validate_op(op)) is not None:
         return invalid
+    decision = _decide(snapshot, op, now)
+    if isinstance(decision, Apply):
+        for change in decision.changes:
+            if problem := fields.ticket_file_problem(change.ticket.encoded()):
+                return _invalid(f"{change.ticket.id}: {problem}")
+    return decision
+
+
+def _decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
     match op:
         case InitOp():
             return decide_init(snapshot, op, now)
@@ -101,26 +112,17 @@ def decide(snapshot: Snapshot, op: Op, now: Timestamp) -> Decision:
 def validate_op(op: Op) -> Refusal | None:
     """Refusal(INVALID) if any field of `op` is malformed on its own, else None.
 
-    - ticket ids (`ticket_id`, each `blocked_by` entry) must `fullmatch`
-      ticket.TICKET_ID_RE;
-    - `claim_id` must `fullmatch` ticket.CLAIM_ID_RE;
-    - every value the op writes (title, body, reason, agent, tags, project, priority,
-      blocked_by) and a claim-next project filter must pass its `domain.fields` rule;
+    - every value the op writes into a ticket or a commit trailer (ticket ids, claim id,
+      title, body, reason, agent, tags, project, priority, blocked_by) must pass its
+      `domain.fields` rule; an edit checks only the fields it sets;
     - `ttl` (claim, claim-next, renew) must satisfy 0 < ttl <= MAX_TTL;
     - `expected_version` (edit) must be >= 1.
     Shape checks only; anything that depends on the snapshot is each rule's concern.
+    Filters (claim-next's project, kind, phase) are not written, so not checked: one
+    that matches nothing finds nothing.
     """
-    for ticket_id in _ticket_ids_of(op):
-        if not TICKET_ID_RE.fullmatch(ticket_id):
-            return _invalid(f"malformed ticket id {ticket_id!r}")
-    match op:
-        case ClaimOp() | ClaimNextOp() | RenewOp() | MoveOp() | ReleaseOp() | DoneOp():
-            if not CLAIM_ID_RE.fullmatch(op.claim_id):
-                return _invalid(
-                    f"malformed claim id {op.claim_id!r} (need 32 lowercase hex characters)"
-                )
-    if problem := next(filter(None, _field_problems(op)), None):
-        return _invalid(problem)
+    if problems := _field_problems(op):
+        return _invalid(problems[0])
     match op:
         case ClaimOp() | ClaimNextOp() | RenewOp():
             if not 0 < op.ttl <= MAX_TTL:
@@ -445,56 +447,66 @@ def _already_ended(claim_id: ClaimId, where: TicketId) -> Refusal:
     return Refusal(RefusalCode.NOT_HOLDER, f"claim {claim_id} already ended on {where}")
 
 
-def _ticket_ids_of(op: Op) -> tuple[TicketId, ...]:
-    """Every ticket id an op names: its ticket, and any blockers it sets."""
+def _field_problems(op: Op) -> list[str]:
+    """The `domain.fields` problems of every value an op writes, in field order."""
     match op:
         case AddOp():
-            return (op.ticket_id, *op.blocked_by)
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.title_problem(op.title),
+                fields.body_problem(op.body),
+                fields.project_problem(op.project),
+                fields.priority_problem(op.priority),
+                fields.blockers_problem(op.blocked_by),
+                fields.tags_problem(op.tags),
+                fields.agent_problem(op.agent),
+            ]
         case EditOp():
-            blocked_by = () if isinstance(op.blocked_by, Unset) else op.blocked_by
-            return (op.ticket_id, *blocked_by)
-        case ClaimOp() | RenewOp() | MoveOp() | ReleaseOp() | DoneOp() | CancelOp():
-            return (op.ticket_id,)
-        case InitOp() | ClaimNextOp() | ReapOp():
-            return ()
-
-
-def _field_problems(op: Op) -> Iterator[str | None]:
-    """The `domain.fields` verdict on every value an op writes into a ticket or a commit
-    trailer, and on a claim-next project filter, in field order (None = fine). An edit
-    checks only the fields it sets. Lazy, so validation stops at the first problem."""
-    match op:
-        case AddOp():
-            yield fields.title_problem(op.title)
-            yield fields.body_problem(op.body)
-            if op.project is not None:
-                yield fields.project_problem(op.project)
-            if op.priority is not None:
-                yield fields.priority_problem(op.priority)
-            yield fields.blockers_problem(op.blocked_by)
-            yield fields.tags_problem(op.tags)
-        case EditOp():
-            if not isinstance(op.title, Unset):
-                yield fields.title_problem(op.title)
-            if not isinstance(op.body, Unset):
-                yield fields.body_problem(op.body)
-            if not isinstance(op.priority, Unset) and op.priority is not None:
-                yield fields.priority_problem(op.priority)
-            if not isinstance(op.blocked_by, Unset):
-                yield fields.blockers_problem(op.blocked_by)
-            if not isinstance(op.tags, Unset):
-                yield fields.tags_problem(op.tags)
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                _if_set(fields.title_problem, op.title),
+                _if_set(fields.body_problem, op.body),
+                _if_set(fields.priority_problem, op.priority),
+                _if_set(fields.blockers_problem, op.blocked_by),
+                _if_set(fields.tags_problem, op.tags),
+                fields.agent_problem(op.agent),
+            ]
+        case ClaimOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.claim_id_problem(op.claim_id),
+                fields.agent_problem(op.agent),
+            ]
         case ClaimNextOp():
-            if op.project is not None:
-                yield fields.project_problem(op.project)
-        case CancelOp() | ReleaseOp():
-            yield fields.reason_problem(op.reason)
-        case InitOp() | ClaimOp() | RenewOp() | MoveOp() | DoneOp() | ReapOp():
-            pass
-    match op:
-        case AddOp() | EditOp() | ClaimOp() | ClaimNextOp() | CancelOp():
-            if op.agent is not None:
-                yield fields.agent_problem(op.agent)
+            verdicts = [fields.claim_id_problem(op.claim_id), fields.agent_problem(op.agent)]
+        case RenewOp() | MoveOp() | DoneOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.claim_id_problem(op.claim_id),
+            ]
+        case ReleaseOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.claim_id_problem(op.claim_id),
+                fields.reason_problem(op.reason),
+            ]
+        case CancelOp():
+            verdicts = [
+                fields.ticket_id_problem(op.ticket_id),
+                fields.reason_problem(op.reason),
+                fields.agent_problem(op.agent),
+            ]
+        case InitOp() | ReapOp():
+            verdicts = []
+    return [verdict for verdict in verdicts if verdict is not None]
+
+
+_V = TypeVar("_V")
+
+
+def _if_set(check: Callable[[_V], str | None], value: _V | UnsetType) -> str | None:
+    """`check(value)`, or None for a field the edit leaves unchanged."""
+    return None if isinstance(value, Unset) else check(value)
 
 
 def _content(ticket: Ticket) -> tuple[object, ...]:

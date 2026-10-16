@@ -79,6 +79,7 @@ def test_agents_refused(agent: str) -> None:
 
 
 def test_tags() -> None:
+    assert fields.tags_problem(("auth", "auth")) is not None
     assert fields.tags_problem(()) is None
     assert fields.tags_problem(("auth", "0day", "a-b-", "t" * fields.TAG_MAX)) is None
     assert fields.tags_problem(tuple(f"t{n}" for n in range(fields.TAGS_MAX))) is None
@@ -120,6 +121,27 @@ def test_blockers() -> None:
     assert fields.blockers_problem(blockers[:-1]) is None
     assert fields.blockers_problem(blockers) is not None
     assert fields.blockers_problem(("tkt-1", "tkt-1")) is not None
+    assert fields.blockers_problem(("tkt-1", "tkt-x")) == (
+        "blocker 2 must be tkt- followed by lowercase hex"
+    )
+
+
+def test_ids() -> None:
+    assert fields.ticket_id_problem("tkt-7f3a91c2") is None
+    assert fields.ticket_id_problem("tkt-1\n") is not None
+    assert fields.claim_id_problem("c" * 32) is None
+    assert fields.claim_id_problem("C" * 32) is not None
+
+
+def test_absent_optional_values_pass() -> None:
+    assert fields.project_problem(None) is None
+    assert fields.priority_problem(None) is None
+    assert fields.agent_problem(None) is None
+
+
+def test_ticket_file_cap() -> None:
+    assert fields.ticket_file_problem(b"x" * fields.TICKET_FILE_MAX) is None
+    assert fields.ticket_file_problem(b"x" * (fields.TICKET_FILE_MAX + 1)) is not None
 
 
 def test_problems_never_echo_the_value() -> None:
@@ -131,5 +153,8 @@ def test_problems_never_echo_the_value() -> None:
         fields.agent_problem(value),
         fields.tags_problem((value,)),
         fields.project_problem(value),
+        fields.ticket_id_problem(value),
+        fields.claim_id_problem(value),
+        fields.blockers_problem((value,)),
     ]:
         assert problem is not None and "SECRET" not in problem

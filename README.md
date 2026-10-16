@@ -68,13 +68,20 @@ git 2.29 or later.
 repository, and never let two processes use the same clone, for example by mounting one
 clone into several containers.
 
-**Agents use only `tkt`, never git, on the store.** `tkt` validates everything it writes
-and reads, never checks out files (so no checkout hooks, filters or symlinks are ever
-involved), writes only by compare-and-swap, and refuses to act on another agent's claim.
-Plain git does none of that: an agent running it can forge tickets and history that
-other agents then trust. Make each clone without a checkout (`git clone --no-checkout`;
-from 0.2.0, `tkt clone`), and give agents only the `tkt` command for the store. The
-security model behind this is in `docs/design.md` §8 and ADR 0005.
+**Agents use only `tkt`, never git, on the store.** `tkt` validates what it writes (and,
+from 0.2.0, everything it reads), never checks out files (so no checkout hooks, filters
+or symlinks are ever involved), and writes only by compare-and-swap; from 0.2.0 it also
+refuses to act as another agent's holder. Plain git does none of that: an agent running
+it can forge tickets and history that other agents then trust. Make each clone without a
+checkout (`git clone --no-checkout`; from 0.2.0, `tkt clone`), and give agents only the
+`tkt` command for the store. The security model behind this is in `docs/design.md` §8
+and ADR 0005.
+
+**One git identity per agent.** From 0.2.0, `tkt` records who did each operation as the
+commit author, the identity git itself uses (`user.name` and `user.email`), and refuses
+to write without one. Give each agent its own, for example a name such as `coder-7` and
+a GitHub noreply address: the store's history is readable by everyone with access to the
+repository, and GitHub can refuse pushes that would expose a private address.
 
 The remote's repository is shared by all clones, so it needs the same care. A remote
 given as a file path (a bare repository) is only safe when every clone is on the same

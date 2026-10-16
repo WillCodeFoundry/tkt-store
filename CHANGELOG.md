@@ -22,7 +22,7 @@
 - Security model decided (ADR 0005, `docs/design.md` §8), to be implemented for 0.2.0:
   agents confined to `tkt`; everything read validated and invalid tickets quarantined;
   strict field rules and limits; escaped output; hashed claim ids; holder-only edits
-  while held; `revoke`; identity from `tkt clone --as`; `tkt audit`.
+  while held; `revoke`; identity from git (no `--as`); `tkt clone`; `tkt audit`.
 - README: agents use only `tkt`, never git, on the store; the risks of path remotes
   (code execution in other agents) and `git daemon` (no authentication).
 

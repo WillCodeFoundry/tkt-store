@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- A self-hosted `git daemon` (or receive-pack over SSH) reports a lost race as
+  `(failed to update ref)` with "is at … but expected …" on its stderr; that is now
+  retried instead of failing with a store error.
+- The store keeps itself packed (`git gc --auto` after each commit) and caches decoded
+  tickets by blob id, so a long-lived store reads only tickets that changed.
+- README: a *Deploying* section (remotes, required protection, one process per clone,
+  the mode limitation).
+- `scripts/check_remote.py` checks that a store's remote refuses a non-fast-forward push
+  and a deletion of the store branch, restoring the branch if either is accepted.
+- `scripts/bench_github.py` is now `scripts/bench.py`, for any remote; it refuses to run
+  against a store holding tickets it did not create.
+- ADR 0001 trimmed to the verdict, the binding constraint and the push budget.
+
 ## 0.1.0 — milestone 1
 
 The first working version: `tkt` runs end to end against a real git store, local-only

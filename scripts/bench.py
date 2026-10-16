@@ -1,15 +1,15 @@
-"""Benchmark a remote-backed store against a protected branch on a real git host (ADR 0001).
+"""Benchmark a remote-backed store against a real remote (ADR 0001).
 
-Not part of the test suite. It WRITES to the remote: point it at a dedicated, otherwise
-empty repository whose `tkt-store` branch is protected (deletion and force-push blocked,
-no signed-commit or pull-request requirement), never at a real store.
+Not part of the test suite. It WRITES many tickets: point it at a dedicated, otherwise
+empty test repository, never at a real store. It refuses to run against a store that
+holds any ticket it did not create itself. Any remote works: a hosted one (GitHub), a
+bare repository over SSH, or `git daemon`. Check the remote's protection separately,
+with `scripts/check_remote.py`.
 
-    uv run python scripts/bench_github.py --url git@github.com:ORG/REPO.git \\
-        --workdir /tmp/tkt-bench
+    uv run python scripts/bench.py --url git@github.com:ORG/REPO.git --workdir /tmp/bench
 
 Stages:
-- all (default): init, protection checks (a force-push and a deletion of the store
-  branch must both be refused), sequential latency, then contention.
+- all (default): init, sequential latency, then contention.
 - contention: only the contention stage, against an already initialised store.
 
 Contention: K agents, each in its own clone, drain K * --per-agent fresh tickets with
@@ -40,7 +40,6 @@ from tkt_store.infrastructure.backoff import JitteredBackoff
 from tkt_store.infrastructure.clock import SystemClock, monotonic, sleep
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError, git_runner
-from tkt_store.infrastructure.git.wire import DEFAULT_REF
 from tkt_store.infrastructure.ids import RandomIds, jitter
 
 TTL = 1800
@@ -117,20 +116,19 @@ def timed(fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> tuple[T, flo
     return result, time.perf_counter() - start
 
 
-def protection_checks(repo: Path) -> dict[str, str]:
-    """A non-fast-forward push and a deletion of the store branch must both be refused."""
-    empty_tree = git(repo, "mktree").stdout.strip()
-    stray = git(repo, "-c", "user.name=bench", "-c", "user.email=bench@invalid",
-                "commit-tree", empty_tree, "-m", "probe").stdout.strip()  # fmt: skip
-    results = {}
-    for name, refspec, extra in [
-        ("force_push", f"{stray}:{DEFAULT_REF}", ["--force"]),
-        ("delete", f":{DEFAULT_REF}", []),
-    ]:
-        out = git(repo, "push", "--porcelain", *extra, "origin", refspec, check=False)
-        status = [line for line in out.stdout.splitlines() if line.startswith("!")]
-        results[name] = status[0].split("\t")[-1] if status else f"NOT REFUSED ({out.returncode})"
-    return results
+BENCH_TITLES = ("latency ", "contention ")
+"""Every ticket this benchmark creates has a title starting with one of these."""
+
+
+def refuse_real_stores(repo: Path) -> None:
+    """Exit unless every ticket in the store was created by this benchmark."""
+    tickets, _ = service(repo)
+    foreign = [v.ticket.id for v in tickets.list() if not v.ticket.title.startswith(BENCH_TITLES)]
+    if foreign:
+        sys.exit(
+            f"refusing to run: the store holds {len(foreign)} ticket(s) this benchmark did not "
+            f"create (e.g. {foreign[0]}); point --url at a dedicated test repository"
+        )
 
 
 def latency(repo: Path, rounds: int) -> dict[str, Any]:
@@ -221,7 +219,7 @@ def contention(clones: list[Path], per_agent: int) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--url", required=True, help="a dedicated, protected test repository")
+    parser.add_argument("--url", required=True, help="a dedicated test repository")
     parser.add_argument("--workdir", required=True, type=Path, help="where the clones go")
     parser.add_argument("--stage", choices=["all", "contention"], default="all")
     parser.add_argument("--agents", type=int, nargs="+", default=[2, 5, 10])
@@ -231,12 +229,11 @@ def main() -> None:
     args.workdir.mkdir(parents=True, exist_ok=True)
     report: dict[str, Any] = {"git": git(args.workdir, "--version").stdout.strip()}
     first = clone(args.url, args.workdir, "clone-0")
+    refuse_real_stores(first)
     if args.stage == "all":
         tickets, _ = service(first)
         outcome, t = timed(tickets.init)
         report["init"] = {"outcome": type(outcome).__name__, "s": round(t, 3)}
-        report["protection"] = protection_checks(first)
-        log("protection:", report["protection"])
         report["latency"] = latency(first, args.rounds)
     clones = [clone(args.url, args.workdir, f"clone-{n}") for n in range(max(args.agents))]
     report["contention"] = []

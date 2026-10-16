@@ -295,16 +295,16 @@ on branch protection alone.
 ## 7. Deployment model
 
 **Multi-writer: agents read and write the store directly**, each through `tkt`, with
-`origin` as the shared remote. **One process per clone** is an assumption: each agent
-gets its own clone (several processes sharing a clone are not supported). A coordinator
+`origin` as the shared remote. **One process per clone** is the recommended setup: each
+agent gets its own clone. A coordinator
 is at most an optional convenience, never a safety mechanism. Correctness rests on:
 
 - compare-and-swap on the ref (one op = one commit; lost races retry), and
 - claim-id fencing (a stale holder can no longer change the ticket), and
 - **a remote that refuses non-fast-forward pushes and deletion of the store branch**
-  (`tkt-store` by default; on GitHub, a branch protection rule or ruleset on it) — a
-  deployment precondition (a self-hosted pre-receive hook, or branch protection on a
-  plan that offers it).
+  (`tkt-store` by default) — a deployment precondition: on GitHub, a ruleset on the
+  branch; on a self-hosted bare repository, `receive.denyNonFastForwards` and
+  `receive.denyDeletes`. `scripts/check_remote.py` verifies it (README, *Deploying*).
 
 **Consistency boundary.** The whole store (one ref) is the unit of consistency: every
 op is decided against a snapshot of all tickets and committed by compare-and-swap on that
@@ -355,6 +355,8 @@ Accepted limitations (decided; revisit only if they cause trouble):
 - Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
 - `SKEW_GRACE` stays a fixed 60-second constant.
 - Phases and kinds are fixed enums; a new phase is a format change.
+- A store's mode is fixed at `init`: a local-only store can never become remote-backed
+  (README, *Deploying*).
 
 Open questions:
 

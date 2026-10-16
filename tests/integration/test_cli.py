@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 
-from tests.gitkit import new_repo
 from tests.unit.builders import NOW, TTL, A, B
 from tkt_store.application.errors import RetriesExhausted, StoreError
 from tkt_store.application.service import TicketStore
@@ -93,12 +92,12 @@ def test_edit_and_cancel(tkt: Tkt) -> None:
 
 
 @pytest.mark.parametrize(("command", "count"), [("init", 0), ("claim", 1), ("reap", 2)])
-def test_tickets_list_has_the_documented_count(command: str, count: int, tmp_path: Path) -> None:
+def test_tickets_list_has_the_documented_count(
+    command: str, count: int, clones: list[Path]
+) -> None:
     """Exactly one for single-ticket commands, none for init, zero or more for reap."""
     clock = FakeClock(NOW)
-    service = TicketStore(
-        GitStore.at(new_repo(tmp_path / "local"), remote=None), clock, SequentialIds()
-    )
+    service = TicketStore(GitStore.at(clones[0], remote="origin"), clock, SequentialIds())
     outcome = service.init()
     if command != "init":
         for n in (1, 2):

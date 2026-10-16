@@ -84,8 +84,14 @@ def write_files(
     git(repo, "read-tree", *([parent] if parent else ["--empty"]), env=env)
     for path, data in files.items():
         name = path.decode(errors="surrogateescape") if isinstance(path, bytes) else path
-        if data is None:
-            git(repo, "update-index", "--force-remove", name, env=env)
+        if data is None:  # an index entry with mode 0 removes the path (works in a bare repo)
+            subprocess.run(
+                ["git", "-C", str(repo), "update-index", "--index-info"],
+                input=f"0 {'0' * 40}\t{name}\n",
+                text=True,
+                check=True,
+                env={**os.environ, **env},
+            )
             continue
         blob = (
             subprocess.run(

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal, cast
 
 from tkt_store.application.errors import StoreError
 from tkt_store.domain.operations import OpName
@@ -31,9 +30,8 @@ PROTOCOL_VERSION = 1
 TICKETS_DIR = "tickets"
 DEFAULT_REF = "refs/heads/tkt-store"
 STORE_META_PATH = "tkt-store.json"
-"""Root file recording the store's format version and mode:
-{"mode": "remote" | "local", "protocol": <int>}. Written into the root commit by `init`;
-checked on every snapshot."""
+"""Root file recording the store's format version: {"protocol": <int>}. Written into the
+root commit by `init`; checked on every snapshot."""
 
 TRAILER_PROTOCOL = "tkt-protocol"
 TRAILER_OP = "tkt-op"
@@ -81,32 +79,26 @@ def is_ticket_path(path: str) -> bool:
     return directory == TICKETS_DIR and stem != name and TICKET_ID_RE.fullmatch(stem) is not None
 
 
-StoreMode = Literal["remote", "local"]
-
-
 def _canonical(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
 
 
-def encode_store_meta(mode: StoreMode) -> bytes:
-    """The tkt-store.json written by init: canonical JSON
-    {"mode": mode, "protocol": PROTOCOL_VERSION}. The mode is fixed for the store's life."""
-    return _canonical({"mode": mode, "protocol": PROTOCOL_VERSION})
+def encode_store_meta() -> bytes:
+    """The tkt-store.json written by init: canonical JSON {"protocol": PROTOCOL_VERSION}."""
+    return _canonical({"protocol": PROTOCOL_VERSION})
 
 
-def decode_store_meta(data: bytes) -> tuple[int, StoreMode]:
-    """The store's (protocol version, mode). Raises StoreError if malformed or the
-    protocol is newer than PROTOCOL_VERSION. The caller refuses a mode that does not match
-    how the store was opened, so a stray --no-remote can never diverge a clone."""
+def decode_store_meta(data: bytes) -> int:
+    """The store's protocol version. Raises StoreError if malformed or newer than
+    PROTOCOL_VERSION."""
     try:
-        meta = json.loads(data)
-        protocol, mode = meta["protocol"], meta["mode"]
+        protocol = json.loads(data)["protocol"]
     except (ValueError, TypeError, KeyError) as error:
         raise StoreError(f"malformed {STORE_META_PATH}: {error!r}") from error
-    if type(protocol) is not int or mode not in ("remote", "local"):
-        raise StoreError(f"malformed {STORE_META_PATH}: {meta!r}")
+    if type(protocol) is not int:
+        raise StoreError(f"malformed {STORE_META_PATH}: protocol {protocol!r}")
     _check_protocol(protocol)
-    return protocol, cast(StoreMode, mode)
+    return protocol
 
 
 def _check_protocol(protocol: int) -> None:

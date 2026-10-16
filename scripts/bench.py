@@ -1,4 +1,4 @@
-"""Benchmark a remote-backed store against a real remote (ADR 0001).
+"""Benchmark a store against a real remote (ADR 0001).
 
 Not part of the test suite. It WRITES many tickets: point it at a dedicated, otherwise
 empty test repository, never at a real store. It refuses to run against a store that

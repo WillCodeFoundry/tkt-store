@@ -5,9 +5,8 @@ dedicated git branch; every change is one commit published by compare-and-swap,
 so "who holds which ticket" has exactly one answer.
 
 > **Status: milestone 1.** The domain, the git store and the `tkt` CLI work end to end
-> (the quickstart below runs as a test), measured against a protected GitHub branch:
-> about 10 agents on tasks of tens of minutes fit GitHub's push guidance; see
-> `docs/decisions/0001-git-branch-as-store.md`.
+> (the quickstart below runs as a test), measured against a protected GitHub branch
+> (`docs/decisions/0001-git-branch-as-store.md`).
 
 ## What it guarantees
 
@@ -62,41 +61,45 @@ safe. See `docs/cli.md`.
 
 ## Deploying
 
-Keep the store in its own repository; `tkt` uses only the `tkt-store` branch. We
-recommend one process per clone: give each agent its own clone of the store repository.
-Requires git 2.29 or later.
+Keep the store in its own repository; `tkt` uses only the `tkt-store` branch. Requires
+git 2.29 or later.
 
-**Choose a remote.** Every `tkt` write is one fetch and one push to it.
+**One clone per process.** Give every process that runs `tkt` its own clone of the store
+repository, and never let two processes use the same clone, for example by mounting one
+clone into several containers.
 
-- **GitHub** (or another hosting service). Protect the `tkt-store` branch with a ruleset
-  that blocks deletion and force pushes. Do not require pull requests, status checks or
-  signed commits: agents push directly, and store commits are unsigned. GitHub
-  recommends at most 6 pushes per minute per repository, and every write counts,
-  renewals and retried pushes included; that suits about 10 agents on tasks of tens of
-  minutes (`docs/decisions/0001-git-branch-as-store.md`).
-- **A bare repository on your own server, over SSH.** No push-rate guidance beyond what
-  the server can take. Protect it with git's own settings:
+The remote's repository is shared by all clones, so it needs the same care. A remote
+given as a file path (a bare repository) is only safe when every clone is on the same
+machine as that repository, with the same filesystem. If clones live in VMs or sandboxes
+(Docker Desktop, Docker Sandboxes) or on other machines, don't mount the remote's
+directory into them: git's locking may not hold across that boundary, and two agents
+could both get the same claim. Serve it over the network instead (a hosting service,
+SSH, or `git daemon`), so that only its own machine writes to it.
 
-  ```sh
-  git init --bare /srv/git/tkt.git
-  git -C /srv/git/tkt.git config receive.denyNonFastForwards true
-  git -C /srv/git/tkt.git config receive.denyDeletes true
-  git -C /srv/git/tkt.git config core.logAllRefUpdates true   # a reflog, for recovery
-  ```
+**Any git server works as the remote:** a hosting service such as GitHub, a bare
+repository over SSH or `git daemon`, or, when every clone is on the same machine as the
+repository, a bare repository's path. Every `tkt` write is one fetch and one push. The
+server must:
 
-- **`git daemon`, for trusted local agents only**, e.g. agents in containers or VMs on
-  one host. It has no authentication: anything that can reach the port can write the
-  store. Protect the repository as above, bind the daemon to loopback, and use SSH
-  instead if you need authentication:
+- **accept direct pushes to `tkt-store`:** no pull-request, status-check or
+  signed-commit requirement on that branch (store commits are unsigned);
+- **refuse force pushes and deletion of `tkt-store`,** however your server does that,
+  e.g. a ruleset on GitHub, or `receive.denyNonFastForwards` and `receive.denyDeletes`
+  on a plain bare repository. `tkt` itself never does either; this protects the history
+  from other writers.
 
-  ```sh
-  git daemon --reuseaddr --base-path=/srv/git --export-all \
-    --enable=receive-pack --listen=127.0.0.1 --port=9418
-  ```
+`git daemon` is for trusted local agents only (e.g. agents in containers or VMs on one
+host): it has no authentication, so anything that can reach its port can write the
+store. Bind it to loopback, and use SSH if you need authentication:
 
-  Agents clone `git://<host>/tkt.git`. From a Docker Sandbox the host is
-  `host.docker.internal`, and the port must be allowed:
-  `sbx policy allow network localhost:9418`.
+```sh
+git daemon --reuseaddr --base-path=/srv/git --export-all \
+  --enable=receive-pack --listen=127.0.0.1 --port=9418
+```
+
+Agents then clone `git://<host>/tkt.git`; from a Docker Sandbox the host is
+`host.docker.internal`, once the port is allowed (`sbx policy allow network
+localhost:9418`).
 
 **Check the protection** once the store exists (`tkt init`). The script tries a
 non-fast-forward push and a deletion of the store branch, reports whether each was
@@ -105,11 +108,6 @@ refused, and restores the branch if either was accepted:
 ```sh
 uv run python scripts/check_remote.py --repo /work/tasks --remote origin
 ```
-
-**Limitation: the mode is fixed when the store is created.** A store created with
-`--no-remote` can never be used with a remote. If agents may ever run on more than one
-machine, create it remote-backed: a bare repository on the same machine works as the
-remote, and moving the remote later only changes its URL in each clone.
 
 ## Layout
 

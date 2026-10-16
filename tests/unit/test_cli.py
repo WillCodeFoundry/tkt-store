@@ -83,7 +83,8 @@ def test_flags_and_required_match_the_docs(name: str) -> None:
     [
         ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID],  # no store opts
         ["claim", "tkt-1", "--as", "a", "--ttl", "60", "--claim-id", CLAIM_ID, "--repo", "r"],
-        ["reap", "--repo", "r", "--remote", "o", "--no-remote"],  # both remote options
+        ["reap", "--repo", "r"],  # --remote is required
+        ["reap", "--remote", "origin"],  # --repo is required
         ["claim", "tkt-1", "--as", "a", "--ttl", "60", *STORE],  # missing --claim-id
         ["renew", "tkt-1", "--claim-id", CLAIM_ID, "--ttl", "30m", *STORE],  # seconds only
         ["edit", "tkt-1", "--if-version", "1", "--priority", "2", "--clear-priority", *STORE],
@@ -105,8 +106,8 @@ def test_mint_needs_no_store_options() -> None:
 
 
 def test_store_options_may_come_anywhere_after_the_command() -> None:
-    args = build_parser().parse_args(["reap", "--no-remote", "--repo", "r"])
-    assert args.repo == "r" and args.no_remote
+    args = build_parser().parse_args(["reap", "--remote", "origin", "--repo", "r"])
+    assert args.repo == "r" and args.remote == "origin"
 
 
 class RecordingStore:

@@ -34,7 +34,7 @@ def protect(bare: Path) -> None:
 
 @pytest.fixture
 def store(clones: list[Path], bare_remote: Path) -> Path:
-    """A remote-backed store with one ticket; returns the clone."""
+    """A store with one ticket; returns the clone."""
     tickets = TicketStore(GitStore.at(clones[0], remote="origin"), FakeClock(), SequentialIds())
     tickets.init()
     tickets.add("Keep me")

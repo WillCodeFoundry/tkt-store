@@ -17,7 +17,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 
 | Term | Meaning |
 |---|---|
-| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding `tickets/<id>.json`, normally backed by a remote (`origin`). The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
+| **Store** | One git ref (default `refs/heads/tkt-store`, the branch `tkt-store`) holding `tickets/<id>.json`, published to a shared remote (normally `origin`) and cached in each agent's clone. The unit of consistency: every op is decided on a snapshot of the whole store (see §7). |
 | **Ticket** | A unit of work. Its fields fall into five groups, each changed one way (see *Data model* below). |
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
@@ -267,28 +267,26 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Retries exhausted | `RetriesExhausted(op)` | Caller re-runs `op` with the same ids (idempotent) |
 | Crash before push | Unreachable git objects only | Re-run; `git gc` collects garbage |
 | Crash after push, before local update | Local behind remote | Next snapshot fetches and fast-forwards (`remote.fetch`, `remote.fast_forward_local`) |
-| Remote moved since the snapshot | Push rejected: the lease is stale (`[rejected]`), or the remote's own compare-and-swap lost a concurrent push, worded by the server: `[remote rejected] (incorrect old value provided)` (git, local transport), `(cannot lock ref '<ref>': is at <oid> but expected <oid>)` (GitHub), or `(failed to update ref)` with that same "is at … but expected …" on the remote's stderr (`git daemon`, receive-pack over SSH) → `Conflict` | Transaction re-decides on the fresh snapshot; a manual re-run converges |
+| Remote moved since the snapshot | Push rejected, nothing published: by our own git client's lease check (`[rejected] (stale info)`) → `Conflict`; or by the server (`[remote rejected] (…)`, whatever the wording), after which one `ls-remote` shows whether the branch moved → `Conflict`, or not (refused for another reason: protection, a hook) → `StoreError`; if it already holds our commit, the push counts as published | Transaction re-decides on the fresh snapshot; a manual re-run converges |
 | Push landed, local update failed | Ignored: the commit is published, `commit` returns it | Next snapshot repairs the local cache |
-| Store opened in the other mode (`--no-remote` on a remote-backed store, or vice versa) | `StoreError` on every snapshot; nothing written | Use the mode recorded in `tkt-store.json` |
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |
 | Holder dies | Lease lapses → `expired` status | After `SKEW_GRACE`, `reap` or a new `claim` takes over; old holder fenced by claim id |
-| Remote unreachable or not configured | `StoreError` | Retry later; never falls back to local-only |
+| Remote unreachable or not configured | `StoreError` | Retry later |
 | Corrupt ticket file, or format version missing/newer | `StoreError` on every snapshot (no partial views) | Fix the file with an ordinary git commit (deliberately bypassing `tkt`), or upgrade the client |
 
-Remote-backed commit order: build objects on `base` → push `new:ref` with `remote.publish`
-(lost lease ⇒ `Conflict`, nothing published; any other rejection, e.g. a hook or branch
-protection, is a `StoreError`) → `update-ref ref new base` locally, best-effort. A snapshot
+Commit order: build objects on `base` → push `new:ref` with `remote.publish`
+(a rejection with the branch moved ⇒ `Conflict`, nothing published; with the branch
+unmoved, e.g. branch protection or a hook ⇒ `StoreError`; no server wording is parsed) → `update-ref ref new base` locally, best-effort. A snapshot
 fetches the ref into a private ref (`refs/tkt-store-remotes/<remote>/…`) that only this
 code writes, and takes its revision from that ref. It then catches the local ref up by
 compare-and-swap; a local ref with commits the remote lacks (made outside `tkt`) is a
-`StoreError` before anything is written. The remote is authoritative; local refs are a cache. A local-only store has
-no push: there `update-ref ref new base` is the compare-and-swap, and a moved ref is a
-`Conflict`.
+`StoreError` before anything is written. The remote is authoritative; local refs are a
+cache.
 
 Only `tkt-store.json` and `tickets/tkt-<hex>.json` files are read; any other path is
 preserved and ignored.
-The store's format version and mode (remote-backed or local-only) live in
-`tkt-store.json` at the tree root and are checked on every snapshot. The push states its
+The store's format version lives in `tkt-store.json` at the tree root and is checked on
+every snapshot. The push states its
 expected old value (`--force-with-lease=<ref>:<base>`), so compare-and-swap does not rely
 on branch protection alone.
 
@@ -324,10 +322,8 @@ acted on only after `SKEW_GRACE`; a TTL should comfortably exceed
 Fencing is authoritative.
 
 **Scale.** Designed for about 10 agents working in parallel on tasks of tens of minutes.
-Every write is a push, and GitHub recommends at most 6 pushes per minute per repository:
-that is the store's budget. With 30-minute leases renewed every ~20 minutes and about 5
-pushes per ticket, 10 agents on 20-minute tasks push about 3 times a minute; many short
-tasks do not fit. Measured throughput, contention and the options beyond: ADR 0001.
+Every write is a push, so throughput is bounded by the remote's round trip and by any
+push-rate limit a hosting service sets. Measurements and the options beyond: ADR 0001.
 
 **Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
 `ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
@@ -341,10 +337,6 @@ same id and name gets the lapsed claim renewed.
 Concurrent reapers simply conflict and converge. It is not needed for recovery (claims
 take over lapsed claims directly); it tidies what `list` shows.
 
-A local-only store (no remote) remains supported for single-machine use and tests; it
-is selected explicitly (`--no-remote`, or `remote=None` in the library), never as a
-fallback.
-
 ## 8. Open questions, accepted limitations and deferred work
 
 Accepted limitations (decided; revisit only if they cause trouble):
@@ -355,8 +347,6 @@ Accepted limitations (decided; revisit only if they cause trouble):
 - Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
 - `SKEW_GRACE` stays a fixed 60-second constant.
 - Phases and kinds are fixed enums; a new phase is a format change.
-- A store's mode is fixed at `init`: a local-only store can never become remote-backed
-  (README, *Deploying*).
 
 Open questions:
 

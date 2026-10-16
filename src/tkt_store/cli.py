@@ -23,9 +23,8 @@ from tkt_store.application.store import HistoryEntry
 from tkt_store.application.transaction import Committed, Outcome, Refused, Unchanged
 from tkt_store.domain.errors import TktError
 from tkt_store.domain.operations import UNSET, Op
-from tkt_store.domain.outcomes import Refusal, RefusalCode
 from tkt_store.domain.status import Status
-from tkt_store.domain.ticket import AgentId, ClaimId, Kind, Phase, ProjectId, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Kind, Phase, ProjectId, TicketId, TicketState
 
 
 class ExitCode(IntEnum):
@@ -269,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = command(
         "show",
         "one ticket with its derived status",
-        lambda s, a: _found(s.view(TicketId(a.ticket_id)), a.ticket_id),
+        lambda s, a: s.show(TicketId(a.ticket_id)),
         render_show,
     )
     ticket_id(c)
@@ -284,13 +283,6 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--limit", type=_count)
 
     return parser
-
-
-def _found(view: TicketView | None, ticket_id: str) -> TicketView | Refused:
-    """`show` of an unknown id is a refusal (NOT_FOUND), printed and exited like one."""
-    if view is None:
-        return Refused(Refusal(RefusalCode.NOT_FOUND, f"no ticket {ticket_id}"))
-    return view
 
 
 def _value(value: Any) -> Any:
@@ -310,8 +302,15 @@ def op_json(op: Op) -> dict[str, Any]:
     }
 
 
+def state_json(state: TicketState) -> dict[str, Any]:
+    """{"ticket": <on-branch JSON>, "claim": <open claim> or null}. A claim shows its
+    hash, never a claim id (ADR 0005)."""
+    claim = None if state.claim is None else state.claim.to_dict()
+    return {"ticket": state.ticket.to_dict(), "claim": claim}
+
+
 def view_json(view: TicketView) -> dict[str, Any]:
-    return {"ticket": view.ticket.to_dict(), "status": view.status.value}
+    return state_json(TicketState(view.ticket, view.claim)) | {"status": view.status.value}
 
 
 def entry_json(entry: HistoryEntry) -> dict[str, Any]:
@@ -322,7 +321,7 @@ def entry_json(entry: HistoryEntry) -> dict[str, Any]:
         "op": record.op.value,
         "ticket_ids": list(record.ticket_ids),
         "agent": record.agent,
-        "claim_id": record.claim_id,
+        "claim_hash": record.claim_hash,
         "phase": _value(record.phase),
         "reason": record.reason,
     }
@@ -332,28 +331,29 @@ def render_outcome(outcome: Outcome) -> tuple[Any, ExitCode]:
     """Committed -> {"outcome": "committed", "revision", "tickets"} (0);
     Unchanged -> {"outcome": "unchanged", "reason", "tickets"} (0);
     Refused -> {"outcome": "refused", "code", "message"} (1).
-    Tickets are rendered as their on-branch JSON (docs/format.md)."""
+    Each ticket is {"ticket", "claim"} (`state_json`)."""
     match outcome:
         case Committed(revision=revision, tickets=tickets):
             committed = {"outcome": "committed", "revision": revision}
-            return committed | {"tickets": [t.to_dict() for t in tickets]}, ExitCode.OK
+            return committed | {"tickets": [state_json(t) for t in tickets]}, ExitCode.OK
         case Unchanged(reason=reason, tickets=tickets):
             unchanged = {"outcome": "unchanged", "reason": reason}
-            return unchanged | {"tickets": [t.to_dict() for t in tickets]}, ExitCode.OK
+            return unchanged | {"tickets": [state_json(t) for t in tickets]}, ExitCode.OK
         case Refused(refusal=refusal):
             refused = {"outcome": "refused", "code": refusal.code.value}
             return refused | {"message": refusal.message}, ExitCode.REFUSED
 
 
 def render_show(found: TicketView | Refused) -> tuple[Any, ExitCode]:
-    """{"ticket", "status"}, or a refused NOT_FOUND object (1) for an unknown id."""
+    """{"ticket", "claim", "status"}, or a refused object (1): NOT_FOUND for an unknown id,
+    SET_ASIDE for one set aside on reading."""
     if isinstance(found, Refused):
         return render_outcome(found)
     return view_json(found), ExitCode.OK
 
 
 def render_views(views: Sequence[TicketView]) -> tuple[Any, ExitCode]:
-    """`list`: a JSON array of {"ticket", "status"}."""
+    """`list`: a JSON array of {"ticket", "claim", "status"}."""
     return [view_json(v) for v in views], ExitCode.OK
 
 

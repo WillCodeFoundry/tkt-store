@@ -119,12 +119,12 @@ def run(steps: list[tuple[Any, ...]]) -> list[Step]:
 @given(scenarios)
 def test_never_two_live_holders(steps: list[tuple[Any, ...]]) -> None:
     """Invariant 1: a claim id is current on at most one ticket, and an ended claim id
-    never becomes current again."""
+    never becomes current again; nothing honest is ever set aside."""
     for s in run(steps):
-        current = [t.claim.claim_id for t in s.after.tickets.values() if t.claim is not None]
+        current = [claim.hash for claim in s.after.claims.values()]
         assert len(current) == len(set(current))
-        ended = {c for t in s.after.tickets.values() for c in t.ended_claim_ids}
-        assert not ended & set(current)
+        assert not set(s.after.ended) & set(current)
+        assert not (s.after.set_aside or s.after.held_aside or s.after.fenced)
 
 
 @settings(max_examples=150, deadline=None)
@@ -146,8 +146,8 @@ def test_only_current_claim_id_can_finish(steps: list[tuple[Any, ...]]) -> None:
             (ticket_id,) = s.outcome.record.ticket_ids
             # the snapshot the decision used may be after an injected commit, but injected
             # commits never change tickets, so `before` holds the same claims
-            claim = s.before.tickets[ticket_id].claim
-            assert claim is not None and claim.claim_id == s.outcome.record.claim_id
+            claim = s.before.claim_of(ticket_id)
+            assert claim is not None and claim.hash == s.outcome.record.claim_hash
 
 
 @settings(max_examples=150, deadline=None)
@@ -172,9 +172,9 @@ def test_blocked_tickets_are_claimed_only_once_their_blockers_are_done(
     for s in run(steps):
         if isinstance(s.outcome, Committed) and s.outcome.record.op in CLAIM_OPS:
             (ticket_id,) = s.outcome.record.ticket_ids
-            prior = s.before.tickets[BLOCKED].claim
+            prior = s.before.claim_of(BLOCKED)
             if ticket_id == BLOCKED and (
-                prior is None or prior.claim_id != s.outcome.record.claim_id
+                prior is None or prior.hash != s.outcome.record.claim_hash
             ):
                 assert all(s.before.tickets[b].is_done for b in BLOCKERS)
 

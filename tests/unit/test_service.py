@@ -14,7 +14,15 @@ from tkt_store.application.transaction import Committed, Refused, Unchanged
 from tkt_store.domain.operations import AddOp, ClaimOp
 from tkt_store.domain.outcomes import Change, OpRecord, RefusalCode
 from tkt_store.domain.status import Status
-from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Revision, Snapshot, TicketId
+from tkt_store.domain.ticket import (
+    AgentId,
+    ClaimId,
+    Phase,
+    Revision,
+    Snapshot,
+    TicketId,
+    claim_hash,
+)
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.ids import SequentialIds
 from tkt_store.infrastructure.memory import MemStore
@@ -76,7 +84,7 @@ def service_on(store: object, ids: SequentialIds | None = None) -> TicketStore:
 
 def test_add_remints_on_duplicate_id_when_minted(memstore: MemStore) -> None:
     outcome = service_on(memstore, ScriptedIds(T1, "tkt-beef")).add("Different title")
-    assert isinstance(outcome, Committed) and outcome.tickets[0].id == "tkt-beef"
+    assert isinstance(outcome, Committed) and outcome.tickets[0].ticket.id == "tkt-beef"
 
 
 def test_add_with_supplied_id_never_retries(memstore: MemStore) -> None:
@@ -92,8 +100,8 @@ def test_failures_carry_the_last_ids_tried(memstore: MemStore) -> None:
         service.add("New")
     assert isinstance(exc.value.op, AddOp) and exc.value.op.ticket_id == "tkt-00aa"
     with pytest.raises(RetriesExhausted) as exc:
-        service.claim(T1, A, TTL)
-    assert isinstance(exc.value.op, ClaimOp) and len(exc.value.op.claim_id) == 32
+        service.claim(T1, A, TTL, claim_id=C1)
+    assert isinstance(exc.value.op, ClaimOp) and exc.value.op.claim_id == C1
 
 
 def test_claim_uses_a_supplied_claim_id_and_reruns_converge(memstore: MemStore) -> None:
@@ -101,7 +109,8 @@ def test_claim_uses_a_supplied_claim_id_and_reruns_converge(memstore: MemStore) 
     first = service.claim(T1, A, TTL, claim_id=C1)
     again = service.claim(T1, A, TTL, claim_id=C1)
     assert isinstance(first, Committed) and isinstance(again, Unchanged)
-    assert again.tickets[0].claim is not None and again.tickets[0].claim.claim_id == C1
+    claim = again.tickets[0].claim
+    assert claim is not None and claim.hash == claim_hash(C1)
 
 
 def test_handoff_through_the_service(memstore: MemStore) -> None:
@@ -109,10 +118,10 @@ def test_handoff_through_the_service(memstore: MemStore) -> None:
     service.claim(T1, A, TTL, claim_id=C1)
     service.move(T1, C1, Phase.REVIEW)
     service.release(T1, C1)
-    ticket = service.get(T1)
-    assert ticket is not None and ticket.phase is Phase.REVIEW and ticket.claim is None
+    view = service.view(T1)
+    assert view is not None and view.ticket.phase is Phase.REVIEW and view.claim is None
     nxt = service.claim_next(A, TTL, phase=Phase.REVIEW, claim_id=ClaimId("2" * 32))
-    assert isinstance(nxt, Committed) and nxt.tickets[0].id == T1
+    assert isinstance(nxt, Committed) and nxt.tickets[0].ticket.id == T1
 
 
 def test_edit_with_stale_expected_version_is_stale(memstore: MemStore) -> None:

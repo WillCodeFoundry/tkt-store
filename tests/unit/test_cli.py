@@ -175,4 +175,4 @@ def test_release_takes_no_phase() -> None:
 
 def test_show_uses_one_snapshot() -> None:
     method, args, _ = _run(["show", "tkt-0001"])
-    assert (method, args) == ("view", ("tkt-0001",))
+    assert (method, args) == ("show", ("tkt-0001",))

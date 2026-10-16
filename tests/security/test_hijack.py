@@ -25,7 +25,7 @@ pytestmark = pytest.mark.git
 def visible_claim_values(clone: Path, capsys: pytest.CaptureFixture[str]) -> list[str]:
     """Every string an impostor sees in the claim when it runs `tkt show tkt-0001`."""
     assert main(["show", T1, "--repo", str(clone), "--remote", "origin"]) == 0
-    claim: dict[str, Any] = json.loads(capsys.readouterr().out)["ticket"]["claim"]
+    claim: dict[str, Any] = json.loads(capsys.readouterr().out)["claim"]
     return [value for value in claim.values() if isinstance(value, str)]
 
 
@@ -37,13 +37,15 @@ HOLDER_OPS = {
 }
 
 
-@pytest.mark.security_design("claim ids are printed by show, so anyone can act as the holder")
 @pytest.mark.parametrize("op", HOLDER_OPS.values(), ids=HOLDER_OPS)
 def test_what_show_prints_cannot_be_used_to_act_as_the_holder(
     tickets: TicketStore, honest_clone: Path, capsys: pytest.CaptureFixture[str], op: Any
 ) -> None:
+    """`show` prints the claim's hash, never its id (ADR 0005, ADR 0007): a hash is not a
+    claim id, so it never acts as the holder."""
     tickets.claim(T1, HOLDER, 1800, claim_id=SECRET)
     before = tickets.view(T1)
+    assert visible_claim_values(honest_clone, capsys)  # the claim is shown, with its hash
     for value in visible_claim_values(honest_clone, capsys):
         assert isinstance(op(tickets, ClaimId(value)), Refused)
     assert tickets.view(T1) == before

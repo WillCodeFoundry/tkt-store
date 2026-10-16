@@ -13,31 +13,33 @@ from tkt_store.application.backoff import Backoff
 from tkt_store.application.clock import Clock
 from tkt_store.application.errors import Conflict, RetriesExhausted, StoreError
 from tkt_store.application.store import Store
+from tkt_store.domain.occupancy import after
 from tkt_store.domain.operations import Op
 from tkt_store.domain.outcomes import NoOp, OpRecord, Refusal
 from tkt_store.domain.rules import decide
-from tkt_store.domain.ticket import Revision, Ticket
+from tkt_store.domain.ticket import Revision, Snapshot, TicketId, TicketState
 
 DEFAULT_MAX_ATTEMPTS = 10
 
 
 @dataclass(frozen=True)
 class Committed:
-    """The op was applied as a new revision. `tickets`: the affected tickets after it."""
+    """The op was applied as a new revision. `tickets`: the tickets it concerns, each with
+    its open claim, after it."""
 
     revision: Revision
     record: OpRecord
-    tickets: tuple[Ticket, ...]
+    tickets: tuple[TicketState, ...]
 
 
 @dataclass(frozen=True)
 class Unchanged:
     """The op was a no-op: its effect was already present. Nothing was written.
-    `tickets`: the tickets it concerns, as they are now (e.g. the ticket a re-run
-    claim already holds, with its claim id)."""
+    `tickets`: the tickets it concerns, each with its open claim, as they are now (e.g. the
+    ticket a re-run claim already holds)."""
 
     reason: str
-    tickets: tuple[Ticket, ...]
+    tickets: tuple[TicketState, ...]
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,7 @@ def transact(
       (ticket times and `OpRecord.at`, which the store persists as tkt-time).
     - Refusal and NoOp return immediately; nothing is written. A NoOp's
       `ticket_ids` are resolved against the snapshot into `Unchanged.tickets`.
-    - Committed.tickets are the tickets written by the Apply.
+    - Committed.tickets are the tickets the record names, as the Apply leaves them.
     - Each attempt starts with `backoff.begin()`; after a Conflict, the wait it returned
       is called with the attempt number before the next attempt (never after the last;
       no backoff means retry at once).
@@ -82,8 +84,7 @@ def transact(
         if isinstance(decision, Refusal):
             return Refused(decision)
         if isinstance(decision, NoOp):
-            tickets = tuple(t for i in decision.ticket_ids if (t := snapshot.get(i)) is not None)
-            return Unchanged(decision.reason, tickets)
+            return Unchanged(decision.reason, _states(snapshot, decision.ticket_ids))
         try:
             revision = store.commit(snapshot.revision, decision.changes, decision.record)
         except Conflict:
@@ -92,6 +93,10 @@ def transact(
             continue
         except StoreError as error:
             raise StoreError(str(error), op=op) from error
-        written = tuple(change.ticket for change in decision.changes)
-        return Committed(revision, decision.record, written)
+        written = after(snapshot, decision.changes, revision)
+        return Committed(revision, decision.record, _states(written, decision.record.ticket_ids))
     raise RetriesExhausted(op)
+
+
+def _states(snapshot: Snapshot, ticket_ids: tuple[TicketId, ...]) -> tuple[TicketState, ...]:
+    return tuple(state for i in ticket_ids if (state := snapshot.state(i)) is not None)

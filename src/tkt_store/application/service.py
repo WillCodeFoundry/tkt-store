@@ -1,7 +1,9 @@
 """TicketStore: the facade agents (directly or via the CLI) use.
 
-Mints ids BEFORE transacting (invariant 7), runs ops through the transaction
-loop, and returns its outcomes. Owns no rules of its own beyond that wiring. It
+Mints ticket ids BEFORE transacting (invariant 7), runs ops through the transaction
+loop, and returns its outcomes. Claim ids are never minted here: the caller supplies
+them, since only their hash is stored and a minted id could never be read back
+(ADR 0005). Owns no rules of its own beyond that wiring. It
 depends only on ports (Store, Clock, IdSource); the concrete implementations are
 chosen at the composition root (`tkt_store.open_store`), never here.
 """
@@ -34,10 +36,12 @@ from tkt_store.domain.operations import (
     Unset,
     UnsetType,
 )
-from tkt_store.domain.outcomes import RefusalCode
+from tkt_store.domain.outcomes import Refusal, RefusalCode
+from tkt_store.domain.rules import ticket_set_aside
 from tkt_store.domain.status import Status, derive_status
 from tkt_store.domain.ticket import (
     AgentId,
+    Claim,
     ClaimId,
     Duration,
     Kind,
@@ -53,12 +57,16 @@ DEFAULT_TTL: Duration = 30 * 60
 MAX_MINT_ATTEMPTS = 10
 """How often `add` re-mints a ticket id that collided with an existing one."""
 
+TAKEN = frozenset({RefusalCode.DUPLICATE_ID, RefusalCode.SET_ASIDE})
+"""Refusals that mean a minted ticket id is already taken."""
+
 
 @dataclass(frozen=True)
 class TicketView:
-    """A ticket with its derived status, both taken from the same snapshot."""
+    """A ticket with its open claim and derived status, all taken from the same snapshot."""
 
     ticket: Ticket
+    claim: Claim | None
     status: Status
 
 
@@ -66,9 +74,9 @@ class TicketStore:
     """All mutating methods return the transaction Outcome. Callers that prefer
     exceptions can wrap a call in `raise_for_refusal`, which raises on a refusal.
 
-    Committed and Unchanged carry the affected tickets (so a re-run still reports the
-    claim id it holds). RetriesExhausted and StoreError carry the `op` with the ids it
-    was last tried with: re-run with those ids to converge.
+    Committed and Unchanged carry the affected tickets, each with its open claim (so a
+    re-run still reports the ticket and claim it holds). RetriesExhausted and StoreError
+    carry the `op` with the ids it was last tried with: re-run with those ids to converge.
 
     Construct it with explicit dependencies, or use `tkt_store.open_store(repo)`
     for the production wiring.
@@ -105,8 +113,9 @@ class TicketStore:
     ) -> Outcome:
         """Transacts AddOp. `agent`, when given, is recorded as the actor.
 
-        `ticket_id` None: mint one from the IdSource; on DUPLICATE_ID re-mint and try
-        again (a mint collision, never a re-run: a re-run of your own add is a NoOp).
+        `ticket_id` None: mint one from the IdSource; on DUPLICATE_ID or SET_ASIDE re-mint
+        and try again (a mint collision with a ticket, or with one set aside; never a
+        re-run: a re-run of your own add is a NoOp).
         Supplied: used verbatim (validated by the rules) and the DUPLICATE_ID / NoOp
         outcome is returned without retrying, so a re-run converges. Failures carry the
         op with the last id tried.
@@ -130,9 +139,7 @@ class TicketStore:
             return self._transact(op(ticket_id))
         for _ in range(MAX_MINT_ATTEMPTS):
             outcome = self._transact(op(self._ids.ticket_id()))
-            if not (
-                isinstance(outcome, Refused) and outcome.refusal.code is RefusalCode.DUPLICATE_ID
-            ):
+            if not (isinstance(outcome, Refused) and outcome.refusal.code in TAKEN):
                 return outcome
         return outcome
 
@@ -171,19 +178,15 @@ class TicketStore:
         agent: AgentId,
         ttl: Duration = DEFAULT_TTL,
         *,
-        claim_id: ClaimId | None = None,
+        claim_id: ClaimId,
     ) -> Outcome:
-        """Transacts ClaimOp. The claim id is in the resulting ticket.
-
-        `claim_id` None: mint one from the IdSource. Supplied: used verbatim
-        (validated by the rules), so re-running with the same id and agent converges:
-        NoOp (Unchanged) while the claim is live; if it lapsed and nobody took it over,
-        it is renewed (Committed). A claim id is single-use: never reuse one whose claim
-        has ended.
+        """Transacts ClaimOp. `claim_id` is the caller's (mint it with IdSource.claim_id
+        and keep it): only its hash is stored. Re-running with the same id and agent
+        converges: NoOp (Unchanged) while the claim is live; if it lapsed and nobody took
+        it over, it is renewed (Committed). A claim id is single-use: never reuse one
+        whose claim has ended.
         """
-        return self._transact(
-            ClaimOp(ticket_id, agent, self._ids.claim_id() if claim_id is None else claim_id, ttl)
-        )
+        return self._transact(ClaimOp(ticket_id, agent, claim_id, ttl))
 
     def claim_next(
         self,
@@ -193,12 +196,11 @@ class TicketStore:
         project: ProjectId | None = None,
         kind: Kind | None = None,
         phase: Phase | None = None,
-        claim_id: ClaimId | None = None,
+        claim_id: ClaimId,
     ) -> Outcome:
         """Transacts ClaimNextOp. `claim_id` as in `claim`: a re-run with the same id
         and agent converges on the ticket it already holds — Unchanged naming it while the
         claim is live, Committed (renewed) if it lapsed — never a second ticket."""
-        claim_id = self._ids.claim_id() if claim_id is None else claim_id
         return self._transact(
             ClaimNextOp(agent, claim_id, ttl, project=project, kind=kind, phase=phase)
         )
@@ -247,7 +249,20 @@ class TicketStore:
         ticket = snapshot.get(ticket_id)
         if ticket is None:
             return None
-        return TicketView(ticket, derive_status(snapshot, ticket, self._clock.now()))
+        status = derive_status(snapshot, ticket, self._clock.now())
+        return TicketView(ticket, snapshot.claim_of(ticket_id), status)
+
+    def show(self, ticket_id: TicketId) -> TicketView | Refused:
+        """`view`, or the refusal for an id with no valid ticket: SET_ASIDE if its file was
+        set aside on reading (naming the check that failed), else NOT_FOUND."""
+        snapshot = self._store.snapshot()
+        if (aside := ticket_set_aside(snapshot, ticket_id)) is not None:
+            return Refused(aside)
+        ticket = snapshot.get(ticket_id)
+        if ticket is None:
+            return Refused(Refusal(RefusalCode.NOT_FOUND, f"no ticket {ticket_id}"))
+        status = derive_status(snapshot, ticket, self._clock.now())
+        return TicketView(ticket, snapshot.claim_of(ticket_id), status)
 
     def list(
         self,
@@ -263,12 +278,13 @@ class TicketStore:
         now = self._clock.now()
         views = []
         for ticket in sorted(snapshot.tickets.values(), key=lambda t: t.id):
-            view = TicketView(ticket, derive_status(snapshot, ticket, now))
+            claim = snapshot.claim_of(ticket.id)
+            view = TicketView(ticket, claim, derive_status(snapshot, ticket, now))
             if (
                 (status is None or view.status is status)
                 and (phase is None or ticket.phase is phase)
                 and (project is None or ticket.project == project)
-                and (agent is None or (ticket.claim is not None and ticket.claim.agent == agent))
+                and (agent is None or (claim is not None and claim.agent == agent))
                 and (kind is None or ticket.kind is kind)
             ):
                 views.append(view)

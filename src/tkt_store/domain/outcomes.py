@@ -3,7 +3,8 @@
 PURE module. `rules.decide` returns one of these. A Refusal is an ordinary
 result, not an exception: the rules looked at the facts and said no, which is a
 normal part of operation. The infrastructure turns an `Apply` into exactly one
-commit; `WriteTicket` and `OpRecord` describe that commit without naming git.
+commit; `WriteTicket`, `WriteClaim` and `OpRecord` describe that commit without naming
+git.
 """
 
 from __future__ import annotations
@@ -13,7 +14,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from tkt_store.domain.operations import OpName
-from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Ticket, TicketId, Timestamp
+from tkt_store.domain.ticket import (
+    AgentId,
+    Claim,
+    ClaimFile,
+    ClaimHash,
+    Phase,
+    Ticket,
+    TicketId,
+    Timestamp,
+)
 
 
 class RefusalCode(StrEnum):
@@ -34,12 +44,12 @@ class RefusalCode(StrEnum):
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
     # malformed op: bad id, a field rule (domain/fields.py), ttl out of bounds,
     # expected_version < 1, unknown/self blocker, dependency cycle; or the ticket it would
-    # write breaks a field rule or exceeds its file budget
+    # write breaks a field rule or exceeds the file cap
     INVALID = "INVALID"
     STALE = "STALE"  # edit based on an older content_version; re-read and retry
-    # a claim would grow the ticket file past fields.CLAIM_FILE_MAX: its claim history
-    # fills it; the ticket can still be released, finished or cancelled
-    FULL = "FULL"
+    # the op names a ticket or claim set aside on reading (ADR 0005, ADR 0007), or a
+    # ticket held by a set-aside claim: an operator must repair the store
+    SET_ASIDE = "SET_ASIDE"
 
 
 @dataclass(frozen=True)
@@ -57,8 +67,17 @@ class WriteTicket:
     ticket: Ticket
 
 
-Change = WriteTicket
-"""The only change for now. Tickets are never deleted (design.md Q1)."""
+@dataclass(frozen=True)
+class WriteClaim:
+    """Persist this claim's file, replacing `replaces` (the same claim, in its state before
+    this op): a renewal or an end is a rename. Claim files are never deleted."""
+
+    claim: ClaimFile
+    replaces: Claim | None = None
+
+
+Change = WriteTicket | WriteClaim
+"""Tickets and claims are never deleted (design.md Q1, ADR 0007)."""
 
 
 @dataclass(frozen=True)
@@ -75,7 +94,7 @@ class OpRecord:
     at: Timestamp
     ticket_ids: tuple[TicketId, ...] = ()
     agent: AgentId | None = None
-    claim_id: ClaimId | None = None
+    claim_hash: ClaimHash | None = None
     reason: str = ""
     summary: str = ""
     phase: Phase | None = None

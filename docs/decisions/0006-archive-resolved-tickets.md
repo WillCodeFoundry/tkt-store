@@ -20,30 +20,47 @@ callers choose; sequential ids would otherwise crowd a few shards. A resolved ti
 final, so an archived file never changes again.
 
 **Snapshots read only `tickets/`:** the open tickets (unclaimed, held, blocked or
-expired). Archived tickets are looked up by path, only when an operation needs a
-specific one, several at a time in one git call (`cat-file --batch-check`, then reading
-the few files found):
+expired). Archived files are looked up by path, at the snapshot's revision (never a
+newer one, so a decision sees one state), several at a time in one git call
+(`cat-file --batch-check`, then reading the few files found). Each op makes at most one
+such batch per kind of lookup:
 
 - **Blockers:** a blocker is done when a valid ticket with resolution `done` is at its
-  `archive/done/` path. A candidate's blockers (at most 20) are looked up together.
-- **`add`:** an id is taken if it exists under `tickets/` or either archive path
-  (`DUPLICATE_ID`, as for a set-aside ticket).
-- **`show` and `log` of a resolved ticket,** and re-runs of `done` or `cancel` on one
-  (`Unchanged` versus a refusal depends on its claim history): that one file is read.
-- **Holder ops and `edit`/`revoke` on a resolved ticket:** `TERMINAL`, as today, after
-  reading its archived file.
+  `archive/done/` path. `list` and `claim-next` need the blockers of every open ticket,
+  `claim` those of its ticket; each looks up the blockers not open in one batch. `add`
+  and `edit` find a blocker in the archive the same way, so a resolved blocker is not
+  refused as unknown.
+- **An id that is not open:** `add` finds it taken if it is at either archive path
+  (`DUPLICATE_ID`, as for a set-aside ticket). `claim`, `show`, holder ops, `edit`,
+  `revoke` and re-runs of `done` or `cancel` read its archived file: `TERMINAL` for a
+  claim, holder op, edit or revoke, as today; `NoOp` or a refusal for a re-run of `done`
+  or `cancel`, from its claim history; `NOT_FOUND` only if it is in neither archive.
 - **`list`** shows open tickets; `list --status done` or `--status cancelled` reads that
-  part of the archive, on request.
+  part of the archive, on request. `log` reads commits, not ticket files.
 
-**Fencing is scoped to open tickets.** "An ended claim hash never claims again" is
-checked against open tickets' histories only, not archived ones. Claim ids are random
-128-bit values minted by each agent, so reuse across tickets only happens by mistake;
-on the ticket a claim belonged to, now resolved, every holder op is refused anyway.
+**Fencing stays global, through a claim index.** "An ended claim hash never claims
+again" must cover archived tickets: an agent that re-runs `claim-next` with the same
+claim id after its ticket was resolved must be refused, not given a second ticket. So
+the `done` or `cancel` commit also writes, for each hash in the ticket's
+`ended_claim_ids`, a file `archive/claims/<hh>/<hash>` holding the ticket's id, where
+`<hh>` is the hash's first two digits. `claim` and `claim-next` check the one path for
+their hash, in the same batch as their other lookups; a hash found there is
+`NOT_HOLDER`, as an ended claim on an open ticket is today. Open tickets' histories are
+checked as before.
 
-**Validation (ADR 0005) applies to archived files when they are read,** plus: the file
-must sit where its id and resolution say (the right archive directory and shard); an id
-present in more than one place (open and archived, or in both archives) has every copy
-set aside and reported. Unknown files anywhere stay preserved and never read.
+**Validation (ADR 0005) applies to archived files when they are read,** plus:
+
+- A ticket file must sit where its state says: a resolved ticket under `tickets/`, an
+  open one in the archive, or one in the wrong archive directory or shard is invalid.
+- An id in more than one place (open and archived, or in both archives) has every copy
+  set aside and reported. A snapshot checks both archive paths of every open id in one
+  batch, and a lookup of an archived ticket also checks `tickets/` and the other
+  archive.
+- A claim index entry counts by its path alone; its content (the ticket id) is for
+  `tkt audit`, which reports entries whose content is not an archived ticket carrying
+  that hash. A forged entry can only fence a claim id, which an agent pushing with plain
+  git can do anyway (ADR 0005).
+- Unknown files anywhere stay preserved and never read.
 
 **No ticket cache.** With only open tickets read, a snapshot is one batched read of a
 few dozen to a few hundred small files, far cheaper than the fetch and push around it,
@@ -60,14 +77,20 @@ commit stays.
 - **Moving invalid tickets into a `quarantine/` area:** a move is a write, so reading
   would start committing, any agent could trigger it, and those writes would conflict.
   Invalid tickets stay where they are and `tkt audit` reports them.
-- **An on-disk or id cache:** archived tickets are found by path, so nothing needs the
-  whole archive, and resolved tickets never change.
+- **Fencing against open tickets only:** a re-run of `claim-next` after its ticket was
+  resolved would take a second ticket, breaking "one claim id names one claim on one
+  ticket".
+- **An on-disk or id cache:** archived tickets and ended claims are found by path, so
+  nothing needs the whole archive, and resolved tickets never change.
 
 ## Consequences
 
-- A snapshot's cost tracks open tickets, not history. A `done` or `cancel` commit
-  rewrites one archive shard (about 1/256 of that archive), its 256-entry directory and
-  the root; other commits do not touch the archive.
+- A snapshot's cost tracks open tickets, not history; lookups add a few batched git
+  calls per op. A `done` or `cancel` commit rewrites `tickets/`, one archive shard
+  (about 1/256 of that archive) and its 256-entry directory, a few claim index shards
+  and theirs, `archive/` and the root; other commits do not touch the archive.
+- The archive grows by one ticket file and one index file per claim ever ended; nothing
+  reads it whole except `list --status done|cancelled`.
 - `list --status done` costs in proportion to that archive; it is a deliberate query.
 - Spam *open* tickets still cost every commit (they sit in `tickets/`), and so do junk
   files there; archiving bounds history, not abuse (ADR 0005, *not defended*).

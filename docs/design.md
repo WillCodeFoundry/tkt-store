@@ -22,7 +22,7 @@ approvals, notifications, syncing with Jira/GitHub, multiple stores.
 | **Project** | An opaque identifier for the code repo a ticket belongs to. Supplied by the caller; the store neither derives nor interprets it. |
 | **Claim** | Exclusive holding of a ticket: `agent`, `claim_id`, `lease_until`, `claimed_at`. Stored inside the ticket. Exclusivity is enforced by the claim id (fencing); the lease is advisory. |
 | **Lease** | The claim's expiry. Renewed by the holder; once past, the claim reads *expired*. It may be taken over or reaped only after a further `SKEW_GRACE` (60 s), which absorbs clock skew between writers. |
-| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/move/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history), and an id in any ticket's `ended_claim_ids` can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
+| **Claim id** | A single-use token per claim: 32 hex characters, random or supplied by the caller. Fences stale holders: renew/move/release/done must present it; once its claim ends the ticket records it in `ended_claim_ids` (the full history), and an id in any ticket's `ended_claim_ids` (from 0.2.0 also archived ones, through the claim index of ADR 0006) can never claim again (`NOT_HOLDER`). One claim id names one claim on one ticket. |
 | **Phase** | *Stored* workflow position: which kind of work (or agent role) the ticket waits for. A fixed set named after swarm-forge's roles plus common human steps: `triage`, `specification`, `implementation`, `cleanup`, `architecture`, `hardening`, `qa`, `review`, `release`. No forced order. Moved only by the holder's `move`. |
 | **Resolution** | *Stored*, set once: `done` (by the holder) or `cancelled` (by anyone). A resolved ticket is terminal: never claimable or editable again. |
 | **Status** | *Derived*, never stored — the availability axis: `open`, `blocked`, `claimed`, `expired`, plus `done`/`cancelled` surfaced from the resolution. |
@@ -163,9 +163,9 @@ never a fresh read (lesson from balls' bl-cdec G1).
    otherwise `NOT_HOLDER`, or `NOT_CLAIMED` when there is no claim (exact rules in the
    table below). Fencing survives the end of a claim: every claim that ends (released,
    reaped, taken over, cancelled, done) is appended to the ticket's `ended_claim_ids`, a
-   complete history, and an id recorded there on any ticket can never claim again
-   (`NOT_HOLDER`). A holder whose lease lapsed may still renew, move, release or
-   complete until someone takes the claim over or reaps it.
+   complete history, and an id recorded there on any ticket (resolved ones included,
+   ADR 0006) can never claim again (`NOT_HOLDER`). A holder whose lease lapsed may still
+   renew, move, release or complete until someone takes the claim over or reaps it.
 5. **Idempotence.** Repeating an op whose effect is already present yields `NoOp`, not an error
    (e.g. `done` on a ticket already done by the same claim, a re-run of a landed `move` or
    `release` however many claims came since, a re-run of `claim`/`claim-next` with the
@@ -284,9 +284,9 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   is missing or set aside counts as not done.
 - **Archive (ADR 0006):** `done` and `cancel` move the file to
   `archive/<resolution>/<xx>/` (`<xx>` from the SHA-256 of the id) in the same commit;
-  snapshots read only open tickets, and archived ones are looked up by path (blockers,
-  `add`'s duplicate check, `show`/`log`, re-runs on a resolved ticket). "An ended claim
-  never claims again" is checked against open tickets only.
+  snapshots read only open tickets, and archived ones are looked up by path, in batches
+  (blockers, ids that are not open). The same commit indexes each ended claim hash at
+  `archive/claims/<hh>/<hash>`, so an ended claim still never claims again.
 - **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
   takeable (and reads expired); honest leases never are, since the cap is relative to
   now.
@@ -442,3 +442,4 @@ Decided questions:
   (§8), which a root-commit hash or an `owner/repo` name fits and a remote URL does not.
 - Q3: `claim-next` stays an op (an atomic choice), not a read plus a claim.
 - Q4: leases and times stay integer seconds since the epoch.
+- Dropped: `claim-next` choosing randomly among the top candidates to spread contention.

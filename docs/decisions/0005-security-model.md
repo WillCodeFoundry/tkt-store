@@ -49,11 +49,12 @@ or commit signing could expose.
 - A ticket file is at most 256 KiB. Reads check the size before reading; writes refuse an
   op whose encoded file would exceed it (`INVALID`), so `tkt` never writes what it would
   refuse to read.
-- An invalid ticket is set aside and reported; it never fails the whole store. A partial view is safe: a set-aside blocker counts as not done,
-  and the worst case is `claim-next` choosing a less urgent ticket. `add` of an id whose
-  file is set aside is `DUPLICATE_ID`. A malformed commit is skipped and reported by
-  history. Only regular files at `tickets/tkt-<hex>.json` are read; other files are
-  preserved, as before.
+- An invalid ticket is set aside and reported; it never fails the whole store. A partial
+  view is safe: a set-aside blocker counts as not done, and the worst case is
+  `claim-next` choosing a less urgent ticket. `add` of an id whose file is set aside is
+  `DUPLICATE_ID`. A malformed commit is skipped and reported by
+  history. Only regular files at `tickets/tkt-<hex>.json` (and, by path, the archive of
+  ADR 0006) are read; other files are preserved, as before.
 - The lease cap is time-dependent, so it lives in the rules: a lease ending more than
   `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable (and reads expired).
 
@@ -123,7 +124,8 @@ anything.
 - The file format and the CLI change: protocol 2 (hashed claim ids, `holder`, a strict
   schema), no `--as`, new `clone`, `revoke`, `audit`, `edit --claim-id`. 0.1.0 stores are
   not migrated: 0.2.0 refuses any store whose protocol is not 2 with a clear
-  `StoreError`, rather than reading it (its tickets would all fail the strict schema). `docs/format.md` and `docs/cli.md` change with each stage.
+  `StoreError`, rather than reading it (its tickets would all fail the strict schema).
+  `docs/format.md` and `docs/cli.md` change with each stage.
 - Two git names can map to the same `holder`; that affects only what the board shows,
   since claims are proven by hash.
 - Prompt injection is reduced, not prevented: the agent that works a ticket reads its

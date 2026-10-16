@@ -70,7 +70,7 @@ names an outer one; outer layers depend on inner ones through small ports
 (protocols) that the inner layer owns.
 
 ```text
-domain/          ticket · fields · status · operations · outcomes · rules · errors
+domain/          ticket · fields · occupancy · status · operations · outcomes · rules · errors
                    pure values and decisions; imports nothing but itself
 
 application/     store (port) · clock (port) · ids (port)

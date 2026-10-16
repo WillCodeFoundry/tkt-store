@@ -74,12 +74,16 @@ TICKET_FIELDS = frozenset(
 """Exactly the keys of a ticket file: a missing or unknown key makes it invalid."""
 
 _TIME = r"0|[1-9][0-9]{0,11}"
-CLAIM_NAME_RE = re.compile(
-    rf"(?P<hash>[0-9a-f]{{64}})\.(?P<state>open|{'|'.join(e.value for e in EndedBy)})"
-    rf"\.(?P<agent>[a-z0-9]+(?:-[a-z0-9]+)*)\.(?P<claimed_at>{_TIME})\.(?P<time>{_TIME})"
+_SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+CLAIM_PATH_RE = re.compile(
+    rf"claims/(?P<folder>(?=[a-z0-9-]{{8,32}}/){_SLUG})/(?P<hash>[0-9a-f]{{64}})"
+    rf"\.(?P<state>open|{'|'.join(e.value for e in EndedBy)})"
+    rf"\.(?P<agent>(?=[a-z0-9-]{{1,39}}\.){_SLUG})\.(?P<claimed_at>{_TIME})\.(?P<time>{_TIME})"
 )
-"""A claim file's name (ADR 0007): `<hash>.<open|ended_by>.<agent>.<claimed_at>.<t>`,
-where `t` is `lease_until` for an open claim and `ended_at` for an ended one."""
+"""A claim file's path (ADR 0007): `claims/<ticket id>/<hash>.<open|ended_by>.<agent>.
+<claimed_at>.<t>`, where `t` is `lease_until` for an open claim and `ended_at` for an
+ended one; the folder follows the ticket id rule and the agent the agent rule."""
+_ENDED_BY = {by.value: by for by in EndedBy}
 
 
 _E = TypeVar("_E", Kind, Phase, Resolution)
@@ -126,18 +130,14 @@ def claim_of(path: str) -> ClaimFile | None:
     """The claim a 'claims/<id>/<name>' path holds, or None when the path is not a claim
     file's (an unknown file: no part of it is used, ADR 0007). Whether the file itself is
     an empty regular file is the caller's check."""
-    parts = path.split("/")
-    if len(parts) != 3 or parts[0] != CLAIMS_DIR or not TICKET_ID_RE.fullmatch(parts[1]):
+    found = CLAIM_PATH_RE.fullmatch(path)
+    if found is None:
         return None
-    folder, name = parts[1], parts[2]
-    found = CLAIM_NAME_RE.fullmatch(name)
-    if found is None or fields.agent_problem(found["agent"]):
-        return None
-    ticket_id, hashed = TicketId(folder), ClaimHash(found["hash"])
-    agent, claimed_at, last = AgentId(found["agent"]), int(found["claimed_at"]), int(found["time"])
-    if found["state"] == "open":
-        return Claim(ticket_id, hashed, agent, claimed_at, last)
-    return EndedClaim(ticket_id, hashed, agent, claimed_at, EndedBy(found["state"]), last)
+    folder, hashed, state, agent, claimed_at, last = found.groups()
+    ticket_id, claim, holder = TicketId(folder), ClaimHash(hashed), AgentId(agent)
+    if state == "open":
+        return Claim(ticket_id, claim, holder, int(claimed_at), int(last))
+    return EndedClaim(ticket_id, claim, holder, int(claimed_at), _ENDED_BY[state], int(last))
 
 
 def encode_store_meta() -> bytes:

@@ -10,17 +10,20 @@ from typing import Any
 
 import pytest
 
-from tests.security import bug, design
-from tests.security.conftest import forged, push_raw, service, ticket_file
-from tests.unit.builders import C1, NOW, T1, T2
+from tests.security.support import bug, design, forged, push_raw, service, ticket_file
 from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
-from tkt_store.domain.ticket import Snapshot, TicketId
+from tkt_store.domain.ticket import ClaimId, Snapshot, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import git_runner
 from tkt_store.infrastructure.git.wire import DEFAULT_REF
 from tkt_store.infrastructure.ids import SequentialIds
+
+NOW = 1_000_000
+C1 = ClaimId("1" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
 
 pytestmark = pytest.mark.git
 

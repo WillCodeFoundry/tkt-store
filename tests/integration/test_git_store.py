@@ -8,25 +8,42 @@ from __future__ import annotations
 import inspect
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from tests.gitkit import HookedRunner, git, head, paths, show, write_files
-from tests.unit.builders import C1, NOW, T1, T2, TTL, A, tkt
 from tkt_store import open_store
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed
 from tkt_store.domain.operations import OpName
 from tkt_store.domain.outcomes import OpRecord, WriteTicket
-from tkt_store.domain.ticket import Revision, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, Phase, Revision, Ticket, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError, git_runner
 from tkt_store.infrastructure.ids import SequentialIds
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+C1 = ClaimId("1" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
+
+
+def tkt(ticket_id: TicketId, **fields: Any) -> Ticket:
+    """A plain open ticket; `fields` override."""
+    base = Ticket(
+        id=ticket_id, title="Expire tokens", created=0, updated=0, phase=Phase.IMPLEMENTATION
+    )
+    return replace(base, **fields)
+
 
 pytestmark = pytest.mark.git
 

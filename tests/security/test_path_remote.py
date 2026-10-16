@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.security import design
-from tests.security.conftest import service
-from tests.unit.builders import T2
+from tests.security.support import design, service
 from tkt_store.application.errors import StoreError
+from tkt_store.domain.ticket import TicketId
+
+T2 = TicketId("tkt-2")
 
 pytestmark = pytest.mark.git
 

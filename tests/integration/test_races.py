@@ -10,13 +10,22 @@ from threading import Barrier
 import pytest
 
 from tests.gitkit import HookedRunner, head, once
-from tests.unit.builders import C1, C2, NOW, T1, T2, TTL, A, B
 from tkt_store.application.service import TicketStore
 from tkt_store.application.transaction import Committed, Refused
 from tkt_store.domain.outcomes import RefusalCode
+from tkt_store.domain.ticket import AgentId, ClaimId, TicketId
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.ids import SequentialIds
+
+NOW = 1_000_000
+TTL = 1800
+A = AgentId("coder-7")
+B = AgentId("reviewer-2")
+C1 = ClaimId("1" * 32)
+C2 = ClaimId("2" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
 
 pytestmark = [pytest.mark.git, pytest.mark.slow]
 

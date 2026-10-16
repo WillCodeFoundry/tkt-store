@@ -7,15 +7,3 @@ lands it passes, which strict mode reports as a failure until the marker is remo
 - `design(...)`: the right behaviour still needs a decision (batch C); the test pins the
   security property, not the shape of the fix, and may be adjusted with that decision.
 """
-
-from __future__ import annotations
-
-import pytest
-
-
-def bug(reason: str) -> pytest.MarkDecorator:
-    return pytest.mark.xfail(strict=True, reason=f"security bug (batch A): {reason}")
-
-
-def design(reason: str) -> pytest.MarkDecorator:
-    return pytest.mark.xfail(strict=True, reason=f"security, design pending (batch C): {reason}")

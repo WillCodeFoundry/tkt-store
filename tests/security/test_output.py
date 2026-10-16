@@ -11,11 +11,13 @@ from typing import Any
 import pytest
 
 from tests.gitkit import write_files
-from tests.security import bug, design
-from tests.security.conftest import forged, push_raw, service, ticket_file
-from tests.unit.builders import T1, TTL, A
+from tests.security.support import bug, design, forged, push_raw, service, ticket_file
 from tkt_store.cli import main
 from tkt_store.domain.ticket import AgentId, ClaimId, TicketId
+
+TTL = 1800
+A = AgentId("coder-7")
+T1 = TicketId("tkt-1")
 
 pytestmark = pytest.mark.git
 

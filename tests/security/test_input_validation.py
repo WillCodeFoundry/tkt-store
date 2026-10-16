@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.security import bug, design
-from tests.unit.builders import C1, T1, T2, TTL, A
+from tests.security.support import bug, design
 from tkt_store.domain.operations import (
     AddOp,
     CancelOp,
@@ -20,7 +19,13 @@ from tkt_store.domain.operations import (
 )
 from tkt_store.domain.outcomes import RefusalCode
 from tkt_store.domain.rules import validate_op
-from tkt_store.domain.ticket import AgentId, ProjectId, TicketId
+from tkt_store.domain.ticket import AgentId, ClaimId, ProjectId, TicketId
+
+TTL = 1800
+A = AgentId("coder-7")
+C1 = ClaimId("1" * 32)
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
 
 LINE_BREAKS = {
     "U+2028 line separator": "\u2028",

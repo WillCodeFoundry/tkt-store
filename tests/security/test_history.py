@@ -7,12 +7,13 @@ from pathlib import Path
 import pytest
 
 from tests.gitkit import write_files
-from tests.security import bug
-from tests.security.conftest import service
-from tests.unit.builders import T1, T2
+from tests.security.support import bug, service
 from tkt_store.application.errors import StoreError
 from tkt_store.domain.operations import OpName
-from tkt_store.domain.ticket import AgentId
+from tkt_store.domain.ticket import AgentId, TicketId
+
+T1 = TicketId("tkt-1")
+T2 = TicketId("tkt-2")
 
 
 def malformed(phase: str) -> str:

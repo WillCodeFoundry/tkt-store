@@ -106,14 +106,23 @@ class Claim:
         return max(0, now - self.claimed_at)
 
     def is_live(self, now: Timestamp) -> bool:
-        """True while the lease has not expired (now < lease_until)."""
-        return now < self.lease_until
+        """True while the lease has not expired (now < lease_until) and is not beyond
+        the cap (`is_beyond_cap`)."""
+        return now < self.lease_until and not self.is_beyond_cap(now)
 
     def is_takeable(self, now: Timestamp) -> bool:
         """True once the claim may be acted on as expired — taken over or reaped:
-        now >= lease_until + SKEW_GRACE. Display (Status.EXPIRED) starts earlier, at
-        lease_until."""
-        return now >= self.lease_until + SKEW_GRACE
+        now >= lease_until + SKEW_GRACE, or a lease beyond the cap. Display
+        (Status.EXPIRED) starts earlier, at lease_until."""
+        return now >= self.lease_until + SKEW_GRACE or self.is_beyond_cap(now)
+
+    def is_beyond_cap(self, now: Timestamp) -> bool:
+        """A lease ending more than MAX_TTL + SKEW_GRACE after now, which no honest
+        writer sets (claim and renew cap it at now + MAX_TTL, and clocks agree within
+        the grace). Such a claim reads expired and is takeable, so a forged lease cannot
+        lock a ticket. The cap is relative to now, never to claimed_at, so an honestly
+        renewed claim is never beyond it."""
+        return self.lease_until > now + MAX_TTL + SKEW_GRACE
 
     def to_dict(self) -> dict[str, Any]:
         """The claim as plain data, as it appears in the ticket file (docs/format.md)."""

@@ -32,8 +32,8 @@ class RefusalCode(StrEnum):
     BLOCKED = "BLOCKED"  # a blocker is not yet done
     TERMINAL = "TERMINAL"  # the ticket is already resolved (done/cancelled): final
     NOTHING_CLAIMABLE = "NOTHING_CLAIMABLE"  # claim-next found no candidate
-    # malformed op: bad id, control characters, ttl out of bounds, expected_version < 1,
-    # empty title, unknown/self blocker, dependency cycle
+    # malformed op: bad id, a field rule (domain/fields.py), ttl out of bounds,
+    # expected_version < 1, unknown/self blocker, dependency cycle
     INVALID = "INVALID"
     STALE = "STALE"  # edit based on an older content_version; re-read and retry
 

@@ -178,7 +178,7 @@ def encode_message(record: OpRecord) -> str:
     """Subject line, blank line, trailers in a fixed order, including tkt-protocol.
 
     The subject is always emitted on one line (defensively, although the rules
-    already refuse control characters in titles). tkt-time (`record.at`) is always
+    already refuse line breaks in titles). tkt-time (`record.at`) is always
     written; tkt-phase only when `record.phase` is set.
     """
     trailers = [

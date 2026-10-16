@@ -2,7 +2,8 @@
 
 The remote is authoritative; local refs are a cache (design.md §6). Everything
 here goes through a GitRunner, so nothing in this module touches the git binary
-directly. One process per clone is assumed (design.md §7).
+directly. One process per clone is assumed (design.md §7). The remote name always
+follows `--`, so a name starting with `-` is never read as an option (ADR 0005).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ def fetch(git: GitRunner, remote: str, ref: str) -> Revision | None:
     the private ref, and one process per clone is assumed (design.md §7), so it holds
     exactly what this fetch brought in."""
     try:
-        git("fetch", "--no-tags", "--no-write-fetch-head", remote,
+        git("fetch", "--no-tags", "--no-write-fetch-head", "--", remote,
             f"+{ref}:{fetched_ref(remote, ref)}")  # fmt: skip
     except GitError:
         if not _remote_lacks(git, remote, ref):
@@ -124,7 +125,7 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     try:
         git(
             "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
-            remote, f"{new}:{ref}",
+            "--", remote, f"{new}:{ref}",
         )  # fmt: skip
     except GitError as error:
         status = [line for line in error.stdout.decode().splitlines() if line.startswith("!")]
@@ -150,7 +151,7 @@ def remote_head(git: GitRunner, remote: str, ref: str) -> Revision | None:
     """The remote's current value of `ref` (None if it does not exist), by `ls-remote`:
     one round trip, no objects transferred."""
     try:
-        out = git("ls-remote", "--exit-code", remote, ref).decode()
+        out = git("ls-remote", "--exit-code", "--", remote, ref).decode()
     except GitError as error:
         if error.returncode == NO_SUCH_REF:
             return None

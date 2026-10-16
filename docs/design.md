@@ -70,7 +70,7 @@ names an outer one; outer layers depend on inner ones through small ports
 (protocols) that the inner layer owns.
 
 ```text
-domain/          ticket · status · operations · outcomes · rules · errors
+domain/          ticket · fields · status · operations · outcomes · rules · errors
                    pure values and decisions; imports nothing but itself
 
 application/     store (port) · clock (port) · ids (port)
@@ -250,8 +250,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | op | refusals (in order) | NoOp | Apply |
 |---|---|---|---|
 | init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
-| add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
-| edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
+| add | `NOT_INITIALISED`, `INVALID` (a field rule, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
+| edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (a field rule, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
 | claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent (until 0.2.0) → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
 | claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |
@@ -282,9 +282,14 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   taken, and the file is evidence.
 - **Blockers:** writes still refuse unknown or self blockers; on reading, a blocker that
   is missing or set aside counts as not done.
+- **Field rules** (`domain/fields.py`, `docs/format.md`): every value an op writes is
+  checked by `validate_op` (`INVALID`): identifiers like GitHub names, PRECIS-style free
+  text, size limits, priority 0 to 100, at most 20 blockers without duplicates.
 - **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
   takeable (and reads expired); honest leases never are, since the cap is relative to
   now.
+- **git** always gets `--` before the remote name, so a name starting with `-` is never
+  read as an option.
 
 ## 6. Failure model
 

@@ -26,18 +26,12 @@ def malformed(phase: str) -> str:
     )
 
 
-@pytest.mark.security_bug(
-    "a U+2028 in --as forges a tkt-id trailer: log(victim) shows an op that never happened"
-)
 def test_an_agent_name_cannot_forge_history_for_another_ticket(tickets: TicketStore) -> None:
     tickets.add("Attacker's own ticket", ticket_id=T2)
     tickets.cancel(T2, agent=AgentId("mallory\u2028tkt-id: tkt-1"))
     assert [e.record.op for e in tickets.log(T1)] == [OpName.ADD]
 
 
-@pytest.mark.security_bug(
-    "a U+2028 in --reason writes a malformed trailer that breaks every later tkt log"
-)
 def test_a_reason_cannot_break_history(tickets: TicketStore) -> None:
     tickets.add("Attacker's own ticket", ticket_id=T2)
     tickets.cancel(T2, "bye\u2028tkt-phase: bogus")

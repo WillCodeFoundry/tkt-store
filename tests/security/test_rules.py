@@ -1,5 +1,5 @@
 """The rules (domain/rules.py decide) facing forged state that decodes fine, with a guard
-(an ordinary passing test) that the fix must keep: honest renewals are never taken over."""
+that the lease cap must keep: honest renewals are never taken over."""
 
 from __future__ import annotations
 
@@ -45,9 +45,6 @@ FORGED_LEASE = Claim(agent=A, claim_id=C1, lease_until=NOW + 100 * MAX_TTL, clai
 """A lease no honest writer can produce: renew and claim cap it at now + MAX_TTL."""
 
 
-@pytest.mark.security_design(
-    "a forged lease far beyond MAX_TTL locks a ticket until someone cancels it"
-)
 @pytest.mark.parametrize(
     "op", [ClaimOp(T1, B, C2, TTL), ReapOp()], ids=["claim by another agent", "reap"]
 )
@@ -66,7 +63,7 @@ HONESTLY_RENEWED = Claim(agent=A, claim_id=C1, lease_until=RENEWED_AT + TTL, cla
 
 
 def test_guard_an_honestly_renewed_claim_is_never_taken_over() -> None:
-    """Not a finding: a guard for the fix above. A cap based on claimed_at would let anyone
+    """A guard for the lease cap above. A cap based on claimed_at would let anyone
     take over a claim that has been renewed for more than MAX_TTL while its lease is live,
     breaking invariant 1; only a cap relative to now passes both tests."""
     now = RENEWED_AT + 1

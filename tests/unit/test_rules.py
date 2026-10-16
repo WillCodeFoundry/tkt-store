@@ -436,6 +436,10 @@ class TestValidation:
         decision = decide(snap(tkt()), EditOp(T1, expected_version, title="X"), NOW)
         refused(decision, RefusalCode.INVALID)
 
+    def test_claim_next_project_filter_is_validated(self) -> None:
+        op = ClaimNextOp(A, C1, TTL, project=ProjectId("github.com/org/repo"))
+        refused(decide(snap(tkt()), op, NOW), RefusalCode.INVALID)
+
     def test_validation_wins_over_every_other_outcome(self) -> None:
         refused(decide(snap(), RenewOp(T1, ClaimId("bad"), TTL), NOW), RefusalCode.INVALID)
 

@@ -97,9 +97,6 @@ def test_errors_do_not_echo_a_forged_store_meta(honest_clone: Path, bare_remote:
     assert "curl" not in str(exc.value)
 
 
-@pytest.mark.security_bug(
-    "a remote name starting with '-' reaches git as an option: --upload-pack runs a command"
-)
 def test_a_remote_name_is_never_an_option(honest_clone: Path, tmp_path: Path) -> None:
     marker = tmp_path / "pwned"
     store = GitStore.at(honest_clone, remote=f"--upload-pack=touch {marker};false")

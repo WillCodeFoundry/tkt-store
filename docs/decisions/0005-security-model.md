@@ -76,11 +76,15 @@ saying the claim was revoked. `cancel` remains for work that is no longer wanted
 
 **Identity comes from git, not from a flag.** No command takes an agent name (`--as` is
 removed). `tkt` uses the author identity git would put on the commit (`git var
-GIT_AUTHOR_IDENT`) and refuses to write if none is set. The commit author records who
-did each op, and `tkt log` shows its name and email, unverified; the `tkt-agent` trailer
-goes. A claim stores `holder`, the git name mapped to an identifier (accents folded with
-NFKD, each run of other characters to one `-`, ends trimmed, cut to 39; refused only if
-nothing is left), so `show` and `list` say who is working on what (`list --holder`).
+GIT_AUTHOR_IDENT`), run with `user.useConfigOnly=true` so git never invents one from the
+OS account and host name, and refuses to write if none is configured. The commit author
+records who did each op, and `tkt log` shows its name and email, unverified; the
+`tkt-agent` trailer goes. A claim stores `holder`, the git name mapped to an identifier:
+accents folded with NFKD, each run of characters outside `[A-Za-z0-9]` (hyphens
+included) replaced by one `-`, cut to 39, then hyphens trimmed from both ends; refused
+if nothing is left (so a name in a non-Latin script needs an ASCII `user.name`). `show`
+and `list` say who is working on what; `list --holder NAME` maps its argument the same
+way and matches ignoring case, as GitHub does. A re-run of a claim keeps its `holder`.
 `tkt clone URL DIR` makes the clone without a checkout and prints the identity and the
 holder name; every write reports them. Documentation recommends a GitHub noreply address
 per agent: the store's history is readable by everyone with access, and GitHub can
@@ -119,7 +123,8 @@ anything.
 
 - The file format and the CLI change: protocol 2 (hashed claim ids, `holder`, a strict
   schema), no `--as`, new `clone`, `revoke`, `audit`, `edit --claim-id`. 0.1.0 stores are
-  not migrated. `docs/format.md` and `docs/cli.md` change with each stage.
+  not migrated: 0.2.0 refuses any store whose protocol is not 2 with a clear
+  `StoreError`, rather than reading it (its tickets would all fail the strict schema). `docs/format.md` and `docs/cli.md` change with each stage.
 - Two git names can map to the same `holder`; that affects only what the board shows,
   since claims are proven by hash.
 - Prompt injection is reduced, not prevented: the agent that works a ticket reads its

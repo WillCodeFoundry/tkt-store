@@ -252,8 +252,8 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
 | add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
 | edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
-| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
-| claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
+| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent (until 0.2.0) → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
+| claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |
 | reap | — | no claim past the grace | every claim past the grace cleared, one record |
 
@@ -267,9 +267,11 @@ in this order after `NOT_FOUND`, the first that applies deciding:
   hash alone (no agent comparison). Callers always supply claim ids (the CLI already
   does; the library stops minting them), since a minted id could not be read back.
 - **The holder is recorded, not declared.** No op takes an agent name. A claim records
-  `holder`: the claimer's git name, mapped to an identifier (accents folded, each run of
-  other characters one `-`, ends trimmed, at most 39 characters; refused only if nothing
-  is left). Who did each op is the commit's author.
+  `holder`: the claimer's git name, mapped to an identifier (accents folded; each run of
+  characters outside `[A-Za-z0-9]`, hyphens included, becomes one `-`; cut to 39; then
+  hyphens trimmed; refused if nothing is left). A re-run keeps the claim's `holder`;
+  `list --holder` maps its argument the same way and ignores case. Who did each op is
+  the commit's author.
 - **edit while held** needs the holder's claim id; anyone else is refused `NOT_HOLDER`.
   An unheld ticket may be edited by anyone, as before.
 - **revoke** (new, anyone, optional reason): `NOT_FOUND`; `TERMINAL` if resolved; NoOp
@@ -365,7 +367,8 @@ take over lapsed claims directly); it tidies what `list` shows.
 ## 8. Security model
 
 Decided in ADR 0005 and implemented in stages for 0.2.0, which bumps the format to
-protocol 2 (0.1.0 stores are not migrated). Each gap is a strict expected-failure test in
+protocol 2. 0.1.0 stores are not migrated: 0.2.0 refuses a store whose protocol is not 2
+(`StoreError`) instead of reading it. Each gap is a strict expected-failure test in
 `tests/security/` until its fix lands.
 
 **Threat.** The agents are LLMs. One may be compromised or confused (prompt-injected by
@@ -394,12 +397,13 @@ better than one bad file stopping every agent. When two tickets carry the same c
 claim hash, both are set aside (deterministic for every reader).
 
 **Identity.** `tkt` uses the author identity git would put on the commit (`git var
-GIT_AUTHOR_IDENT`: the clone's config, then global and system, and the `GIT_AUTHOR_*`
-variables) and refuses to write if none is set. The commit author is the record of who
+GIT_AUTHOR_IDENT`: the `GIT_AUTHOR_*` variables, then the clone's config, then global and
+system), run with `user.useConfigOnly=true` so git never invents one from the OS account
+and host name; it refuses to write if none is configured. The commit author is the record of who
 did each op; `tkt log` shows its name and email, unverified. A claim also stores
-`holder`, the git name mapped to an identifier (accents folded, runs of other characters
-to one `-`, ends trimmed, at most 39 characters), so `show` and `list` say who is working
-on what. `tkt clone` prints the identity and the holder name; every write reports them.
+`holder`, the git name mapped to an identifier (accents folded, each run of characters
+outside `[A-Za-z0-9]` to one `-`, cut to 39, hyphens trimmed; a name with no Latin
+letters or digits is refused), so `show` and `list` say who is working on what. `tkt clone` prints the identity and the holder name; every write reports them.
 Hashed claim ids still prove that the agent acting on a claim is the one that took it.
 
 **Not defended.** The agent that works a ticket reads its body, so prompt injection is

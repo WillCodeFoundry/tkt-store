@@ -16,6 +16,15 @@
 - `scripts/bench_github.py` is now `scripts/bench.py`, for any remote; it refuses to run
   against a store holding tickets it did not create.
 - ADR 0001 trimmed to the verdict, the binding constraint and the push budget.
+- Security review: every finding is a strict expected-failure test in `tests/security/`
+  (markers `security_bug` / `security_design`); test modules no longer import helpers
+  from other test suites; pytest runs with `--strict-markers`.
+- Security model decided (ADR 0005, `docs/design.md` §8), to be implemented for 0.2.0:
+  agents confined to `tkt`; everything read validated and invalid tickets quarantined;
+  strict field rules and limits; escaped output; hashed claim ids; holder-only edits
+  while held; `revoke`; identity from git (no `--as`); `tkt clone`; `tkt audit`.
+- README: agents use only `tkt`, never git, on the store; the risks of path remotes
+  (code execution in other agents) and `git daemon` (no authentication).
 
 ## 0.1.0 — milestone 1
 

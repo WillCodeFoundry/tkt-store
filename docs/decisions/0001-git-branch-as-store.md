@@ -44,7 +44,7 @@ file's git history.
   thousand, on GitHub (seconds of network per op) only at tens of thousands. The store
   keeps itself packed (`git gc --auto`) and a long-lived store caches decoded tickets;
   what would make each CLI call independent of history is archiving resolved tickets
-  (design.md §8, Q1).
+  (design.md §9, Q1).
 - **Budget:** pushes per minute ≈ agents × (pushes per ticket ÷ minutes per ticket + 1 ÷
   renew interval in minutes), plus lost races. With 10 agents, about 5 pushes per
   ticket and renewals every 20 minutes, tasks of 20 minutes need about 3 pushes per

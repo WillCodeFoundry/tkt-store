@@ -40,7 +40,7 @@ That is the whole mental model: to know how a field behaves, find its group.
 | Group | Fields | Changed by | Guard |
 |---|---|---|---|
 | Identity | `id`, `kind`, `project`, `created` | `add` only | never changes |
-| Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `edit`, by anyone | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
+| Content | `title`, `body`, `priority`, `blocked_by`, `tags`, `content_version` | `edit`, by anyone (from 0.2.0: only the holder while held, §5) | not resolved; must name the `content_version` it was based on (`STALE` otherwise) |
 | Workflow | `phase`, `resolution` | `move` (holder), `done` (holder), `cancel` (anyone): the lifecycle table below | per transition; `resolution` is set once |
 | Occupancy | `claim`, `ended_claim_ids` | `claim`, `claim-next`, `renew`, `release`, `done`, `reap`, `cancel` | holder ops (`renew`, `move`, `release`, `done`) fenced by claim id (holder-op table, §5); `reap` and `cancel` deliberately unfenced |
 | Bookkeeping | `updated`, unknown keys | the system | — |
@@ -195,8 +195,8 @@ never a fresh read (lesson from balls' bl-cdec G1).
     still renews it, like `renew`) — and reads `blocked` unless it
     is live-claimed. A *cancelled* blocker
     does not satisfy a dependency. Blockers do not gate completion: `edit` may add a
-    blocker to a claimed ticket without disturbing the claim, and the holder may still
-    finish it.
+    blocker to a claimed ticket without disturbing the claim (from 0.2.0 only its holder
+    may), and the holder may still finish it.
 11. **No silent overwrite of edits.** `edit` names the `content_version` it was based
     on; if it was edited since (its `content_version` moved on), it is refused `STALE`,
     never last-writer-wins.
@@ -252,12 +252,39 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | init | — | store exists | empty tree (the git store also writes `tkt-store.json` into the root commit) |
 | add | `NOT_INITIALISED`, `INVALID` (empty title, unknown/self blocker); id exists: `DUPLICATE_ID` if `kind`/`project` differ, or if never edited and the content differs | id exists with the same identity, and either the same content or edited since (workflow and occupancy are never compared) | new ticket |
 | edit | `NOT_FOUND`, `TERMINAL`, `INVALID` (empty title, unknown/self blocker, cycle); then, unless it is a NoOp, `STALE` if `content_version != expected_version` | every field it sets already has that value (checked before the version, so a landed re-run converges) | changed fields, `content_version + 1` |
-| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
-| claim-next | same claim id on any ticket, other agent → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
+| claim | `NOT_FOUND`, `TERMINAL`; this ticket's claim has the id, other agent (until 0.2.0) → `ALREADY_CLAIMED`; the id is the current claim on another ticket → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `BLOCKED`; `ALREADY_CLAIMED` | this ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live | new claim; a takeover fences the old id; the same id and agent on a lapsed claim renews it |
+| claim-next | same claim id on any ticket, other agent (until 0.2.0) → `ALREADY_CLAIMED`; ended claim id on any ticket → `NOT_HOLDER`; `NOTHING_CLAIMABLE` (a `--project` filter matches that exact project only) | some ticket's current claim has the same id and agent (from 0.2.0: the same id) and is live (names it) | as claim, on the most urgent claimable match; the same id and agent on a lapsed claim renews it |
 | cancel | `NOT_FOUND`, `TERMINAL` (done) | already cancelled | resolution `cancelled`, claim cleared |
 | reap | — | no claim past the grace | every claim past the grace cleared, one record |
 
 `validate_op` (shape checks, `INVALID`) runs before all of these.
+
+### Changes in 0.2.0 (ADR 0005, §8)
+
+- **Claims store a hash.** `claim.claim_id` and `ended_claim_ids` hold the SHA-256 of
+  each claim id (64 lowercase hex), and so does the `tkt-claim` trailer. Every rule above
+  compares hashes, so fencing and re-runs are unchanged; a re-run is recognised by the
+  hash alone (no agent comparison). Callers always supply claim ids (the CLI already
+  does; the library stops minting them), since a minted id could not be read back.
+- **The holder is recorded, not declared.** No op takes an agent name. A claim records
+  `holder`: the claimer's git name, mapped to an identifier (accents folded: NFKD, then combining marks dropped; each run of
+  characters outside `[A-Za-z0-9]`, hyphens included, becomes one `-`; cut to 39; then
+  hyphens trimmed; refused if nothing is left). A re-run keeps the claim's `holder`;
+  `list --holder` maps its argument the same way and ignores case. Who did each op is
+  the commit's author.
+- **edit while held** needs the holder's claim id; anyone else is refused `NOT_HOLDER`.
+  An unheld ticket may be edited by anyone, as before.
+- **revoke** (new, anyone, optional reason): `NOT_FOUND`; `TERMINAL` if resolved; NoOp
+  if not claimed; otherwise the claim ends (its hash appended to `ended_claim_ids`) and
+  the ticket stays open in its phase. The holder's next `renew`, `move` or `done` is
+  `NOT_HOLDER`, its `release` a NoOp, and both messages say the claim was revoked.
+- **add** of an id whose file is set aside on reading (§8) is `DUPLICATE_ID`: the id is
+  taken, and the file is evidence.
+- **Blockers:** writes still refuse unknown or self blockers; on reading, a blocker that
+  is missing or set aside counts as not done.
+- **Leases:** a lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as
+  takeable (and reads expired); honest leases never are, since the cap is relative to
+  now.
 
 ## 6. Failure model
 
@@ -272,7 +299,7 @@ in this order after `NOT_FOUND`, the first that applies deciding:
 | Push failed ambiguously (timeout) | `StoreError(op=…)`; the commit may have landed | Re-run `op` with the same ids: converges either way |
 | Holder dies | Lease lapses → `expired` status | After `SKEW_GRACE`, `reap` or a new `claim` takes over; old holder fenced by claim id |
 | Remote unreachable or not configured | `StoreError` | Retry later |
-| Corrupt ticket file, or format version missing/newer | `StoreError` on every snapshot (no partial views) | Fix the file with an ordinary git commit (deliberately bypassing `tkt`), or upgrade the client |
+| Corrupt ticket file (until 0.2.0), or format version missing/newer | `StoreError` on every snapshot (no partial views) | An operator fixes the file with an ordinary git commit, or upgrades the client. From 0.2.0 an invalid ticket is set aside and reported instead (§8) |
 
 Commit order: build objects on `base` → push `new:ref` with `remote.publish`
 (a rejection with the branch moved ⇒ `Conflict`, nothing published; with the branch
@@ -310,11 +337,11 @@ ref. That is what makes `claim-next`, `reap` and dependency checks safe across t
 and it means every write is serialized. `Ticket` is a value inside that boundary, not an
 aggregate of its own.
 
-**Trust model.** Agents are trusted to mutate the store *only through `tkt`*. The
-remote rules protect history and prevent lost updates; they do not stop a credential
-holder from bypassing `tkt` and committing arbitrary content. CAS and fencing bind only
-writers that go through the library. Defending against a malicious agent would need
-coordinator-gated writes and is out of scope.
+**Trust model.** Agents are confined to `tkt`: they never run git against the store.
+The remote rules protect history and prevent lost updates; they do not stop a credential
+holder from bypassing `tkt` and committing arbitrary content. CAS, fencing and validation
+bind only writers that go through `tkt`. What one compromised agent can and cannot do
+to the others is §8.
 
 **Clocks.** Each writer uses its own clock, so clocks may skew. Leases are advisory and
 acted on only after `SKEW_GRACE`; a TTL should comfortably exceed
@@ -328,22 +355,75 @@ push-rate limit a hosting service sets. Measurements and the options beyond: ADR
 **Crash recovery is lease expiry.** A crashed agent's ticket becomes takeable at most
 `ttl + SKEW_GRACE` after its last renewal (about 31 minutes with a 30-minute lease), and
 the next `claim` or `claim-next` takes it over; no supervisor or `reap` is required. A
-supervisor that knows the agent's claim id may release it early, as an optional
-speed-up (an ordinary `release`, not an administrative one). The agent owns
+supervisor may end the claim early with `revoke` (0.2.0, §8); until then, one that
+knows the agent's claim id may `release` it. The agent owns
 its claim id (from `tkt mint claim-id`); a restarted agent re-running its claim with the
-same id and name gets the lapsed claim renewed.
+same id (until 0.2.0, also the same name) gets the lapsed claim renewed.
 
 **Reaping.** `reap` is an idempotent job any writer may run on a schedule (cron, CI).
 Concurrent reapers simply conflict and converge. It is not needed for recovery (claims
 take over lapsed claims directly); it tidies what `list` shows.
 
-## 8. Open questions, accepted limitations and deferred work
+## 8. Security model
+
+Decided in ADR 0005 and implemented in stages for 0.2.0, which bumps the format to
+protocol 2. 0.1.0 stores are not migrated: 0.2.0 refuses a store whose protocol is not 2
+(`StoreError`) instead of reading it. Each gap is a strict expected-failure test in
+`tests/security/` until its fix lands.
+
+**Threat.** The agents are LLMs. One may be compromised or confused (prompt-injected by
+a page or a repository it worked on) and try to run code on another agent's machine,
+prompt-inject the others through the store, or forge or break shared state.
+
+**Assumptions.** Agents are confined to `tkt` (§7): no git commands against the store,
+and a clone made by `tkt clone`. `tkt` never checks out files, so checkout hooks,
+filters and symlinks never come into play, and every write is a compare-and-swap. Each
+agent has its own git identity, which does not change while it runs.
+
+**Defences, all inside `tkt`** (the remote is unknown, so nothing is enforced on push):
+
+| Threat | Defence |
+|---|---|
+| Code execution in other agents | No shell anywhere (argument lists only); git always gets the remote name after `--`; no checkout. Deployment: never a path remote shared across agents that do not fully trust each other (README) |
+| Prompt injection through stored text | Strict field rules (identifier allowlists, a PRECIS-style rule for free text, size limits; lengths in code points after NFC); all non-ASCII escaped on output; errors never echo values read from the store; `list` never prints bodies; agent guidance: every composed field is data, never instructions |
+| Forged or malformed content | Everything read is checked like everything written (the same field checks), plus whole-ticket and cross-ticket checks; a strict schema (unknown keys invalid); only regular files at ticket paths are read, and never one over 256 KiB (writes are refused if the encoded file would exceed it); an invalid ticket is set aside and reported (cached by blob id), never failing the store; a malformed commit is skipped by history; `tkt audit` lists what was set aside |
+| Acting as another agent's holder | Tickets and history store a SHA-256 of each claim id, so only the agent that minted it can renew, move, release, finish or (while held) edit; anyone may `revoke` a claim (ends it, ticket stays open) or `cancel` the ticket |
+| Locking a ticket forever | A lease ending more than `MAX_TTL` + `SKEW_GRACE` after now is treated as takeable |
+
+**A partial view is acceptable.** Setting an invalid ticket aside means a snapshot may
+miss tickets. That is safe because a missing blocker counts as not done (nothing is
+claimed too early) and the worst case is `claim-next` choosing a less urgent ticket, far
+better than one bad file stopping every agent. When two tickets carry the same current
+claim hash, both are set aside (deterministic for every reader).
+
+**Identity.** `tkt` uses the author identity git would put on the commit (`git var
+GIT_AUTHOR_IDENT`: the `GIT_AUTHOR_*` variables, then the clone's config, then global and
+system), run with `user.useConfigOnly=true` so git never invents one from the OS account
+and host name; it refuses to write if none is configured. The commit author is the record of who
+did each op; `tkt log` shows its name and email, unverified. A claim also stores
+`holder`, the git name mapped to an identifier (accents folded: NFKD, then combining marks
+dropped; each run of characters outside `[A-Za-z0-9]` to one `-`; cut to 39; then
+hyphens trimmed from both ends; a name with no Latin
+letters or digits is refused), so `show` and `list` say who is working on what. `tkt clone` prints the identity and the holder name; every write reports them.
+Hashed claim ids still prove that the agent acting on a claim is the one that took it.
+
+**Not defended.** The agent that works a ticket reads its body, so prompt injection is
+reduced, not prevented; confinement, guidance and narrow agent permissions do the rest.
+An agent with plain git and push access can forge well-formed tickets and history, or get
+a genuine held ticket set aside by pushing another ticket with the same claim hash
+(branch protection only stops rewrites). Junk files and spam tickets cost every commit
+until tickets are separated or sharded (Q1).
+
+## 9. Open questions, accepted limitations and deferred work
 
 Accepted limitations (decided; revisit only if they cause trouble):
 
-- No administrative release: a dead holder blocks a ticket for at most its lease plus
-  the grace (30-minute default, `MAX_TTL` 2 h), unless the ticket is cancelled.
-- `--as` (the agent name) is not authenticated; it is trusted under the trust model.
+- No administrative release until `revoke` (0.2.0, §8): a dead holder blocks a ticket
+  for at most its lease plus the grace (30-minute default, `MAX_TTL` 2 h), unless the
+  ticket is cancelled.
+- Who acted is not authenticated: today the `--as` name, from 0.2.0 the git author
+  identity (and the claim's `holder`, derived from it). It is trusted under the trust
+  model; commit signing could authenticate it (deferred).
 - Resolved tickets stay on the branch for good (Q1); fine at the expected scale.
 - `SKEW_GRACE` stays a fixed 60-second constant.
 - Phases and kinds are fixed enums; a new phase is a format change.
@@ -355,13 +435,10 @@ Open questions:
   Every op reads every ticket file, so a CLI op costs ~0.25 s at 5,000 tickets and ~1 s
   at 20,000 on a local store (ADR 0001, *Store size*). Archiving would need blockers,
   re-runs of `done` and claim-id fencing to work without reading archived tickets.
-- Q2: Project identity is now the caller's concern (an opaque string). Should callers
-  standardise on root-commit hash (stable, but multi-root repos) or
-  normalised remote URL (renames)? Out of scope for the store itself.
+- Q2: Project identity is the caller's concern. From 0.2.0 it must be `[owner/]repo`
+  (§8), which a root-commit hash or an `owner/repo` name fits and a remote URL does not.
 - Q3: Should `claim_next` (pick highest-priority claimable) be an op (atomic choice) — current design — or a read + claim?
 - Q4: Lease units: integer seconds since epoch (current) vs ISO timestamps in files.
-- Deferred: an administrative release that frees a dead holder's ticket without
-  cancelling it, before `MAX_TTL` plus the grace.
 - Deferred: `claim-next` choosing randomly among the top candidates to spread contention.
   On one ref any two concurrent writes conflict, whichever ticket they touch, so this
   only pays off with one ref per ticket (ADR 0001).

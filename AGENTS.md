@@ -31,6 +31,12 @@ Dependencies point **inward only**: `domain` ← `application` ← `infrastructu
 - Any change to store behaviour must be expressed in `tests/contract/` so both
   stores keep identical semantics.
 - Race and crash behaviour is tested against real git (`tests/integration/`).
+- Security findings live in `tests/security/` as strict expected failures, marked
+  `@pytest.mark.security_bug(reason)` (a defect) or `security_design(reason)` (needs a
+  decision). A fix removes its marker; a new finding gets its failing test first. The
+  model they test: ADR 0005 and `docs/design.md` §8.
+- Test modules read on their own: constants and small builders are defined where used.
+  The only module tests import from `tests/` is `tests/gitkit.py` (real-git machinery).
 
 ## Format changes
 
@@ -62,8 +68,8 @@ uv run mypy
 uv run pytest
 ```
 
-pytest is quiet by default (`addopts = "-q"` in `pyproject.toml`); use `-vv` to list
-individual tests.
+pytest is quiet and strict about markers by default (`addopts = "-q --strict-markers"`
+in `pyproject.toml`); use `-vv` to list individual tests.
 
 Two hooks back this up; they are a safety net, not the check:
 

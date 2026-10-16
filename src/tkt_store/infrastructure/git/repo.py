@@ -28,7 +28,8 @@ commit(base, changes, record):
                                                "remote" or "local" by self._remote)
     git commit-tree <tree> [-p <base>] -F -   (message = wire.encode_message(record))
     [remote] remote.publish(new, base)        -> push with --force-with-lease=<ref>:<base>;
-                                               Conflict if the lease fails; nothing published
+                                               rejected: Conflict if the branch moved,
+                                               StoreError if not; nothing published
     [remote] git update-ref <ref> <new> <base> best-effort: once published, any failure
                                                (ref moved, cannot lock ref, ...) is ignored
                                                and commit returns `new`; the next snapshot

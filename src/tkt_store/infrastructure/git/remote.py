@@ -7,8 +7,6 @@ directly. One process per clone is assumed (design.md §7).
 
 from __future__ import annotations
 
-import re
-
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.domain.ticket import Revision
 from tkt_store.infrastructure.git.runner import GitError, GitRunner
@@ -46,10 +44,9 @@ def fetch(git: GitRunner, remote: str, ref: str) -> Revision | None:
 def _remote_lacks(git: GitRunner, remote: str, ref: str) -> bool:
     """After a failed fetch: True only if the remote is reachable and has no `ref`."""
     try:
-        git("ls-remote", "--exit-code", remote, ref)
-    except GitError as error:
-        return error.returncode == NO_SUCH_REF
-    return False
+        return remote_head(git, remote, ref) is None
+    except GitError:
+        return False
 
 
 def local_head(git: GitRunner, ref: str) -> Revision | None:
@@ -102,8 +99,19 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     """Push `new` to `remote` `ref` with `--force-with-lease=<ref>:<base>` (an empty
     expected value when `base` is None), so the push itself states the expected old value:
     it lands only if the remote ref is still `base`. Never a plain force-push.
-    A rejected lease or non-fast-forward raises Conflict (nothing published). Any other
-    failure is a StoreError, which may hide a push that landed."""
+
+    A rejected push publishes nothing. It is a lost race (Conflict, retried) if the branch
+    moved, and a StoreError (stopped) if it was refused for another reason, e.g. branch
+    protection or a hook. That is decided without reading the server's wording, which
+    differs between servers:
+
+    - "[rejected] (stale info)" comes from our own git client, whose lease check saw the
+      branch move before anything was sent: a lost race, no round trip needed;
+    - "[remote rejected] (...)" is the server's refusal of our update; one `ls-remote`
+      then says whether the branch moved.
+
+    A failure without a status line (a timeout, a dropped connection) is the GitError
+    itself, a StoreError that may hide a push that landed."""
     try:
         git(
             "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
@@ -111,43 +119,33 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
         )  # fmt: skip
     except GitError as error:
         status = [line for line in error.stdout.decode().splitlines() if line.startswith("!")]
-        if any(_lost_race(line) for line in status) or _lost_race_on_remote(status, error.stderr):
+        if any("\t[rejected]" in line for line in status):
             raise Conflict(base, None) from error
-        if status:  # declined for another reason: say why (git's status, the remote's words)
-            reasons = "; ".join(line.split("\t")[-1] for line in status)
-            raise StoreError(f"push to {remote} {reasons}: {error.stderr.strip()}") from error
+        if not status:
+            raise
+        reasons = "; ".join(line.split("\t")[-1] for line in status)
+        try:
+            head = remote_head(git, remote, ref)
+        except GitError as check:
+            raise StoreError(
+                f"push to {remote} {reasons}, and the branch could not be re-read: {check}"
+            ) from error
+        if head != base:
+            raise Conflict(base, head) from error
+        raise StoreError(f"push to {remote} {reasons}: {error.stderr.strip()}") from error
+
+
+def remote_head(git: GitRunner, remote: str, ref: str) -> Revision | None:
+    """The remote's current value of `ref` (None if it does not exist), by `ls-remote`:
+    one round trip, no objects transferred."""
+    try:
+        out = git("ls-remote", "--exit-code", remote, ref).decode()
+    except GitError as error:
+        if error.returncode == NO_SUCH_REF:
+            return None
         raise
-
-
-LOST_RACE = re.compile(
-    r"\t\[rejected\]"  # the client-side lease check: "[rejected] (stale info)"
-    r"|\(incorrect old value provided\)"  # git's receive-pack (e.g. a bare remote)
-    r"|\(cannot lock ref '[^']*': is at [0-9a-f]+ but expected [0-9a-f]+\)"  # GitHub
-)
-"""Porcelain push status that proves nothing was published because the ref moved:
-the client-side lease check ("!\t<src>:<dst>\t[rejected] (stale info)"), or the remote's
-own compare-and-swap losing a concurrent update. That last one is worded by the server:
-"[remote rejected] (incorrect old value provided)" from git itself, "[remote rejected]
-(cannot lock ref '<ref>': is at <oid> but expected <oid>)" from GitHub (observed in the
-ADR 0001 benchmark). Any other "[remote rejected]" (a hook, branch protection, a lock
-that could not be taken) stays a StoreError: re-running the op converges."""
-
-
-def _lost_race(line: str) -> bool:
-    return LOST_RACE.search(line) is not None
-
-
-REMOTE_CAS_LOST = re.compile(r"cannot lock ref '[^']*': is at [0-9a-f]+ but expected [0-9a-f]+")
-"""A remote's compare-and-swap losing a concurrent update, as reported on its stderr."""
-
-
-def _lost_race_on_remote(status: list[str], stderr: str) -> bool:
-    """`git daemon` and plain receive-pack over SSH (observed with git 2.53) report a lost
-    race as the generic "[remote rejected] (failed to update ref)", with the reason only on
-    the remote's stderr ("remote: error: cannot lock ref '<ref>': is at <oid> but expected
-    <oid>"). Only that pair is a lost race: "(failed to update ref)" for any other reason
-    (a lock that could not be taken, a full disk) stays a StoreError."""
-    return (
-        any("(failed to update ref)" in line for line in status)
-        and REMOTE_CAS_LOST.search(stderr) is not None
-    )
+    for line in out.splitlines():
+        oid, _, name = line.partition("\t")
+        if name == ref:
+            return Revision(oid)
+    return None

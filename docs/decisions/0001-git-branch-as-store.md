@@ -34,7 +34,8 @@ file's git history.
 - **One ref serialises every write.** Throughput is about one commit per fetch-and-push
   round trip (about 20 per minute against GitHub), however many agents there are; more
   agents only add lost races, which the transaction loop retries with backoff
-  (design.md §4). How each server words a lost race: design.md §6.
+  (design.md §4). Lost races are told apart from refusals without depending on how a
+  server words them (design.md §6).
 - **The binding limit is GitHub's guidance, not git:** "The recommended maximum limit
   is 6 pushes per minute per repository" ([repository limits](https://docs.github.com/en/repositories/creating-and-managing-repositories/repository-limits)).
   Every write is a push, including renewals and pushes that lose a race.

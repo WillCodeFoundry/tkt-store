@@ -1,6 +1,6 @@
-"""How remote.publish classifies a failed push (docs/design.md §6), from canned
-`git push --porcelain` output: a lost race is a Conflict (retried), anything else is a
-StoreError (never retried)."""
+"""How remote.publish classifies a failed push (docs/design.md §6), against a fake remote:
+a rejected push is a Conflict (retried) if the branch moved, and a StoreError (stopped)
+if it did not. No server wording is read, so any wording must classify the same way."""
 
 from __future__ import annotations
 
@@ -12,83 +12,97 @@ from tkt_store.infrastructure.git.remote import publish
 from tkt_store.infrastructure.git.runner import GitError
 
 REF = "refs/heads/tkt-store"
-NEW, BASE = Revision("b" * 40), Revision("a" * 40)
+NEW, BASE, OTHER = Revision("b" * 40), Revision("a" * 40), Revision("c" * 40)
+SERVER_WORDINGS = [
+    "[remote rejected] (incorrect old value provided)",  # git, local transport
+    f"[remote rejected] (cannot lock ref '{REF}': is at {OTHER} but expected {BASE})",  # GitHub
+    "[remote rejected] (failed to update ref)",  # git daemon
+    "[remote rejected] (pre-receive hook declined)",
+    "[remote rejected] (protected branch hook declined)",
+    "[remote rejected] (a wording no server has used yet)",
+]
 
 
-class FailingPush:
-    """A runner whose every command fails with the given porcelain stdout."""
+class FakeRemote:
+    """Rejects every push with the given porcelain status; `ls-remote` reports `head`
+    (None: the branch does not exist; "unreachable": ls-remote fails)."""
 
-    def __init__(self, stdout: str, stderr: str = "error: failed to push some refs") -> None:
-        self.stdout, self.stderr = stdout.encode(), stderr
+    def __init__(self, status: str, head: Revision | str | None) -> None:
+        self.stdout = f"To origin\n!\t{NEW}:{REF}\t{status}\nDone\n".encode() if status else b""
+        self.head = head
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
         self.calls.append(args)
-        raise GitError(args, 1, self.stdout, self.stderr)
+        if args[0] == "push":
+            raise GitError(args, 1, self.stdout, "remote: something\nerror: failed to push")
+        if args[0] == "ls-remote":
+            if self.head == "unreachable":
+                raise GitError(args, 128, b"", "fatal: could not read from remote")
+            if self.head is None:
+                raise GitError(args, 2, b"", "")
+            return f"{self.head}\t{REF}\n".encode()
+        raise AssertionError(f"unexpected git {args}")
+
+    def ls_remotes(self) -> int:
+        return sum(args[0] == "ls-remote" for args in self.calls)
 
 
-def status(flag_and_reason: str) -> str:
-    return f"To origin\n!\t{NEW}:{REF}\t{flag_and_reason}\nDone\n"
-
-
-@pytest.mark.parametrize(
-    "reason",
-    [
-        "[rejected] (stale info)",
-        "[rejected] (fetch first)",
-        "[remote rejected] (incorrect old value provided)",
-        # GitHub, observed in the ADR 0001 benchmark
-        f"[remote rejected] (cannot lock ref '{REF}': is at {'c' * 40} but expected {BASE})",
-    ],
-)
-def test_lost_race_is_conflict(reason: str) -> None:
+@pytest.mark.parametrize("status", ["[rejected] (stale info)", "[rejected] (fetch first)"])
+def test_our_clients_lease_check_is_a_lost_race_without_a_round_trip(status: str) -> None:
+    remote = FakeRemote(status, head=BASE)
     with pytest.raises(Conflict):
-        publish(FailingPush(status(reason)), "origin", REF, NEW, BASE)
+        publish(remote, "origin", REF, NEW, BASE)
+    assert remote.ls_remotes() == 0
 
 
-def test_failed_ref_update_with_a_moved_ref_on_the_remote_is_conflict() -> None:
-    """git daemon / receive-pack over SSH: the generic status, the reason on stderr."""
-    stderr = (
-        f"remote: error: cannot lock ref '{REF}': is at {'c' * 40} but expected {BASE}\n"
-        "error: failed to push some refs to 'git://host/tkt.git'"
-    )
-    with pytest.raises(Conflict):
-        publish(FailingPush(status("[remote rejected] (failed to update ref)"), stderr),
-                "origin", REF, NEW, BASE)  # fmt: skip
+@pytest.mark.parametrize("status", SERVER_WORDINGS)
+def test_a_server_rejection_with_the_branch_moved_is_a_lost_race(status: str) -> None:
+    remote = FakeRemote(status, head=OTHER)
+    with pytest.raises(Conflict) as exc:
+        publish(remote, "origin", REF, NEW, BASE)
+    assert exc.value.actual == OTHER and remote.ls_remotes() == 1
 
 
-def test_failed_ref_update_for_another_reason_is_a_store_error() -> None:
-    stderr = f"remote: error: cannot lock ref '{REF}': Unable to create '{REF}.lock': File exists"
+@pytest.mark.parametrize("status", SERVER_WORDINGS)
+def test_a_server_rejection_with_the_branch_unmoved_is_a_store_error(status: str) -> None:
     with pytest.raises(StoreError) as exc:
-        publish(FailingPush(status("[remote rejected] (failed to update ref)"), stderr),
+        publish(FakeRemote(status, head=BASE), "origin", REF, NEW, BASE)
+    assert not isinstance(exc.value, Conflict) and status in str(exc.value)
+
+
+def test_creating_the_store_refused_while_it_does_not_exist_is_a_store_error() -> None:
+    with pytest.raises(StoreError) as exc:
+        publish(FakeRemote("[remote rejected] (creation denied)", head=None), "origin",
+                REF, NEW, None)  # fmt: skip
+    assert not isinstance(exc.value, Conflict)
+
+
+def test_creating_the_store_after_someone_else_created_it_is_a_lost_race() -> None:
+    with pytest.raises(Conflict):
+        publish(FakeRemote("[remote rejected] (failed to update ref)", head=OTHER), "origin",
+                REF, NEW, None)  # fmt: skip
+
+
+def test_a_branch_that_cannot_be_re_read_is_a_store_error() -> None:
+    with pytest.raises(StoreError, match="could not be re-read") as exc:
+        publish(FakeRemote("[remote rejected] (failed to update ref)", head="unreachable"),
                 "origin", REF, NEW, BASE)  # fmt: skip
     assert not isinstance(exc.value, Conflict)
 
 
-@pytest.mark.parametrize(
-    "reason",
-    [
-        "[remote rejected] (pre-receive hook declined)",
-        "[remote rejected] (protected branch hook declined)",
-        "[remote rejected] (failed to update ref)",
-        f"[remote rejected] (cannot lock ref '{REF}': Unable to create '{REF}.lock': File exists)",
-    ],
-)
-def test_other_rejections_are_store_errors_that_say_why(reason: str) -> None:
-    with pytest.raises(StoreError, match=r"\(") as exc:
-        publish(FailingPush(status(reason), "remote: no"), "origin", REF, NEW, BASE)
-    assert not isinstance(exc.value, Conflict) and reason in str(exc.value)
-
-
-def test_failure_without_status_is_the_git_error() -> None:
+def test_a_failure_without_a_status_is_the_git_error() -> None:
+    """No status: the push may have landed (a timeout); never guessed to be a lost race."""
+    remote = FakeRemote("", head=OTHER)
     with pytest.raises(GitError):
-        publish(FailingPush("", "fatal: could not read from remote"), "origin", REF, NEW, BASE)
+        publish(remote, "origin", REF, NEW, BASE)
+    assert remote.ls_remotes() == 0
 
 
 @pytest.mark.parametrize(("base", "lease"), [(BASE, f"{REF}:{BASE}"), (None, f"{REF}:")])
 def test_push_states_the_expected_old_value(base: Revision | None, lease: str) -> None:
-    runner = FailingPush(status("[rejected] (stale info)"))
+    remote = FakeRemote("[rejected] (stale info)", head=OTHER)
     with pytest.raises(Conflict):
-        publish(runner, "origin", REF, NEW, base)
-    (push,) = runner.calls
+        publish(remote, "origin", REF, NEW, base)
+    (push,) = remote.calls
     assert f"--force-with-lease={lease}" in push and push[-2:] == ("origin", f"{NEW}:{REF}")

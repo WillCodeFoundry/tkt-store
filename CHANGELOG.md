@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-- A self-hosted `git daemon` (or receive-pack over SSH) reports a lost race as
-  `(failed to update ref)` with "is at … but expected …" on its stderr; that is now
-  retried instead of failing with a store error.
+- Lost races are recognised on any git server: after the server rejects a push, one
+  `ls-remote` shows whether the branch moved (retry) or not (store error), instead of
+  matching each server's wording. This also covers `git daemon` and receive-pack over
+  SSH, whose lost races were store errors in 0.1.0.
 - The store keeps itself packed (`git gc --auto` after each commit) and caches decoded
   tickets by blob id, so a long-lived store reads only tickets that changed.
-- README: a *Deploying* section (remotes, required protection, one process per clone,
-  the mode limitation).
+- README: a *Deploying* section (what a remote must do, one process per clone, the
+  mode limitation).
 - `scripts/check_remote.py` checks that a store's remote refuses a non-fast-forward push
   and a deletion of the store branch, restoring the branch if either is accepted.
 - `scripts/bench_github.py` is now `scripts/bench.py`, for any remote; it refuses to run

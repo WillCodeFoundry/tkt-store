@@ -70,10 +70,12 @@ def write_files(
     *,
     ref: str = DEFAULT_REF,
     message: str = "edited by hand\n",
+    modes: Mapping[str, str] | None = None,
 ) -> str:
     """Commit `files` on top of `ref` (None deletes a path) without touching any worktree,
-    as a person repairing the branch would. Paths may be bytes (any file name git allows).
-    Moves `ref`; returns the new commit."""
+    as a person repairing the branch would. Paths may be bytes (any file name git allows);
+    `modes` gives a path another git mode than 100644, e.g. 120000 for a symlink whose
+    target is the data. Moves `ref`; returns the new commit."""
     index = repo / "tkt-test-index"
     env = {"GIT_INDEX_FILE": str(index)}
     parent = subprocess.run(
@@ -103,7 +105,8 @@ def write_files(
             .stdout.decode()
             .strip()
         )
-        git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{name}", env=env)
+        mode = (modes or {}).get(name, "100644")
+        git(repo, "update-index", "--add", "--cacheinfo", f"{mode},{blob},{name}", env=env)
     tree = git(repo, "write-tree", env=env).strip()
     index.unlink()
     commit = subprocess.run(

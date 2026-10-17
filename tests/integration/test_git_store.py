@@ -42,6 +42,7 @@ TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
+C3 = ClaimId("3" * 32)
 T1 = TicketId("tkt-0001")
 T2 = TicketId("tkt-0002")
 
@@ -528,15 +529,21 @@ def test_a_forged_name_with_a_slash_in_a_claims_folder_holds_only_its_ticket(
     local: Path, bare_remote: Path
 ) -> None:
     """Its folder can't be rewritten, so it counts as not a folder: the ticket is held
-    by a set-aside claim, claim-next passes it over, and cancel still resolves it."""
+    by a set-aside claim, claim-next passes it over, and cancel still resolves it. Its
+    claims are all set aside, so they still fence: an id that ended there never claims
+    again, and the holder's re-run is never given a second ticket."""
     tickets = service(opened(local))
     tickets.edit(T1, 1, priority=0)  # T1 is the most urgent, unless passed over
     tickets.add("Second", ticket_id=T2, priority=50)
     tickets.claim(T1, A, TTL, claim_id=C1)
-    tickets.release(T1, C1)
+    tickets.release(T1, C1)  # C1 ended in T1's folder
+    tickets.claim(T1, A, TTL, claim_id=C3)  # C3 holds T1
     forge_slash_name(bare_remote, f"claims/{T1}")
     view = tickets.view(T1)
     assert view is not None and view.held_aside == "its claims folder is not a folder"
+    for claim_id in (C1, C3):
+        refused = tickets.claim_next(A, TTL, claim_id=claim_id)
+        assert isinstance(refused, Refused) and refused.refusal.code is RefusalCode.SET_ASIDE
     claimed = tickets.claim_next(A, TTL, claim_id=C2)
     assert isinstance(claimed, Committed) and claimed.tickets[0].ticket.id == T2
     assert isinstance(tickets.cancel(T1, "forged"), Committed)

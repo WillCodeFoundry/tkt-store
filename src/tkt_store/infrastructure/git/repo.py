@@ -281,17 +281,23 @@ class GitStore:
             else:
                 unread.setdefault(entry.oid, []).append(ticket_id)
         trees = list(unread)
+        unwritable: list[ClaimFile] = []
         for tree, data in zip(trees, self._read_objects(trees, "tree"), strict=True):
             try:
                 names = self._claim_names(data)
-            except wire.SlashInName:  # it can't be rewritten: as if not a folder at all
+            except wire.SlashInName as slash:
+                # It can't be rewritten: not a folder, so its ticket is held aside, while
+                # its claims (all set aside by assemble) still fence. Never kept: it is
+                # read again on every snapshot.
                 not_folders.extend(unread[tree])
+                for ticket_id in unread[tree]:
+                    unwritable.extend(_Folder.of(ticket_id, slash.names).claims)
                 continue
             for ticket_id in unread[tree]:
                 folders[ticket_id] = (tree, _Folder.of(ticket_id, names))
         self._folders = {(ticket_id, tree): folder for ticket_id, (tree, folder) in folders.items()}
         claims = [claim for _tree, folder in folders.values() for claim in folder.claims]
-        return claims, not_folders, folders
+        return claims + unwritable, not_folders, folders
 
     def _claim_names(self, tree: bytes) -> tuple[str, ...]:
         """`wire.claim_names` of a raw tree, with this repository's empty blob; a tree that

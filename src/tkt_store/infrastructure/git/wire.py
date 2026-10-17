@@ -96,7 +96,12 @@ class Invalid(Exception):
 
 class SlashInName(Invalid):
     """A tree holds a name with '/': git never writes one, and no tree that holds one can
-    be rewritten (`git mktree` refuses it), so the folder can't be written."""
+    be rewritten (`git mktree` refuses it), so the folder can't be written. `names` are
+    the tree's other names, as `claim_names` reads them: their claims still fence."""
+
+    def __init__(self, names: tuple[str, ...]) -> None:
+        super().__init__("a name holds '/'")
+        self.names = names
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
@@ -170,7 +175,7 @@ def claim_names(tree: bytes, empty: bytes) -> tuple[str, ...]:
     The names themselves are parsed by `claim_named`. Raises SlashInName if any entry's
     name holds '/', and Invalid if the tree does not parse. Part of what the clone cache
     keeps, so its rules are in this module."""
-    size, names, at = len(empty), [], 0
+    size, names, at, slash = len(empty), [], 0, False
     try:
         while at < len(tree):
             space = tree.index(b" ", at)
@@ -184,12 +189,15 @@ def claim_names(tree: bytes, empty: bytes) -> tuple[str, ...]:
                 raise ValueError("malformed tree entry")  # as strict as git's own reading
             mode, at = int(digits, 8), nul + 1 + size
             if b"/" in name:
-                raise SlashInName("a name holds '/'")
+                slash = True
+                continue
             if mode & 0o170000 == 0o100000 and not mode & 0o100 and oid == empty:
                 with suppress(UnicodeDecodeError):
                     names.append(name.decode())
-    except ValueError as error:  # SlashInName is no ValueError: it passes through
+    except ValueError as error:
         raise Invalid("not a tree") from error
+    if slash:
+        raise SlashInName(tuple(dict.fromkeys(names)))
     return tuple(dict.fromkeys(names))
 
 

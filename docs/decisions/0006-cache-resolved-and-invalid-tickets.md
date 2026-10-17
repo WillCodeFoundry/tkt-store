@@ -1,6 +1,6 @@
 # 0006 — Each clone caches resolved and invalid tickets
 
-**Status:** accepted; to be implemented for 0.2.0 (with ADR 0005's validation on read)
+**Status:** accepted; implemented for 0.2.0 in stage 2b
 
 ## Context
 
@@ -25,8 +25,10 @@ never changes.
 **The layout stays as it is:** one `tickets/` directory, one file per ticket, wherever
 its state. Nothing moves when a ticket is resolved.
 
-**Each clone keeps a cache file** at `git rev-parse --git-path tkt-store/cache.json`
-(inside the clone's git directory, never pushed). Its entries are keyed by blob id, and
+**Each clone keeps a cache** in `tkt-store/cache/` in the clone's git directory (`git
+rev-parse --absolute-git-dir`; never pushed), spread over 256 shard files by the first
+two digits of each entry's object id, so resolving a ticket rewrites one or two small
+files, never the whole cache. Its entries are keyed by blob id, and
 a blob id names exact content, so an entry is never stale:
 
 - a valid resolved ticket: the ticket;
@@ -53,18 +55,21 @@ cache never holds more than the store. If two processes share a clone anyway (ag
 the one-clone-per-process rule), the last rename wins and a lost entry only costs a
 re-read.
 
-**The cache is a convenience, never the source of truth.** It records a cache version,
-a constant bumped whenever the decoder or a cached check changes, and the tkt-store
-version that wrote it; a cache with either different, one that does not parse, or one
-whose entries have the wrong shape is discarded, and the next snapshot rebuilds it with
-one full read. Cached tickets are loaded through the same decoder as ticket files,
+**The cache is a convenience, never the source of truth.** Each shard records a cache
+version, the tkt-store version that wrote it, and a hash of the source of the decoder and
+the field rules, so a changed rule, even in an editable install, never keeps an old
+verdict; a shard with any of them different, one that does not parse, one whose entries
+have the wrong shape or belong to another shard, or one whose cached reason does not look
+like one of tkt's own (short printable ASCII) is ignored, and the next snapshot rebuilds
+it. Cached tickets are loaded through the same decoder as ticket files,
 without the field checks. Deleting the cache is always safe. It is JSON, never pickle:
 loading a pickle can run code.
 
 **The cache is trusted like the rest of the clone.** An entry is believed without reading
 its blob, so whoever can write the clone's git directory can make a forged ticket look
-valid. That adds no exposure: writing it already lets them change hooks or config and
-run code in that clone (ADR 0005).
+valid, or a forged folder entry hide or add a claim, on any ticket. That adds no
+exposure: writing it already lets them change hooks or config and run code in that clone
+(ADR 0005).
 
 ## Alternatives rejected
 
@@ -86,21 +91,27 @@ run code in that clone (ADR 0005).
 
 ## Consequences
 
-- An op skips reading and checking resolved and invalid files. It still parses the cache
-  (about as costly as decoding the same tickets without the checks), lists every file
-  and rebuilds the `tickets/` tree, so its cost still grows with history, only more
-  slowly; accepted (design.md §9). Expected at 20,000 tickets, mostly resolved: about
-  140 ms to parse the cache and 150 ms to build its tickets, plus listing and the tree
-  (~60 ms) and the few open files, so about 350 ms instead of ~700 ms today, and more
-  saved once 0.2.0's validation on read lands.
+- An op skips reading and checking resolved and invalid files, and listing or parsing
+  resolved tickets' claims folders. It still parses the cache, lists every file and
+  rebuilds the `tickets/` tree, so its cost still grows with history, only more slowly;
+  accepted (design.md §9).
+- Measured in stage 2b at 20,000 tickets (90% resolved) with three claims each, per op:
+  a new process (the CLI) takes about 1.1 s instead of 2.4 s, a long-running one about
+  0.35 s instead of 0.77 s; at 2,000 tickets, about 120 ms and 50 ms instead of 260 ms
+  and 95 ms. The first estimate (about 350 ms for the CLI) predated 0.2.0's validation
+  on read, which makes reading a ticket costlier and the cache worth more; what remains
+  is mostly decoding the cached tickets and parsing claim names.
 - The first op in a new clone, and the first after an upgrade, reads every file once.
-- The cache grows with resolved tickets: about the size of their files.
+- The cache grows with resolved tickets: about the size of their files (about 17 MB at
+  20,000 tickets with short bodies). Saving after a resolution rewrites one or two shards
+  (about 20 ms at that size; the whole cache would take about 300 ms).
 - The cache changes no format: it is local to each clone and to the GitStore adapter.
-- Claims (ADR 0007) have no content to cache, but listing and parsing their names
-  costs about 430 ms per op at 20,000 tickets with three claims each (measured in stage
-  2a), plus about 250 ms to assemble the snapshot. The cache therefore also keeps each
-  ticket's parsed claims, and their hashes, by the blob id of its `claims/<id>/` tree
-  (parsed names only, never verdicts, which depend on the ticket): a snapshot lists
-  `claims/` without recursing, reads the folders whose tree changed in one batch, and
-  does the per-hash check with a count over the cached hashes, so only open or changed
-  folders need the full per-file work.
+- Claims (ADR 0007) have no content to cache, but listing and parsing their names cost
+  about 430 ms per op at that size (measured in stage 2a). So the cache also keeps each
+  resolved ticket's claim file names by the id of its `claims/<id>/` tree (names only,
+  never verdicts, which depend on the ticket), and a process keeps every folder it read
+  by tree id in memory: a snapshot lists `claims/` without recursing and reads only the
+  folders it does not know, together, in one batch, as raw trees read the way `git
+  ls-tree` reads them (a regular file's mode canonicalised, a repeated name once).
+  Assembling the snapshot looks at repeated hashes only, and is about 170 ms at that
+  size.

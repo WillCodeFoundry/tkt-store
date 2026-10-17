@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TypeVar
+from contextlib import suppress
+from typing import Any, TypeVar
 
 from tkt_store.application.errors import StoreError
 from tkt_store.domain import fields
@@ -75,14 +76,13 @@ TICKET_FIELDS = frozenset(
 
 _TIME = r"0|[1-9][0-9]{0,11}"
 _SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
-CLAIM_PATH_RE = re.compile(
-    rf"claims/(?P<folder>(?=[a-z0-9-]{{8,32}}/){_SLUG})/(?P<hash>[0-9a-f]{{64}})"
-    rf"\.(?P<state>open|{'|'.join(e.value for e in EndedBy)})"
+CLAIM_NAME_RE = re.compile(
+    rf"(?P<hash>[0-9a-f]{{64}})\.(?P<state>open|{'|'.join(e.value for e in EndedBy)})"
     rf"\.(?P<agent>(?=[a-z0-9-]{{1,39}}\.){_SLUG})\.(?P<claimed_at>{_TIME})\.(?P<time>{_TIME})"
 )
-"""A claim file's path (ADR 0007): `claims/<ticket id>/<hash>.<open|ended_by>.<agent>.
-<claimed_at>.<t>`, where `t` is `lease_until` for an open claim and `ended_at` for an
-ended one; the folder follows the ticket id rule and the agent the agent rule."""
+"""A claim file's name in `claims/<ticket id>/` (ADR 0007): `<hash>.<open|ended_by>.
+<agent>.<claimed_at>.<t>`, where `t` is `lease_until` for an open claim and `ended_at`
+for an ended one; the agent follows the agent rule."""
 _ENDED_BY = {by.value: by for by in EndedBy}
 
 
@@ -130,14 +130,23 @@ def claim_of(path: str) -> ClaimFile | None:
     """The claim a 'claims/<id>/<name>' path holds, or None when the path is not a claim
     file's (an unknown file: no part of it is used, ADR 0007). Whether the file itself is
     an empty regular file is the caller's check."""
-    found = CLAIM_PATH_RE.fullmatch(path)
+    parts = path.split("/")
+    if len(parts) != 3 or parts[0] != CLAIMS_DIR or not TICKET_ID_RE.fullmatch(parts[1]):
+        return None
+    return claim_named(TicketId(parts[1]), parts[2])
+
+
+def claim_named(folder: TicketId, name: str) -> ClaimFile | None:
+    """The claim a file named `name` in `claims/<folder>/` holds, or None when the name is
+    not a claim file's. `folder` must already follow the ticket id rule."""
+    found = CLAIM_NAME_RE.fullmatch(name)
     if found is None:
         return None
-    folder, hashed, state, agent, claimed_at, last = found.groups()
-    ticket_id, claim, holder = TicketId(folder), ClaimHash(hashed), AgentId(agent)
+    hashed, state, agent, claimed_at, last = found.groups()
+    claim, holder = ClaimHash(hashed), AgentId(agent)
     if state == "open":
-        return Claim(ticket_id, claim, holder, int(claimed_at), int(last))
-    return EndedClaim(ticket_id, claim, holder, int(claimed_at), _ENDED_BY[state], int(last))
+        return Claim(folder, claim, holder, int(claimed_at), int(last))
+    return EndedClaim(folder, claim, holder, int(claimed_at), _ENDED_BY[state], int(last))
 
 
 def claims_folder_of(path: str) -> TicketId | None:
@@ -147,6 +156,43 @@ def claims_folder_of(path: str) -> TicketId | None:
     if directory != CLAIMS_DIR or not slash or "/" in name or not TICKET_ID_RE.fullmatch(name):
         return None
     return TicketId(name)
+
+
+def claim_names(tree: bytes, empty: bytes) -> tuple[str, ...]:
+    """The names in a raw git tree object that may be claim files: regular, non-executable
+    files (mode 100644 once canonicalised, as `git ls-tree` shows it) whose blob is git's
+    empty blob (`empty`, its raw id), each name once, as git reads a tree that repeats one.
+    The names themselves are parsed by `claim_named`. Raises Invalid if the tree does not
+    parse. Part of what the clone cache keeps, so its rules are in this module."""
+    size, names, at = len(empty), [], 0
+    try:
+        while at < len(tree):
+            space = tree.index(b" ", at)
+            nul = tree.index(b"\0", space)
+            digits, name, oid = (
+                tree[at:space],
+                tree[space + 1 : nul],
+                tree[nul + 1 : nul + 1 + size],
+            )
+            if not digits.isdigit() or b"8" in digits or b"9" in digits or len(oid) != size:
+                raise ValueError("malformed tree entry")  # as strict as git's own reading
+            mode, at = int(digits, 8), nul + 1 + size
+            if mode & 0o170000 == 0o100000 and not mode & 0o100 and oid == empty:
+                with suppress(UnicodeDecodeError):
+                    names.append(name.decode())
+    except ValueError as error:
+        raise Invalid("not a tree") from error
+    return tuple(dict.fromkeys(names))
+
+
+def verdict(data: bytes) -> Ticket | str:
+    """A ticket file's content checked on its own: the ticket, or the check that failed.
+    What the clone cache keeps for a file, so its rules are in this module."""
+    try:
+        ticket = decode_ticket(data)
+    except Invalid as invalid:
+        return str(invalid)
+    return fields.ticket_problem(ticket) or ticket
 
 
 def encode_store_meta() -> bytes:
@@ -184,6 +230,12 @@ def decode_ticket(data: bytes) -> Ticket:
         raw = json.loads(data)
     except (ValueError, RecursionError) as error:
         raise Invalid("not JSON") from error
+    return ticket_from_raw(raw)
+
+
+def ticket_from_raw(raw: object) -> Ticket:
+    """A ticket from parsed JSON, strictly (as `decode_ticket`): the clone cache loads its
+    tickets through this, without the field rules they already passed."""
     if not isinstance(raw, dict):
         raise Invalid("not a JSON object")
     if missing := sorted(TICKET_FIELDS - set(raw)):
@@ -228,11 +280,17 @@ def _strings(raw: dict[str, object], key: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+_MEMBERS: dict[type, dict[str, Any]] = {
+    kind: {member.value: member for member in kind} for kind in (Kind, Phase, Resolution)
+}
+
+
 def _enum(kind: type[_E], raw: dict[str, object], key: str) -> _E:
     value = raw[key]
-    if not isinstance(value, str) or value not in {member.value for member in kind}:
+    member = _MEMBERS[kind].get(value) if isinstance(value, str) else None
+    if member is None:
         raise Invalid(f"{key} is not one of its values")
-    return kind(value)
+    return member  # type: ignore[no-any-return]
 
 
 def _one_line(text: str) -> str:

@@ -94,6 +94,11 @@ class Invalid(Exception):
     never a value read."""
 
 
+class SlashInName(Invalid):
+    """A tree holds a name with '/': git never writes one, and no tree that holds one can
+    be rewritten (`git mktree` refuses it), so the folder can't be written."""
+
+
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 
 
@@ -162,8 +167,9 @@ def claim_names(tree: bytes, empty: bytes) -> tuple[str, ...]:
     """The names in a raw git tree object that may be claim files: regular, non-executable
     files (mode 100644 once canonicalised, as `git ls-tree` shows it) whose blob is git's
     empty blob (`empty`, its raw id), each name once, as git reads a tree that repeats one.
-    The names themselves are parsed by `claim_named`. Raises Invalid if the tree does not
-    parse. Part of what the clone cache keeps, so its rules are in this module."""
+    The names themselves are parsed by `claim_named`. Raises SlashInName if any entry's
+    name holds '/', and Invalid if the tree does not parse. Part of what the clone cache
+    keeps, so its rules are in this module."""
     size, names, at = len(empty), [], 0
     try:
         while at < len(tree):
@@ -177,10 +183,12 @@ def claim_names(tree: bytes, empty: bytes) -> tuple[str, ...]:
             if not digits.isdigit() or b"8" in digits or b"9" in digits or len(oid) != size:
                 raise ValueError("malformed tree entry")  # as strict as git's own reading
             mode, at = int(digits, 8), nul + 1 + size
+            if b"/" in name:
+                raise SlashInName("a name holds '/'")
             if mode & 0o170000 == 0o100000 and not mode & 0o100 and oid == empty:
                 with suppress(UnicodeDecodeError):
                     names.append(name.decode())
-    except ValueError as error:
+    except ValueError as error:  # SlashInName is no ValueError: it passes through
         raise Invalid("not a tree") from error
     return tuple(dict.fromkeys(names))
 

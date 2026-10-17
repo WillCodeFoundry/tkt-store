@@ -188,14 +188,26 @@ class GitStore:
     def _check_layout(self, revision: Revision) -> None:
         """`tickets` and `claims`, where present, must be folders: the store's own layout,
         like `tkt-store.json`. Anything else is a StoreError that names no value, since
-        nothing could be written until an operator repairs it (ADR 0007)."""
+        nothing could be written until an operator repairs it (ADR 0007); so is a name
+        with '/' in the root, `tickets/` or `claims/`, which git never writes and no
+        commit could rewrite (`git mktree` refuses it; checked here for the root, by
+        `_tickets` and `_claims` for theirs)."""
         for entry in _entries(self._git("ls-tree", "-z", revision)):
+            self._check_name(revision, entry.name, depth=0)
             name = entry.name.decode(errors="replace")
             if name in (wire.TICKETS_DIR, wire.CLAIMS_DIR) and entry.kind != "tree":
                 raise StoreError(
                     f"{self._ref} at {revision}: {name} is not a folder; an operator must "
                     "repair the store"
                 )
+
+    def _check_name(self, revision: Revision, path: bytes, *, depth: int) -> None:
+        """A StoreError if `path`, listed `depth` folders down, has a '/' of its own."""
+        if path.count(b"/") > depth:
+            raise StoreError(
+                f"{self._ref} at {revision} holds a file name with '/', which git never "
+                "writes; an operator must repair the store"
+            )
 
     def _tickets(
         self, revision: Revision
@@ -213,6 +225,7 @@ class GitStore:
             if not raw:
                 continue
             meta, name = raw.split(b"\t", 1)
+            self._check_name(revision, name, depth=1)
             mode, kind, oid, size = meta.decode().split()
             ticket_id = wire.ticket_id_of(name.decode(errors="replace"))
             if ticket_id is None:
@@ -255,6 +268,7 @@ class GitStore:
         not_folders: list[TicketId] = []
         unread: dict[str, list[TicketId]] = {}
         for entry in _entries(listing):
+            self._check_name(revision, entry.name, depth=1)
             ticket_id = wire.claims_folder_of(entry.name.decode(errors="replace"))
             if ticket_id is None:
                 continue
@@ -268,7 +282,11 @@ class GitStore:
                 unread.setdefault(entry.oid, []).append(ticket_id)
         trees = list(unread)
         for tree, data in zip(trees, self._read_objects(trees, "tree"), strict=True):
-            names = self._claim_names(data)
+            try:
+                names = self._claim_names(data)
+            except wire.SlashInName:  # it can't be rewritten: as if not a folder at all
+                not_folders.extend(unread[tree])
+                continue
             for ticket_id in unread[tree]:
                 folders[ticket_id] = (tree, _Folder.of(ticket_id, names))
         self._folders = {(ticket_id, tree): folder for ticket_id, (tree, folder) in folders.items()}
@@ -277,9 +295,11 @@ class GitStore:
 
     def _claim_names(self, tree: bytes) -> tuple[str, ...]:
         """`wire.claim_names` of a raw tree, with this repository's empty blob; a tree that
-        does not parse is a StoreError."""
+        does not parse is a StoreError (one holding a name with '/', wire.SlashInName)."""
         try:
             return wire.claim_names(tree, bytes.fromhex(self._empty_blob()))
+        except wire.SlashInName:
+            raise
         except wire.Invalid as invalid:
             raise StoreError("cannot parse a claims folder's tree") from invalid
 

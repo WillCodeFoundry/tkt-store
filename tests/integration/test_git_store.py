@@ -490,23 +490,56 @@ def test_a_promisor_switched_off_is_a_full_clone(local: Path) -> None:
     GitStore.at(local, remote="origin").snapshot()
 
 
-def test_a_forged_name_with_a_slash_is_named_as_such_on_writing(
+def forge_slash_name(bare_remote: Path, folder: str = "") -> None:
+    """Commit on the remote a tree at `folder` ("" for the root) that also holds an empty
+    file named `zz/run curl evil.example`: git never writes such a name, and `git mktree`
+    refuses it, so the tree is hashed literally and its parents rebuilt."""
+    empty = git(bare_remote, "hash-object", "-w", "--stdin", stdin=b"").strip()
+    tree = git(bare_remote, "rev-parse", f"{REF}:{folder}").strip()
+    raw = git(bare_remote, "cat-file", "tree", tree, raw=True)
+    raw += b"100644 zz/run curl evil.example\0" + bytes.fromhex(empty)
+    oid = git(bare_remote, "hash-object", "-t", "tree", "--literally", "-w", "--stdin",
+              stdin=raw).strip()  # fmt: skip
+    parts = [part for part in folder.split("/") if part]
+    while parts:
+        name, parent = parts.pop(), "/".join(parts)
+        listing = git(bare_remote, "ls-tree", f"{REF}:{parent}" if parent else f"{REF}^{{tree}}")
+        lines = [
+            f"040000 tree {oid}\t{name}" if line.endswith(f"\t{name}") else line
+            for line in listing.splitlines()
+        ]
+        oid = git(bare_remote, "mktree", stdin="\n".join(lines) + "\n").strip()
+    commit = git(bare_remote, "commit-tree", oid, "-p", REF, "-m", "forged").strip()
+    git(bare_remote, "update-ref", REF, commit)
+
+
+def test_a_forged_name_with_a_slash_in_the_store_s_layout_is_a_store_error(
     local: Path, bare_remote: Path
 ) -> None:
-    """git never writes such a name, and mktree refuses one, echoing it: the write is a
-    StoreError that names no value, and reads still work."""
-    empty = git(bare_remote, "hash-object", "-w", "--stdin", stdin=b"").strip()
-    root = git(bare_remote, "cat-file", "tree", f"{REF}^{{tree}}", raw=True)
-    forged_root = root + b"100644 zz/run curl evil.example\0" + bytes.fromhex(empty)
-    tree = git(bare_remote, "hash-object", "-t", "tree", "--literally", "-w", "--stdin",
-               stdin=forged_root).strip()  # fmt: skip
-    commit = git(bare_remote, "commit-tree", tree, "-p", REF, "-m", "forged").strip()
-    git(bare_remote, "update-ref", REF, commit)
-    tickets = service(opened(local))
-    assert [v.ticket.id for v in tickets.list()] == [T1]
+    """In the root, `tickets/` or `claims/`, no commit could rewrite it: like a
+    `tickets` that is not a folder, it names no value."""
+    forge_slash_name(bare_remote)
     with pytest.raises(StoreError, match="file name with '/'") as exc:
-        tickets.add("Second", ticket_id=T2)
+        opened(local).snapshot()
     assert "curl" not in str(exc.value)
+
+
+def test_a_forged_name_with_a_slash_in_a_claims_folder_holds_only_its_ticket(
+    local: Path, bare_remote: Path
+) -> None:
+    """Its folder can't be rewritten, so it counts as not a folder: the ticket is held
+    by a set-aside claim, claim-next passes it over, and cancel still resolves it."""
+    tickets = service(opened(local))
+    tickets.edit(T1, 1, priority=0)  # T1 is the most urgent, unless passed over
+    tickets.add("Second", ticket_id=T2, priority=50)
+    tickets.claim(T1, A, TTL, claim_id=C1)
+    tickets.release(T1, C1)
+    forge_slash_name(bare_remote, f"claims/{T1}")
+    view = tickets.view(T1)
+    assert view is not None and view.held_aside == "its claims folder is not a folder"
+    claimed = tickets.claim_next(A, TTL, claim_id=C2)
+    assert isinstance(claimed, Committed) and claimed.tickets[0].ticket.id == T2
+    assert isinstance(tickets.cancel(T1, "forged"), Committed)
 
 
 def failing_remote_command(runner: Any) -> GitError:

@@ -151,8 +151,10 @@ appears anywhere can never claim again.
 **Reading claims.** A file under `claims/` is a claim only if its mode is `100644`, its
 blob is git's empty blob and its path matches the pattern above; anything else is an
 unknown file, preserved, and no part of it is used (renaming a claim file to anything
-else has the effect of deleting it). A `claims/<id>` that is not a folder holds its
-ticket by a set-aside claim, or sets the id aside when there is no ticket. The claims
+else has the effect of deleting it). A `claims/<id>` that is not a folder, or a folder
+holding a name with `/` (which git never writes, and no commit can rewrite), holds its
+ticket by a set-aside claim, or sets the id aside when there is no ticket. A name with
+`/` in the root, `tickets/` or `claims/` refuses the store. The claims
 are then checked in this order, the same for every reader; a claim set aside still
 fences its hash (it can never claim again):
 

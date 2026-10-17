@@ -76,7 +76,9 @@
     file name; git's text is appended, controls escaped, to
     `.git/tkt-store/git-errors.log` for an operator, escaped as output is, each line
     quoted. Partial clones are refused, and git never fetches objects lazily. A forged
-    file name holding '/' makes a write a StoreError that says so; reads still work. An unforeseen failure prints an
+    file name holding '/', which git never writes and no commit can rewrite, is a
+    StoreError in the root, `tickets/` or `claims/`; in a ticket's claims folder it
+    makes the folder count as not a folder, so only that ticket is held aside. An unforeseen failure prints an
     error object naming its type (exit 4) instead of a traceback.
   - Free text also refuses U+16FE4 and U+1D159, two printable characters that render
     blank.

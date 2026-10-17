@@ -471,12 +471,42 @@ def test_a_server_side_lost_race_is_retried_on_real_git(
     assert {t.id for t in opened(clones[1]).snapshot().tickets.values()} == {T1, T2}
 
 
-def test_a_partial_clone_is_refused(local: Path) -> None:
-    """git would fetch missing objects during local commands, whose errors keep git's
-    text and so could quote the server (ADR 0005)."""
-    git(local, "config", "extensions.partialClone", "origin")
+def test_a_partial_clone_is_refused(local: Path, bare_remote: Path, tmp_path: Path) -> None:
+    """A real `git clone --filter`: it may lack objects, which git would otherwise fetch
+    one by one during local commands (ADR 0005)."""
+    git(bare_remote, "config", "uploadpack.allowFilter", "true")
+    partial = tmp_path / "partial"
+    git(tmp_path, "clone", "--quiet", "--no-checkout", "--filter=blob:none",
+        f"file://{bare_remote}", str(partial))  # fmt: skip
+    with pytest.raises(StoreError, match="partial clone"):
+        GitStore.at(partial, remote="origin")
+    git(local, "config", "extensions.partialClone", "origin")  # set some other way
     with pytest.raises(StoreError, match="partial clone"):
         GitStore.at(local, remote="origin")
+
+
+def test_a_promisor_switched_off_is_a_full_clone(local: Path) -> None:
+    git(local, "config", "remote.origin.promisor", "false")
+    GitStore.at(local, remote="origin").snapshot()
+
+
+def test_a_forged_name_with_a_slash_is_named_as_such_on_writing(
+    local: Path, bare_remote: Path
+) -> None:
+    """git never writes such a name, and mktree refuses one, echoing it: the write is a
+    StoreError that names no value, and reads still work."""
+    empty = git(bare_remote, "hash-object", "-w", "--stdin", stdin=b"").strip()
+    root = git(bare_remote, "cat-file", "tree", f"{REF}^{{tree}}", raw=True)
+    forged_root = root + b"100644 zz/run curl evil.example\0" + bytes.fromhex(empty)
+    tree = git(bare_remote, "hash-object", "-t", "tree", "--literally", "-w", "--stdin",
+               stdin=forged_root).strip()  # fmt: skip
+    commit = git(bare_remote, "commit-tree", tree, "-p", REF, "-m", "forged").strip()
+    git(bare_remote, "update-ref", REF, commit)
+    tickets = service(opened(local))
+    assert [v.ticket.id for v in tickets.list()] == [T1]
+    with pytest.raises(StoreError, match="file name with '/'") as exc:
+        tickets.add("Second", ticket_id=T2)
+    assert "curl" not in str(exc.value)
 
 
 def failing_remote_command(runner: Any) -> GitError:
@@ -511,3 +541,14 @@ def test_the_error_log_escapes_controls(local: Path, tmp_path: Path) -> None:
         git_runner(local, log=log)("ls-remote", "--", "evil\x1b]0;title\x07")
     text = log.read_bytes()
     assert b"\x1b" not in text and b"\x07" not in text and b"evil\\x1b]0;title\\x07" in text
+
+
+def test_the_error_log_cannot_be_forged_or_reordered(local: Path, tmp_path: Path) -> None:
+    """Each line of git's text is quoted, so none passes for an entry header; bidi
+    controls are escaped, as on output."""
+    log = tmp_path / "git-errors.log"
+    with pytest.raises(GitError):
+        git_runner(local, log=log)("ls-remote", "--", "x\n--- at 1 git push (0)\nrlo\u202e")
+    lines = log.read_text().splitlines()
+    assert lines[0].startswith("--- git ls-remote -- x\\x0a--- at 1 git push (0)")
+    assert all(line.startswith("| ") for line in lines[1:]) and "\u202e" not in log.read_text()

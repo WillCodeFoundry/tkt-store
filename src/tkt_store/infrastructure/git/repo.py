@@ -74,14 +74,19 @@ BLOB_MODE = "100644"
 
 
 def _is_partial(git: GitRunner) -> bool:
-    """True if the clone has a promisor remote (`git clone --filter`)."""
+    """True if the clone may lack objects: a promisor remote (`git clone --filter` sets
+    `remote.<name>.promisor`) or `extensions.partialClone`."""
     try:
-        git("config", "--get", "extensions.partialClone")
+        found = git("config", "--get-regexp", r"^(extensions\.partialclone|remote\..*\.promisor)$")
     except GitError as error:
-        if error.returncode == 1:  # not set
+        if error.returncode == 1:  # none set
             return False
         raise
-    return True
+    for line in found.decode(errors="replace").splitlines():
+        key, _, value = line.partition(" ")
+        if key == "extensions.partialclone" or value.lower() not in ("false", "no", "off", "0"):
+            return True
+    return False
 
 
 class GitStore:
@@ -391,8 +396,15 @@ class GitStore:
 
     def _edit_tree(self, tree: str | None, edits: dict[str, str | None]) -> str:
         """`tree` (None: empty) with `edits` applied, paths relative to it; returns the new
-        tree's id. Only the subtrees an edit touches are read and rewritten."""
+        tree's id. Only the subtrees an edit touches are read and rewritten. A name with
+        a '/' (which git never writes, but a forged tree can hold) is a StoreError that
+        names no value: mktree would refuse it, echoing the name."""
         entries = {} if tree is None else _by_name(self._git("ls-tree", "-z", tree))
+        if any(b"/" in name for name in entries):
+            raise StoreError(
+                f"{self._ref} holds a file name with '/', which git never writes; an "
+                "operator must repair the store"
+            )
         nested: dict[str, dict[str, str | None]] = {}
         for path, oid in edits.items():
             head, slash, rest = path.partition("/")

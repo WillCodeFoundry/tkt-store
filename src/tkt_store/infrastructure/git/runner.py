@@ -14,7 +14,6 @@ as a category; git's text goes to an operator's log (ADR 0005).
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from collections.abc import Callable
 from contextlib import suppress
@@ -22,6 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from tkt_store.application.errors import StoreError
+from tkt_store.domain import fields
 
 REMOTE_COMMANDS = frozenset({"fetch", "push", "ls-remote"})
 """The git commands tkt runs that talk to the remote. No other command does: lazy
@@ -143,19 +143,31 @@ def git_runner(
     return run
 
 
-_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
-"""Controls but tab and newline, escaped in the log: an operator reading it with `cat`
-must not let the server drive the terminal (set its title, write the clipboard)."""
+def _escaped(text: str, keep: str = "\t\n") -> str:
+    """`text` with every character an operator's terminal must not get raw written as an
+    escape, as on output (`cli.escape_json`): whatever Python finds non-printable, but
+    tab and newline, and the field rules' invisible characters. A server must not drive
+    the terminal (set its title, write the clipboard) or reorder what it shows."""
+    return "".join(
+        char
+        if char in keep or (char.isprintable() and not fields.REFUSED_BEYOND_C0_RE.match(char))
+        else f"\\x{ord(char):02x}"
+        if ord(char) < 0x100
+        else f"\\u{{{ord(char):x}}}"
+        for char in text
+    )
 
 
 def _append(
     log: Path, stamp: int | None, args: tuple[str, ...], returncode: int, stderr: str
 ) -> bool:
-    """Append one failure to `log`, moving a full log to `<name>.1` first. Returns
-    whether it was written: logging never fails an op."""
+    """Append one failure to `log`, moving a full log to `<name>.1` first: a header line,
+    then git's text with each line after `| `, so no text can pass for a header.
+    Returns whether it was written: logging never fails an op."""
     when = "" if stamp is None else f"at {stamp} "
-    text = f"--- {when}git {' '.join(args)} ({returncode})\n{stderr.rstrip()}"
-    entry = (_CONTROL.sub(lambda m: f"\\x{ord(m[0]):02x}", text) + "\n").encode()
+    quoted = "".join(f"| {line}\n" for line in stderr.rstrip().split("\n"))
+    header = _escaped(f"--- {when}git {' '.join(args)} ({returncode})", keep="")
+    entry = f"{header}\n{_escaped(quoted)}".encode()
     with suppress(OSError):
         log.parent.mkdir(parents=True, exist_ok=True)
         with suppress(FileNotFoundError):

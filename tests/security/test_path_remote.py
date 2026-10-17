@@ -64,7 +64,8 @@ def test_server_rejection_text_is_not_passed_to_agents(
     with pytest.raises(StoreError) as exc:
         tickets.add("Honest work", ticket_id=T2)
     assert "curl" not in str(exc.value) and "refused by the server" in str(exc.value)
-    assert b"curl evil.example" in error_log(honest_clone).read_bytes()
+    logged = error_log(honest_clone).read_bytes()
+    assert b"curl evil.example" in logged and b"pre-receive hook declined" in logged
 
 
 def test_a_server_s_own_errors_are_not_passed_to_agents(

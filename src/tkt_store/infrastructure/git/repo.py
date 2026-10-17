@@ -88,6 +88,8 @@ class GitStore:
     """A Store backed by one ref, published to a remote and cached in a clone.
 
     `remote` is the shared remote's name (normally "origin"); it has no default here.
+    git errors carry only a category (ADR 0005): `GitStore.at` logs git's text in the
+    clone's git directory; a runner built without `log=` keeps it nowhere.
     """
 
     def __init__(

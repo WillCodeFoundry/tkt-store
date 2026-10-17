@@ -32,8 +32,10 @@ LOG_MAX = 1024 * 1024
 
 NOT_A_REPOSITORY = (
     "the clone is not a git repository",
-    ("not a git repository", "cannot change to"),
+    ("not a git repository (or any of the parent", "cannot change to"),
 )
+"""git's wording about the clone itself, never what a server could print about its own
+repository."""
 REMOTE_CATEGORIES = (
     NOT_A_REPOSITORY,
     ("the remote refused access (authentication or permissions)",
@@ -131,7 +133,10 @@ def git_runner(
             logged = False
             if log is not None and stderr.strip():  # an expected failure prints nothing
                 stamp = None if now is None else now()
-                logged = _append(log, stamp, args, result.returncode, stderr)
+                text = stderr
+                if args[0] == "push":  # the porcelain status, with the server's reason
+                    text += "\n" + result.stdout.decode("utf-8", errors="replace")
+                logged = _append(log, stamp, args, result.returncode, text)
             raise GitError(args, result.returncode, result.stdout, stderr, logged=logged)
         return result.stdout
 

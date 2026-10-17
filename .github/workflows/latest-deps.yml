@@ -1,6 +1,7 @@
-# Weekly and small: the fast tests on every supported Python against the newest
-# dependency versions pyproject.toml allows (ignoring uv.lock), so upstream drift
-# shows up without blocking PRs. Slow checks (e.g. mutation testing) stay out.
+# Weekly: the whole suite on every supported Python against the newest dependency
+# versions pyproject.toml allows (ignoring uv.lock), so upstream drift and breakage on
+# newer Pythons show up without blocking PRs (which test the floor). Mutation testing
+# stays out.
 name: latest-deps
 
 on:
@@ -25,4 +26,4 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --upgrade --group dev
-      - run: uv run pytest -m "not slow"
+      - run: uv run pytest

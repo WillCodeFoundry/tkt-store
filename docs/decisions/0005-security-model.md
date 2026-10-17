@@ -84,14 +84,22 @@ escaped):
   characters, line and paragraph separators, spaces other than U+0020, private use,
   surrogates, unassigned code points), plus the field rules' fixed list of invisible
   characters. Output, unlike the field rules, may follow the running Python's Unicode
-  version: it changes how a value prints, never a verdict, and an invisible character a
-  later Unicode adds is unassigned, so escaped, until Python knows it.
+  version: it changes how a value prints, never a verdict, so output is compared as
+  parsed JSON, never as text. A character a later Unicode adds is unassigned, so
+  escaped, until Python knows it; from then on a new format character is still escaped,
+  but a new invisible character in a printable category prints raw unless the fixed
+  list names it, so that list is kept up to date.
 - Errors never echo values read from the store: they name the file and the field, the
   ticket id, and the holder, a slug of at most 39 that can't hide characters. Nor do
-  they carry text a server chose: git's own messages are kept, but `remote:` lines,
-  `remote error:` messages and the reason of a `[remote rejected]` push are left out,
-  since any server, or a hook planted in a path remote, can write anything there. A
-  failure tkt did not foresee prints its type only, never a traceback.
+  they carry any text git printed for a command that talks to the remote (`fetch`,
+  `push`, `ls-remote`): it can quote the server (hook output, an SSH server's banner or
+  a forced command's errors, a redirect's target), and a server can write anything
+  there, lines that look like git's own included. Such a failure is reported by
+  category (access refused, not found, unreachable, refused by the server,
+  unrecognised), matched on git's own wording, so a server chooses the category at
+  most; git's text is appended to `tkt-store/git-errors.log` in the clone's git
+  directory, which the message names, for an operator. Local git commands keep their
+  text. A failure tkt did not foresee prints its type only, never a traceback.
 - `list` never prints a ticket's body (`show`, `claim`, `claim-next`, `edit` do).
 
 Agent guidance: every composed field (title, body, reason, tags, holder, project) is
@@ -141,8 +149,10 @@ anything.
   protects nothing the field rules and the non-printable escapes leave open: visible
   injection is plain ASCII anyway. An option to choose either was rejected too: one
   behaviour is less to maintain and to test.
-- **No git text in errors at all:** the safest, but failures of authentication or of
-  the network could no longer be told apart; git's own lines say which.
+- **Keeping git's own lines and dropping the server's** (`remote:` lines, `remote
+  error:` messages): an SSH server's stderr reaches git's with no prefix, and can look
+  like git's own lines, so no filter can tell them apart. Categories keep failures of
+  authentication and of the network apart, and the log keeps the detail.
 - **Validating pushes on the server** (`pre-receive`, `tkt verify`): the remote is
   unknown and may be a hosting service without custom hooks.
 - **PRECIS (RFC 8264) for free text, with NFC:** it refuses unassigned characters and

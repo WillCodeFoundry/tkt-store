@@ -122,8 +122,9 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
 
     A failure without a status line (a timeout, a dropped connection) is the GitError
     itself, a StoreError that may hide a push that landed. No message quotes a status
-    line: its reason is the server's, and a server can write anything there, tabs and
-    line breaks included (ADR 0005)."""
+    line or git's text: the reason is the server's, and a server can write anything
+    there, tabs and line breaks included (ADR 0005); git's text is in the log the
+    GitError names."""
     try:
         git(
             "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
@@ -148,7 +149,7 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
             return
         if head != base:
             raise Conflict(base, head) from error
-        raise StoreError(f"{refused}, and the branch did not move: {error.stderr}") from error
+        raise StoreError(f"{refused}, and the branch did not move{error.logged}") from error
 
 
 def remote_head(git: GitRunner, remote: str, ref: str) -> Revision | None:

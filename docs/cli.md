@@ -169,9 +169,15 @@ Each entry of `tickets` is the ticket in its on-branch form and its open claim, 
   control, a format or invisible character, an unusual space, an unassigned code point)
   is written as a JSON `\uXXXX` escape, so the JSON reads back the stored value. If
   stdout cannot encode some text (a legacy locale), all non-ASCII is escaped.
-- Error messages keep git's own text but never the server's: `remote:` lines,
-  `remote error:` messages and a rejected push's reason are left out. A failure tkt did
-  not foresee prints `internal error (<type>)` with exit 4, never a traceback.
+- Output differs between Python versions only in which characters are escaped, so
+  compare it as parsed JSON, never as text.
+- A failed `fetch`, `push` or `ls-remote` is reported by category only (the remote
+  refused access, was not found or is not configured, could not be reached, refused the
+  push, or an unrecognised failure), never with git's text, which can quote the server.
+  The message names the log that holds git's text for an operator:
+  `tkt-store/git-errors.log` in the clone's git directory (moved to `….1` past 1 MiB).
+  A failure tkt did not foresee prints `internal error (<type>)` with exit 4, never a
+  traceback.
 
 ## Exit codes
 

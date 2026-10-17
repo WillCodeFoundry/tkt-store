@@ -70,9 +70,11 @@
     rules' invisible characters, as `\uXXXX`. Printable text in any script prints as
     itself. If stdout cannot encode it, all non-ASCII is escaped.
   - `list` rows leave out the ticket's `body`.
-  - Error messages leave out text a server chose (`remote:` lines, `remote error:`
-    messages, a rejected push's reason), and an unforeseen failure prints an error
-    object naming its type (exit 4) instead of a traceback.
+  - A failed `fetch`, `push` or `ls-remote` is reported by category (access refused,
+    not found, unreachable, refused by the server, unrecognised), never with git's
+    text, which can quote the server; git's text is appended to
+    `.git/tkt-store/git-errors.log` for an operator. An unforeseen failure prints an
+    error object naming its type (exit 4) instead of a traceback.
   - Free text also refuses U+16FE4 and U+1D159, two printable characters that render
     blank.
   - tkt-store imports on Python 3.11 again (broken since stage 2a).

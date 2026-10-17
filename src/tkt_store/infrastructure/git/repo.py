@@ -56,6 +56,7 @@ from tkt_store.domain import fields
 from tkt_store.domain.occupancy import assemble
 from tkt_store.domain.outcomes import Change, OpRecord, WriteClaim, WriteTicket
 from tkt_store.domain.ticket import ClaimFile, Revision, Snapshot, Ticket, TicketId
+from tkt_store.infrastructure.clock import SystemClock
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.cache import Cached, CloneCache
@@ -65,6 +66,9 @@ from tkt_store.infrastructure.git.wire import DEFAULT_REF
 CACHE_PATH = "tkt-store/cache"
 """Where the clone cache's shard files live, relative to the clone's git directory
 (ADR 0006)."""
+ERROR_LOG_PATH = "tkt-store/git-errors.log"
+"""Where git's text for a failed remote command is logged for an operator, relative to
+the clone's git directory: error messages carry only its category (ADR 0005)."""
 TREE_MODE = "040000"
 BLOB_MODE = "100644"
 
@@ -102,13 +106,14 @@ class GitStore:
 
     @classmethod
     def at(cls, repo: Path, *, remote: str, ref: str = DEFAULT_REF) -> GitStore:
-        """The production wiring: git_runner(repo), with the clone cache in the clone's
-        git directory."""
+        """The production wiring: git_runner(repo), with the clone cache and the error
+        log in the clone's git directory."""
         git = git_runner(repo)
         try:
             git_dir = Path(git("rev-parse", "--absolute-git-dir").decode().strip())
         except GitError:
             return cls(git, remote=remote, ref=ref)  # not a repository: the snapshot says so
+        git = git_runner(repo, log=git_dir / ERROR_LOG_PATH, now=SystemClock().now)
         return cls(git, remote=remote, ref=ref, cache=CloneCache(git_dir / CACHE_PATH))
 
     def snapshot(self) -> Snapshot:

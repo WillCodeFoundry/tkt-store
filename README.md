@@ -68,7 +68,9 @@ git 2.29 or later.
 repository, and never let two processes use the same clone, for example by mounting one
 clone into several containers. Each clone keeps a cache of what it has already read in
 `.git/tkt-store/cache/`; deleting it is always safe (the next command reads the store in
-full once).
+full once). When a command can't reach the remote, its error says only what kind of
+failure it was; git's own message is in `.git/tkt-store/git-errors.log`. It may quote
+the server, so read it yourself rather than passing it to an agent.
 
 **Agents use only `tkt`, never git, on the store.** `tkt` validates what it writes (and,
 from 0.2.0, everything it reads), never checks out files (so no checkout hooks, filters

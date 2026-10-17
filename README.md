@@ -164,7 +164,7 @@ dependencies and running tools. Do not use `pip`.
 
 ```sh
 uv sync --group dev           # create .venv from uv.lock, with the opt-in dev tools
-uv run pre-commit install     # git hooks as a safety net
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push  # safety net
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy

@@ -73,12 +73,19 @@ in `pyproject.toml`); use `-vv` to list individual tests.
 
 Two hooks back this up; they are a safety net, not the check:
 
-- The pre-commit hooks (installed with `uv run pre-commit install`) run a subset of
-  these on every `git commit`. Do not invoke pre-commit directly in place of the
-  commands above.
+- `pre-commit` (`.pre-commit-config.yaml`, all `repo: local` hooks run via `uv run`, so
+  no version is pinned outside the `dev` group) installs as two git hook types with
+  `uv run pre-commit install --hook-type pre-commit --hook-type pre-push`:
+  - **pre-commit**: ruff format, ruff check, mypy and the tests that need no git
+    (`pytest -m "not git"`, about 8 s);
+  - **pre-push**: the whole suite (`uv run pytest`, about a minute), as CI's test job
+    runs it, so a push is never green locally and red on GitHub for a reason this
+    already caught.
+
+  Do not invoke pre-commit directly in place of the commands above.
 - For Claude Code, `.claude/hooks/pre-commit-checks.sh` blocks any `git commit` that
   carries a `Co-Authored-By` trailer, uses `--no-verify` or `--no-gpg-sign`, or would
   be unsigned, and runs the four commands above first.
 
 Commits are signed and carry no co-author trailers. Never use `--no-verify`.
-The ruff version is pinned in `pyproject.toml` and `.pre-commit-config.yaml`; change both together.
+Every tool's version is pinned once, in the `dev` group of `pyproject.toml`.

@@ -73,6 +73,9 @@
   - Error messages leave out text a server chose (`remote:` lines, `remote error:`
     messages, a rejected push's reason), and an unforeseen failure prints an error
     object naming its type (exit 4) instead of a traceback.
+  - Free text also refuses U+16FE4 and U+1D159, two printable characters that render
+    blank.
+  - tkt-store imports on Python 3.11 again (broken since stage 2a).
 - Claims to become records of their own in 0.2.0 (ADR 0007): empty files under
   `claims/<id>/` whose names hold the claim's whole state (hash, open or how it ended,
   holder, times), so fencing survives a ticket being set aside, nothing in a claim is

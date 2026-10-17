@@ -10,8 +10,12 @@ value; usage errors are argparse's plain text (exit 2). It holds no rules.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
+import io
 import json
+import os
+import sys
 from collections.abc import Callable, Sequence
 from enum import Enum, IntEnum
 from pathlib import Path
@@ -398,9 +402,20 @@ def _escaped(char: str) -> str:
 def _print(value: Any) -> None:
     text = escape_json(json.dumps(value, ensure_ascii=False))
     try:
-        print(text)
-    except UnicodeEncodeError:  # a stdout that can't encode it (a legacy locale)
-        print(json.dumps(value))  # every non-ASCII character escaped
+        try:
+            print(text, flush=True)
+        except UnicodeEncodeError:  # a stdout that can't encode it (a legacy locale)
+            print(json.dumps(value), flush=True)  # every non-ASCII character escaped
+    except BrokenPipeError:  # the reader went away: the exit code still says how it went
+        _silence_stdout()
+
+
+def _silence_stdout() -> None:
+    """Point stdout at the null device, so Python's flush at exit can't fail again and
+    print a traceback."""
+    with contextlib.suppress(OSError, ValueError, io.UnsupportedOperation):
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
 
 
 def emit_error(error: TktError) -> int:

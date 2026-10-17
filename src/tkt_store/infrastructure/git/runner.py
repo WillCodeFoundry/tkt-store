@@ -8,6 +8,7 @@ production runner shells out with `git -C <repo> ...`.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -17,12 +18,24 @@ from tkt_store.application.errors import StoreError
 SERVER_TEXT_OMITTED = "(the server's text is omitted)"
 
 
+_GIT_LINE_BREAK = re.compile(r"\r\n?|\n")
+"""Where git starts a new line, and so a new `remote:` prefix: never at the other breaks
+`str.splitlines` knows (form feed, U+2028, ...), which a hook can write mid-line."""
+_SERVER_TEXT = ("remote error:", "warning: redirecting to")
+
+
 def own_text(stderr: str) -> str:
-    """git's own lines from `stderr`, without any text a server chose: `remote:` lines
-    (hook and server output) and `remote error:` messages. Error messages reach agents,
-    and a server, or a hook planted in a path remote, can write anything (ADR 0005)."""
-    lines = stderr.strip().splitlines()
-    own = [line for line in lines if not line.startswith("remote:") and "remote error:" not in line]
+    """git's own lines from `stderr`, without the text a server chose: `remote:` lines
+    (hook and server output), `remote error:` messages and an HTTP redirect's target.
+    Error messages reach agents, and a server, or a hook planted in a path remote, can
+    write anything (ADR 0005). An SSH server's banner reaches stderr with no prefix to
+    recognise it by: that server is trusted, as the host is."""
+    lines = _GIT_LINE_BREAK.split(stderr.strip())
+    own = [
+        line
+        for line in lines
+        if not line.startswith("remote:") and not any(text in line for text in _SERVER_TEXT)
+    ]
     if len(own) < len(lines):
         own.append(SERVER_TEXT_OMITTED)
     return "\n".join(own)

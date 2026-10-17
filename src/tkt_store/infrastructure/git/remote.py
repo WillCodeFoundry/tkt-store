@@ -121,40 +121,34 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     pushes would turn a lost race into a StoreError. Neither publishes anything.
 
     A failure without a status line (a timeout, a dropped connection) is the GitError
-    itself, a StoreError that may hide a push that landed. No message carries the
-    server's reason or its `remote:` lines: a server can write anything there (ADR 0005)."""
+    itself, a StoreError that may hide a push that landed. No message quotes a status
+    line: its reason is the server's, and a server can write anything there, tabs and
+    line breaks included (ADR 0005)."""
     try:
         git(
             "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
             "--", remote, f"{new}:{ref}",
         )  # fmt: skip
     except GitError as error:
-        status = [line for line in error.stdout.decode().splitlines() if line.startswith("!")]
+        status = [
+            line
+            for line in error.stdout.decode(errors="replace").splitlines()
+            if line.startswith("!")
+        ]
         if any("\t[rejected]" in line for line in status):
             raise Conflict(base, None) from error
         if not status:
             raise
-        reasons = "; ".join(_without_reason(line.split("\t")[-1]) for line in status)
+        refused = f"push to {remote} refused by the server (its reason is omitted)"
         try:
             head = remote_head(git, remote, ref)
         except GitError as check:
-            raise StoreError(
-                f"push to {remote} {reasons}, and the branch could not be re-read: {check}"
-            ) from error
+            raise StoreError(f"{refused}, and the branch could not be re-read: {check}") from error
         if head == new:
             return
         if head != base:
             raise Conflict(base, head) from error
-        raise StoreError(
-            f"push to {remote} {reasons}: refused by the server (its reason is omitted), "
-            f"and the branch did not move: {error.stderr}"
-        ) from error
-
-
-def _without_reason(status: str) -> str:
-    """A porcelain push status without its parenthesised reason: for `[remote rejected]`
-    the server writes it, and it can say anything (ADR 0005)."""
-    return status.partition(" (")[0]
+        raise StoreError(f"{refused}, and the branch did not move: {error.stderr}") from error
 
 
 def remote_head(git: GitRunner, remote: str, ref: str) -> Revision | None:

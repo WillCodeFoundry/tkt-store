@@ -81,7 +81,9 @@ _REFUSED_BEYOND_C0 = (
     (0xFFA0, 0xFFA0),  # halfwidth hangul filler
     (0xFFF0, 0xFFFB),  # unassigned specials, interlinear annotation controls: invisible
     (0x13430, 0x1343F),  # egyptian hieroglyph format controls
+    (0x16FE4, 0x16FE4),  # khitan small script filler: renders blank
     (0x1BCA0, 0x1BCA3),  # shorthand format controls: invisible
+    (0x1D159, 0x1D159),  # musical symbol null notehead: renders blank
     (0x1D173, 0x1D17A),  # musical symbol formatting controls
     (0xE0000, 0xE0FFF),  # tags, variation selectors supplement, the rest of the block:
     #                      invisible to people, read by LLMs, can smuggle hidden data

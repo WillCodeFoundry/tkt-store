@@ -322,7 +322,7 @@ def test_rejection_by_a_remote_hook_is_store_error_not_conflict(
     hook = bare_remote / "hooks" / "pre-receive"
     hook.write_text("#!/bin/sh\necho protected >&2\nexit 1\n")
     hook.chmod(0o755)
-    with pytest.raises(StoreError, match=r"\[remote rejected\].*did not move") as exc:
+    with pytest.raises(StoreError, match=r"refused by the server.*did not move") as exc:
         tickets.add("Expire tokens", ticket_id=T1)
     assert not isinstance(exc.value.__cause__, Conflict)
     assert "protected" not in str(exc.value) and "hook declined" not in str(exc.value)

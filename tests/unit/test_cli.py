@@ -260,3 +260,12 @@ def test_an_unexpected_failure_prints_an_error_object_without_its_values(
     out = json.loads(capsys.readouterr().out)
     assert code == 4 and out["outcome"] == "error" and "curl" not in out["message"]
     assert "KeyError" in out["message"]
+
+
+def test_a_reader_that_goes_away_costs_no_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Gone(io.StringIO):
+        def write(self, _: str) -> int:
+            raise BrokenPipeError
+
+    monkeypatch.setattr(sys, "stdout", Gone())
+    cli._print({"outcome": "committed"})  # no exception

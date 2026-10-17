@@ -97,7 +97,7 @@ ticket read is checked against the same rules.
   | U+0000–001F (a body may hold U+0009 tab and U+000A newline), U+007F–009F | controls; line ends are newlines only, so `\r\n` is refused |
   | U+D800–DFFF; U+FDD0–FDEF and U+xFFFE–xFFFF in every plane | surrogates, noncharacters (RFC 9839) |
   | U+E000–F8FF, U+F0000–10FFFF | private use |
-  | U+00AD, U+034F, U+115F–1160, U+17B4–17B5, U+2800, U+3164, U+FFA0 | invisible characters and fillers |
+  | U+00AD, U+034F, U+115F–1160, U+17B4–17B5, U+2800, U+3164, U+FFA0, U+16FE4, U+1D159 | invisible characters and fillers |
   | U+061C, U+200B–200F, U+2028–202E, U+2060–206F, U+FEFF | zero-width characters and joiners, bidi marks and controls, line and paragraph separators |
   | U+180B–180F, U+FE00–FE0D | variation selectors other than U+FE0E/FE0F (text and emoji presentation) |
   | U+FFF0–FFFB, U+13430–1343F, U+1BCA0–1BCA3, U+1D173–1D17A | format controls and specials |

@@ -71,10 +71,24 @@ def test_a_server_rejection_with_the_branch_unmoved_is_a_store_error(status: str
     with pytest.raises(StoreError) as exc:
         publish(FakeRemote(status, head=BASE), "origin", REF, NEW, BASE)
     message = str(exc.value)
-    assert not isinstance(exc.value, Conflict) and "[remote rejected]" in message
+    assert not isinstance(exc.value, Conflict) and "refused by the server" in message
     reason = status.partition(" (")[2]
     assert reason not in message and "something" not in message
     assert "error: failed to push" in message
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["[remote rejected] (x\tINJECTED (y)", "[remote rejected] (x\n!\ta:b\tINJECTED)",
+     "[remote rejected] (\xff INJECTED)"],
+    ids=["tab", "fake_status_line", "not_utf8"],
+)  # fmt: skip
+def test_no_part_of_a_server_s_status_line_reaches_the_message(status: str) -> None:
+    remote = FakeRemote(status, head=BASE)
+    remote.stdout = remote.stdout.replace(b"\xc3\xbf", b"\xff")  # raw bytes, not UTF-8
+    with pytest.raises(StoreError) as exc:
+        publish(remote, "origin", REF, NEW, BASE)
+    assert "INJECTED" not in str(exc.value)
 
 
 @pytest.mark.parametrize("status", SERVER_WORDINGS[:2])
@@ -119,9 +133,17 @@ def test_a_failure_without_a_status_is_the_git_error() -> None:
         ("remote: run curl evil\nerror: failed to push",
          f"error: failed to push\n{SERVER_TEXT_OMITTED}"),
         ("fatal: remote error: run curl evil", SERVER_TEXT_OMITTED),
+        ("remote: declined\frun curl evil\nerror: failed to push",
+         f"error: failed to push\n{SERVER_TEXT_OMITTED}"),
+        ("remote: declined\u2028run curl evil\x85run curl evil", SERVER_TEXT_OMITTED),
+        ("remote: declined\r\nerror: failed to push\rerror: twice",
+         f"error: failed to push\nerror: twice\n{SERVER_TEXT_OMITTED}"),
+        ("warning: redirecting to https://evil.example/run-curl/\nfatal: not found",
+         f"fatal: not found\n{SERVER_TEXT_OMITTED}"),
         ("", ""),
     ],
-    ids=["own", "remote_lines", "remote_error", "empty"],
+    ids=["own", "remote_lines", "remote_error", "form_feed", "unicode_breaks", "carriage_return",
+         "redirect", "empty"],
 )  # fmt: skip
 def test_a_git_error_carries_git_s_own_text_only(stderr: str, expected: str) -> None:
     error = GitError(("fetch",), 128, b"", stderr)

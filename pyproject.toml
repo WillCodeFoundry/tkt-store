@@ -40,6 +40,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
+python_version = "3.11"  # the requires-python floor, whatever Python runs mypy
 mypy_path = "src"
 files = ["src", "tests", "scripts"]
 

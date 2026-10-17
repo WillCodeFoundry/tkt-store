@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- CI: PR tests run on Python 3.11, the `requires-python` floor, and mypy checks
+  against 3.11 whatever Python runs it; the weekly job runs the whole suite, slow
+  tests included, on 3.11 to 3.14.
 - Lost races are recognised on any git server: after the server rejects a push, one
   `ls-remote` shows whether the branch moved (retry) or not (store error), instead of
   matching each server's wording. This also covers `git daemon` and receive-pack over

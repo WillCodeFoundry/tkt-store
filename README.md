@@ -162,14 +162,34 @@ The package is organised in layers, with dependencies pointing inward only
 This project uses [uv](https://docs.astral.sh/uv/) for environments,
 dependencies and running tools. Do not use `pip`.
 
+**Set up a clone for development** (once per clone). You need uv and git 2.29 or later;
+uv fetches a suitable Python (3.11 or later) if you have none.
+
 ```sh
-uv sync --group dev           # create .venv from uv.lock, with the opt-in dev tools
-uv run pre-commit install     # git hooks as a safety net
+git clone https://github.com/WillCodeFoundry/tkt-store.git
+cd tkt-store
+uv sync --group dev    # .venv from uv.lock, with the dev tools (they are opt-in)
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+The last command installs both git hooks; check with `ls .git/hooks/pre-commit
+.git/hooks/pre-push`. It refuses to install if git's `core.hooksPath` is set: unset it,
+or point it at a directory that runs these hooks. A plain `uv sync` installs none of the
+dev tools, so the hooks would fail.
+
+**Before committing**, run the checks CI runs; they must pass:
+
+```sh
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
 uv run pytest
 ```
 
+**The git hooks** are a safety net, not the check. On `git commit` they run ruff, mypy
+and the tests that need no git (about 8 s); on `git push`, the whole suite (about a
+minute), as CI's test job runs it. Every tool's version is pinned once, in the `dev`
+group of `pyproject.toml`; the hooks run it with `uv run`.
+
 `uv.lock` is tracked; commit it whenever dependencies change. See `AGENTS.md` for the
-commit rules and hooks.
+commit rules and the Claude Code hook.

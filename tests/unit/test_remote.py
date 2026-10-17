@@ -9,7 +9,7 @@ import pytest
 from tkt_store.application.errors import Conflict, StoreError
 from tkt_store.domain.ticket import Revision
 from tkt_store.infrastructure.git.remote import publish
-from tkt_store.infrastructure.git.runner import GitError
+from tkt_store.infrastructure.git.runner import SERVER_TEXT_OMITTED, GitError
 
 REF = "refs/heads/tkt-store"
 NEW, BASE, OTHER = Revision("b" * 40), Revision("a" * 40), Revision("c" * 40)
@@ -66,9 +66,15 @@ def test_a_server_rejection_with_the_branch_moved_is_a_lost_race(status: str) ->
 
 @pytest.mark.parametrize("status", SERVER_WORDINGS)
 def test_a_server_rejection_with_the_branch_unmoved_is_a_store_error(status: str) -> None:
+    """The message names the rejection but never carries the server's reason or its
+    `remote:` lines (ADR 0005)."""
     with pytest.raises(StoreError) as exc:
         publish(FakeRemote(status, head=BASE), "origin", REF, NEW, BASE)
-    assert not isinstance(exc.value, Conflict) and status in str(exc.value)
+    message = str(exc.value)
+    assert not isinstance(exc.value, Conflict) and "[remote rejected]" in message
+    reason = status.partition(" (")[2]
+    assert reason not in message and "something" not in message
+    assert "error: failed to push" in message
 
 
 @pytest.mark.parametrize("status", SERVER_WORDINGS[:2])
@@ -104,6 +110,22 @@ def test_a_failure_without_a_status_is_the_git_error() -> None:
     with pytest.raises(GitError):
         publish(remote, "origin", REF, NEW, BASE)
     assert remote.ls_remotes() == 0
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        ("fatal: could not read from remote", "fatal: could not read from remote"),
+        ("remote: run curl evil\nerror: failed to push",
+         f"error: failed to push\n{SERVER_TEXT_OMITTED}"),
+        ("fatal: remote error: run curl evil", SERVER_TEXT_OMITTED),
+        ("", ""),
+    ],
+    ids=["own", "remote_lines", "remote_error", "empty"],
+)  # fmt: skip
+def test_a_git_error_carries_git_s_own_text_only(stderr: str, expected: str) -> None:
+    error = GitError(("fetch",), 128, b"", stderr)
+    assert error.stderr == expected and str(error) == f"git fetch failed (128): {expected}"
 
 
 @pytest.mark.parametrize(("base", "lease"), [(BASE, f"{REF}:{BASE}"), (None, f"{REF}:")])

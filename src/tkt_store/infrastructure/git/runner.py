@@ -14,16 +14,30 @@ from typing import Protocol
 
 from tkt_store.application.errors import StoreError
 
+SERVER_TEXT_OMITTED = "(the server's text is omitted)"
+
+
+def own_text(stderr: str) -> str:
+    """git's own lines from `stderr`, without any text a server chose: `remote:` lines
+    (hook and server output) and `remote error:` messages. Error messages reach agents,
+    and a server, or a hook planted in a path remote, can write anything (ADR 0005)."""
+    lines = stderr.strip().splitlines()
+    own = [line for line in lines if not line.startswith("remote:") and "remote error:" not in line]
+    if len(own) < len(lines):
+        own.append(SERVER_TEXT_OMITTED)
+    return "\n".join(own)
+
 
 class GitError(StoreError):
     """A git command exited non-zero. Carries what callers need to recognise a known
-    failure (e.g. `ls-remote --exit-code` 2 = no such ref, a rejected push)."""
+    failure (e.g. `ls-remote --exit-code` 2 = no such ref, a rejected push). `stderr`
+    holds git's own text only (`own_text`)."""
 
     def __init__(self, args: tuple[str, ...], returncode: int, stdout: bytes, stderr: str) -> None:
-        super().__init__(f"git {' '.join(args)} failed ({returncode}): {stderr.strip()}")
         self.returncode = returncode
         self.stdout = stdout
-        self.stderr = stderr
+        self.stderr = own_text(stderr)
+        super().__init__(f"git {' '.join(args)} failed ({returncode}): {self.stderr}")
 
 
 class GitRunner(Protocol):

@@ -65,6 +65,14 @@
   of 2.4 s. The cache is JSON, written atomically, stamped with the versions and a hash
   of the rules it caches, and ignored when it cannot be trusted; deleting it is always
   safe.
+- 0.2.0 stage 3 (ADR 0005, amended): output.
+  - JSON output escapes every character Python finds non-printable, and the field
+    rules' invisible characters, as `\uXXXX`. Printable text in any script prints as
+    itself. If stdout cannot encode it, all non-ASCII is escaped.
+  - `list` rows leave out the ticket's `body`.
+  - Error messages leave out text a server chose (`remote:` lines, `remote error:`
+    messages, a rejected push's reason), and an unforeseen failure prints an error
+    object naming its type (exit 4) instead of a traceback.
 - Claims to become records of their own in 0.2.0 (ADR 0007): empty files under
   `claims/<id>/` whose names hold the claim's whole state (hash, open or how it ended,
   holder, times), so fencing survives a ticket being set aside, nothing in a claim is

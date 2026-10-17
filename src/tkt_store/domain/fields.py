@@ -94,6 +94,9 @@ presentation selectors U+FE0E and U+FE0F stay allowed (one at a time); zero-widt
 joiners (U+200C, U+200D) and tag characters do not, which rules out some Persian and
 Indic spellings, joined emoji sequences and subdivision flags."""
 
+REFUSED_BEYOND_C0_RE = re.compile(f"[{_cps(*_REFUSED_BEYOND_C0)}]")
+"""One code point free text never holds, besides C0 controls: output escapes these too
+(cli), so a value that reached the store by any path still never prints raw."""
 _REFUSED = re.compile(f"[{_cps(_C0, *_REFUSED_BEYOND_C0)}]")
 _REFUSED_IN_BODY = re.compile(f"[{_cps(*_C0_BUT_NEWLINE_AND_TAB, *_REFUSED_BEYOND_C0)}]")
 _SELECTOR_RUN = re.compile(f"[{_cps((0xFE0E, 0xFE0F))}]{{2}}")

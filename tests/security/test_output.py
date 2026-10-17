@@ -86,17 +86,21 @@ def test_hidden_characters_never_reach_output_raw(
     assert raw_hidden(out) == []
 
 
-@pytest.mark.security_design(
-    "non-ASCII text reaches agents raw (ensure_ascii=False): stage 3 escapes it all"
-)
-def test_non_ascii_is_escaped_on_output(
+UNASSIGNED = "\u0378"
+"""Unassigned in every Unicode version so far: valid in a title (the field rules refuse
+fixed ranges only), the stand-in for an invisible character a future Unicode adds."""
+
+
+def test_only_printable_text_reaches_output_raw(
     tickets: TicketStore, honest_clone: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Valid text may hold any assigned character; output escapes every non-ASCII one, so
-    a lookalike or an invisible character a future Unicode adds is always visible."""
-    tickets.edit(T1, 1, title="Caf\u00e9")
+    """Readable text, in any script, prints as itself; a character Python finds
+    non-printable is escaped, and the JSON still reads back the stored value."""
+    title = f"Caf\u00e9 \u6f22\u5b57 {UNASSIGNED}"
+    tickets.edit(T1, 1, title=title)
     _code, out = run(honest_clone, capsys, "show", T1)
-    assert out.isascii()
+    assert "Caf\u00e9 \u6f22\u5b57" in out and UNASSIGNED not in out and "\\u0378" in out
+    assert json.loads(out)["ticket"]["title"] == title
 
 
 @pytest.mark.parametrize("trailer", ["tkt-agent", "tkt-reason"])
@@ -151,14 +155,15 @@ def test_deeply_nested_json_is_set_aside_and_printed_as_json(
     assert code == 0 and [row["ticket"]["id"] for row in json.loads(out)] == [T1]
 
 
-@pytest.mark.security_design("list prints every ticket's body, flooding every reader's context")
 def test_list_output_is_bounded(
     tickets: TicketStore, honest_clone: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A body at its limit is valid; `list` must not print it (stage 3), only `show`."""
+    """A body at its limit is valid; `list` never prints it, only `show` does."""
     tickets.edit(T1, 1, body="b" * 65_536)
     _code, out = run(honest_clone, capsys, "list")
-    assert len(out) < 10_000
+    assert len(out) < 10_000 and "body" not in json.loads(out)[0]["ticket"]
+    _code, out = run(honest_clone, capsys, "show", T1)
+    assert json.loads(out)["ticket"]["body"] == "b" * 65_536
 
 
 @pytest.mark.security_design(

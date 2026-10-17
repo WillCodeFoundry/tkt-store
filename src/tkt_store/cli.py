@@ -2,8 +2,9 @@
 
 A thin, explicit adapter for agents: every store command maps to one TicketStore
 method, every input is an explicit flag (no environment defaults, no inferred ids, no
-local state), and every store result is printed as one JSON value. `mint` is local and
-prints a bare value; usage errors are argparse's plain text (exit 2). It holds no rules.
+local state), and every store result is printed as one JSON value, with every character
+an agent must never get raw escaped (`escape_json`). `mint` is local and prints a bare
+value; usage errors are argparse's plain text (exit 2). It holds no rules.
 """
 
 from __future__ import annotations
@@ -17,10 +18,11 @@ from pathlib import Path
 from typing import Any
 
 from tkt_store import new_id_source, open_store
-from tkt_store.application.errors import RetriesExhausted
+from tkt_store.application.errors import RetriesExhausted, StoreError
 from tkt_store.application.service import TicketStore, TicketView
 from tkt_store.application.store import HistoryEntry
 from tkt_store.application.transaction import Committed, Outcome, Refused, Unchanged
+from tkt_store.domain import fields
 from tkt_store.domain.errors import TktError
 from tkt_store.domain.operations import UNSET, Op
 from tkt_store.domain.status import Status
@@ -309,10 +311,12 @@ def state_json(state: TicketState) -> dict[str, Any]:
     return {"ticket": state.ticket.to_dict(), "claim": claim}
 
 
-def view_json(view: TicketView) -> dict[str, Any]:
+def view_json(view: TicketView, *, body: bool = True) -> dict[str, Any]:
     """`state_json`, the status, and `held_aside`: the check that failed when the ticket is
-    held by a set-aside claim, else null."""
+    held by a set-aside claim, else null. Without `body`, the ticket has no "body" key."""
     state = state_json(TicketState(view.ticket, view.claim))
+    if not body:
+        del state["ticket"]["body"]
     return state | {"status": view.status.value, "held_aside": view.held_aside}
 
 
@@ -356,8 +360,10 @@ def render_show(found: TicketView | Refused) -> tuple[Any, ExitCode]:
 
 
 def render_views(views: Sequence[TicketView]) -> tuple[Any, ExitCode]:
-    """`list`: a JSON array of {"ticket", "claim", "status"}."""
-    return [view_json(v) for v in views], ExitCode.OK
+    """`list`: a JSON array of {"ticket", "claim", "status", "held_aside"}, each ticket
+    without its body, so one long body can't flood every reader's context (ADR 0005);
+    `show` prints it."""
+    return [view_json(v, body=False) for v in views], ExitCode.OK
 
 
 def render_log(entries: Sequence[HistoryEntry]) -> tuple[Any, ExitCode]:
@@ -365,17 +371,36 @@ def render_log(entries: Sequence[HistoryEntry]) -> tuple[Any, ExitCode]:
     return [entry_json(e) for e in entries], ExitCode.OK
 
 
+def escape_json(text: str) -> str:
+    """JSON text with every character an agent must never get raw written as a `\\uXXXX`
+    escape (a surrogate pair beyond U+FFFF), so it still parses to the same value
+    (ADR 0005): whatever Python's Unicode data finds non-printable (controls, format
+    characters, line and paragraph separators, spaces other than U+0020, private use,
+    surrogates, unassigned code points) and the field rules' fixed list of invisible
+    characters. Printable text, non-ASCII included, is unchanged. Unlike the field rules,
+    this may follow the running Python's Unicode version: it only changes how a value
+    prints, never a verdict."""
+    if text.isprintable() and not fields.REFUSED_BEYOND_C0_RE.search(text):
+        return text
+    return "".join(_escaped(char) for char in text)
+
+
+def _escaped(char: str) -> str:
+    if char.isprintable() and not fields.REFUSED_BEYOND_C0_RE.match(char):
+        return char
+    code = ord(char)
+    if code <= 0xFFFF:
+        return f"\\u{code:04x}"
+    code -= 0x10000
+    return f"\\u{0xD800 + (code >> 10):04x}\\u{0xDC00 + (code & 0x3FF):04x}"
+
+
 def _print(value: Any) -> None:
-    print(json.dumps(value, ensure_ascii=False))
-
-
-def emit(result: Any, render: Render = render_outcome) -> int:
-    """Print `result` as one JSON value on stdout (via the command's `render`) and
-    return its exit code. Results are complete before anything is printed, so output
-    is never partial: a failure prints only the error object."""
-    value, code = render(result)
-    _print(value)
-    return code
+    text = escape_json(json.dumps(value, ensure_ascii=False))
+    try:
+        print(text)
+    except UnicodeEncodeError:  # a stdout that can't encode it (a legacy locale)
+        print(json.dumps(value))  # every non-ASCII character escaped
 
 
 def emit_error(error: TktError) -> int:
@@ -398,14 +423,22 @@ def emit_error(error: TktError) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run one command. A store command's result is rendered in full before anything is
+    printed, so output is never partial: a failure prints only the error object, and
+    every value printed goes through `escape_json`."""
     parser = build_parser()
     args = parser.parse_args(argv)  # usage errors: plain text on stderr, exit 2
     if hasattr(args, "local"):
         print(args.local(args))
         return ExitCode.OK
-    store = open_store(Path(args.repo), remote=args.remote)
     try:
+        store = open_store(Path(args.repo), remote=args.remote)
         result = args.run(store, args)  # complete before anything is printed
+        render: Render = args.render
+        value, code = render(result)
     except TktError as error:
         return emit_error(error)
-    return emit(result, args.render)
+    except Exception as error:  # a bug: no traceback, which could hold a value read
+        return emit_error(StoreError(f"internal error ({type(error).__name__}); please report it"))
+    _print(value)
+    return code

@@ -121,7 +121,8 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     pushes would turn a lost race into a StoreError. Neither publishes anything.
 
     A failure without a status line (a timeout, a dropped connection) is the GitError
-    itself, a StoreError that may hide a push that landed."""
+    itself, a StoreError that may hide a push that landed. No message carries the
+    server's reason or its `remote:` lines: a server can write anything there (ADR 0005)."""
     try:
         git(
             "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
@@ -133,7 +134,7 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
             raise Conflict(base, None) from error
         if not status:
             raise
-        reasons = "; ".join(line.split("\t")[-1] for line in status)
+        reasons = "; ".join(_without_reason(line.split("\t")[-1]) for line in status)
         try:
             head = remote_head(git, remote, ref)
         except GitError as check:
@@ -144,7 +145,16 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
             return
         if head != base:
             raise Conflict(base, head) from error
-        raise StoreError(f"push to {remote} {reasons}: {error.stderr.strip()}") from error
+        raise StoreError(
+            f"push to {remote} {reasons}: refused by the server (its reason is omitted), "
+            f"and the branch did not move: {error.stderr}"
+        ) from error
+
+
+def _without_reason(status: str) -> str:
+    """A porcelain push status without its parenthesised reason: for `[remote rejected]`
+    the server writes it, and it can say anything (ADR 0005)."""
+    return status.partition(" (")[0]
 
 
 def remote_head(git: GitRunner, remote: str, ref: str) -> Revision | None:

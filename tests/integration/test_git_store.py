@@ -316,15 +316,16 @@ def test_rejection_by_a_remote_hook_is_store_error_not_conflict(
     clones: list[Path], bare_remote: Path
 ) -> None:
     """A hook or branch protection declining the push is not a lost race: StoreError,
-    never retried as a Conflict."""
+    never retried as a Conflict. The hook's text is the server's, so it is left out."""
     tickets = service(GitStore.at(clones[0], remote="origin"))
     tickets.init()
     hook = bare_remote / "hooks" / "pre-receive"
     hook.write_text("#!/bin/sh\necho protected >&2\nexit 1\n")
     hook.chmod(0o755)
-    with pytest.raises(StoreError, match=r"\[remote rejected\].*protected") as exc:
+    with pytest.raises(StoreError, match=r"\[remote rejected\].*did not move") as exc:
         tickets.add("Expire tokens", ticket_id=T1)
     assert not isinstance(exc.value.__cause__, Conflict)
+    assert "protected" not in str(exc.value) and "hook declined" not in str(exc.value)
 
 
 def test_non_utf8_file_names_are_preserved(local: Path, bare_remote: Path) -> None:

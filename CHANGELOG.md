@@ -70,10 +70,12 @@
     rules' invisible characters, as `\uXXXX`. Printable text in any script prints as
     itself. If stdout cannot encode it, all non-ASCII is escaped.
   - `list` rows leave out the ticket's `body`.
-  - A failed `fetch`, `push` or `ls-remote` is reported by category (access refused,
-    not found, unreachable, refused by the server, unrecognised), never with git's
-    text, which can quote the server; git's text is appended to
-    `.git/tkt-store/git-errors.log` for an operator. An unforeseen failure prints an
+  - A failed git command is reported by category (for the remote: access refused, not
+    found, unreachable, refused by the server, unrecognised; locally: not a repository,
+    or a local failure), never with git's text, which can quote the server or a forged
+    file name; git's text is appended, controls escaped, to
+    `.git/tkt-store/git-errors.log` for an operator. Partial clones are refused, and
+    git never fetches objects lazily. An unforeseen failure prints an
     error object naming its type (exit 4) instead of a traceback.
   - Free text also refuses U+16FE4 and U+1D159, two printable characters that render
     blank.

@@ -31,6 +31,7 @@ from tkt_store.domain.ticket import (
 )
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git import remote as sync
+from tkt_store.infrastructure.git import runner as runner_module
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError, git_runner
@@ -468,3 +469,45 @@ def test_a_server_side_lost_race_is_retried_on_real_git(
     assert isinstance(outcome, Committed) and (bare_remote / "moved").exists()
     assert [args[0] for args in runner.calls].count("ls-remote") == 1
     assert {t.id for t in opened(clones[1]).snapshot().tickets.values()} == {T1, T2}
+
+
+def test_a_partial_clone_is_refused(local: Path) -> None:
+    """git would fetch missing objects during local commands, whose errors keep git's
+    text and so could quote the server (ADR 0005)."""
+    git(local, "config", "extensions.partialClone", "origin")
+    with pytest.raises(StoreError, match="partial clone"):
+        GitStore.at(local, remote="origin")
+
+
+def failing_remote_command(runner: Any) -> GitError:
+    with pytest.raises(GitError) as exc:
+        runner("ls-remote", "--", "no-such-remote")
+    return exc.value
+
+
+def test_the_error_log_rotates_past_its_limit(local: Path, tmp_path: Path) -> None:
+    log = tmp_path / "logs" / "git-errors.log"
+    log.parent.mkdir()
+    log.write_bytes(b"x" * runner_module.LOG_MAX)
+    error = failing_remote_command(git_runner(local, log=log, now=lambda: 42))
+    assert (log.parent / "git-errors.log.1").stat().st_size == runner_module.LOG_MAX
+    entry = log.read_bytes()
+    assert entry.startswith(b"--- at 42 git ls-remote -- no-such-remote (128)\n")
+    assert b"no-such-remote" in entry and str(error).endswith(runner_module.LOGGED)
+
+
+def test_a_log_that_cannot_be_written_never_fails_differently(local: Path, tmp_path: Path) -> None:
+    """The op fails with its category as before, and the message names no log."""
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("a file where the log's directory would go")
+    error = failing_remote_command(git_runner(local, log=blocked / "git-errors.log"))
+    assert "not found" in str(error) and "logged" not in str(error)
+
+
+def test_the_error_log_escapes_controls(local: Path, tmp_path: Path) -> None:
+    """An operator reading it with `cat` must not let the server drive the terminal."""
+    log = tmp_path / "git-errors.log"
+    with pytest.raises(GitError):
+        git_runner(local, log=log)("ls-remote", "--", "evil\x1b]0;title\x07")
+    text = log.read_bytes()
+    assert b"\x1b" not in text and b"\x07" not in text and b"evil\\x1b]0;title\\x07" in text

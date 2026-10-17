@@ -73,6 +73,17 @@ TREE_MODE = "040000"
 BLOB_MODE = "100644"
 
 
+def _is_partial(git: GitRunner) -> bool:
+    """True if the clone has a promisor remote (`git clone --filter`)."""
+    try:
+        git("config", "--get", "extensions.partialClone")
+    except GitError as error:
+        if error.returncode == 1:  # not set
+            return False
+        raise
+    return True
+
+
 class GitStore:
     """A Store backed by one ref, published to a remote and cached in a clone.
 
@@ -107,12 +118,18 @@ class GitStore:
     @classmethod
     def at(cls, repo: Path, *, remote: str, ref: str = DEFAULT_REF) -> GitStore:
         """The production wiring: git_runner(repo), with the clone cache and the error
-        log in the clone's git directory."""
+        log in the clone's git directory. A partial clone is refused: git would fetch
+        missing objects during local commands, one by one, and their errors could quote
+        the server (ADR 0005)."""
         git = git_runner(repo)
         try:
             git_dir = Path(git("rev-parse", "--absolute-git-dir").decode().strip())
         except GitError:
             return cls(git, remote=remote, ref=ref)  # not a repository: the snapshot says so
+        if _is_partial(git):
+            raise StoreError(
+                f"{repo} is a partial clone (made with --filter): tkt needs a full clone"
+            )
         git = git_runner(repo, log=git_dir / ERROR_LOG_PATH, now=SystemClock().now)
         return cls(git, remote=remote, ref=ref, cache=CloneCache(git_dir / CACHE_PATH))
 

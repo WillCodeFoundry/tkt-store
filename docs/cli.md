@@ -171,11 +171,13 @@ Each entry of `tickets` is the ticket in its on-branch form and its open claim, 
   stdout cannot encode some text (a legacy locale), all non-ASCII is escaped.
 - Output differs between Python versions only in which characters are escaped, so
   compare it as parsed JSON, never as text.
-- A failed `fetch`, `push` or `ls-remote` is reported by category only (the remote
-  refused access, was not found or is not configured, could not be reached, refused the
-  push, or an unrecognised failure), never with git's text, which can quote the server.
-  The message names the log that holds git's text for an operator:
-  `tkt-store/git-errors.log` in the clone's git directory (moved to `….1` past 1 MiB).
+- A failed git command is reported by category only, never with git's text, which can
+  quote the server or a file name read from the store: for the remote, it refused
+  access, was not found or is not configured, could not be reached, refused the push,
+  or an unrecognised failure; locally, the clone is not a git repository, or a local git
+  command failed. git's text is logged for an operator in `tkt-store/git-errors.log` in
+  the clone's git directory (moved to `….1` past 1 MiB). An agent never reads that log:
+  report the error to an operator instead.
   A failure tkt did not foresee prints `internal error (<type>)` with exit 4, never a
   traceback.
 

@@ -91,15 +91,19 @@ escaped):
   list names it, so that list is kept up to date.
 - Errors never echo values read from the store: they name the file and the field, the
   ticket id, and the holder, a slug of at most 39 that can't hide characters. Nor do
-  they carry any text git printed for a command that talks to the remote (`fetch`,
-  `push`, `ls-remote`): it can quote the server (hook output, an SSH server's banner or
-  a forced command's errors, a redirect's target), and a server can write anything
-  there, lines that look like git's own included. Such a failure is reported by
-  category (access refused, not found, unreachable, refused by the server,
-  unrecognised), matched on git's own wording, so a server chooses the category at
-  most; git's text is appended to `tkt-store/git-errors.log` in the clone's git
-  directory, which the message names, for an operator. Local git commands keep their
-  text. A failure tkt did not foresee prints its type only, never a traceback.
+  they carry any text git printed. A command that talks to the remote (`fetch`,
+  `push`, `ls-remote`) can quote the server (hook output, an SSH server's banner or a
+  forced command's errors, a redirect's target), and a server can write anything there,
+  lines that look like git's own included; a local command can quote a file name read
+  from the store (`mktree` refusing a forged name). So a failure is reported by
+  category: for the remote, access refused, not found, unreachable, refused by the
+  server or unrecognised, matched on git's own wording, so a server chooses the
+  category at most; for a local command, not a repository or a local failure. git's
+  text is appended, with controls escaped, to `tkt-store/git-errors.log` in the clone's
+  git directory for an operator; the message says only that it was logged, and agent
+  guidance says never to read the log. No other git command contacts the remote: lazy
+  fetches are off (`GIT_NO_LAZY_FETCH`) and partial clones are refused. A failure tkt
+  did not foresee prints its type only, never a traceback.
 - `list` never prints a ticket's body (`show`, `claim`, `claim-next`, `edit` do).
 
 Agent guidance: every composed field (title, body, reason, tags, holder, project) is

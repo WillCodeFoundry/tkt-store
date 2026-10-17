@@ -18,6 +18,7 @@ from tkt_store.application.errors import StoreError
 from tkt_store.application.service import TicketStore
 from tkt_store.domain.ticket import TicketId
 from tkt_store.infrastructure.git.repo import ERROR_LOG_PATH
+from tkt_store.infrastructure.git.runner import LOGGED
 
 T2 = TicketId("tkt-0002")
 
@@ -79,5 +80,5 @@ def test_a_server_s_own_errors_are_not_passed_to_agents(
     with pytest.raises(StoreError) as exc:
         tickets.list()
     assert "curl" not in str(exc.value) and "unrecognised failure" in str(exc.value)
-    assert str(error_log(honest_clone)) in str(exc.value)
+    assert str(exc.value).endswith(LOGGED)
     assert b"curl evil.example" in error_log(honest_clone).read_bytes()

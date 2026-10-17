@@ -4,7 +4,8 @@ PURE module. A store hands over the valid tickets, the ticket ids it set aside, 
 every claim file whose name parsed; `assemble` runs ADR 0007's checks in their fixed
 order, so every reader reaches the same verdict:
 
-1. each file: times out of order (which tkt never writes) -> set aside;
+1. each file: in a folder that is not one (a `claims/<id>` that can't be written, as it
+   holds a name with '/') or times out of order (which tkt never writes) -> set aside;
 2. each hash, over the files that passed step 1: in more than one folder -> every file
    with it set aside; more than one ended file -> all set aside; an open and an ended
    file in one folder -> the ended one wins, the open one is set aside;
@@ -51,10 +52,12 @@ def assemble(
     name parsed), with `set_aside` the ticket ids whose files failed their checks and
     `not_folders` the ids whose `claims/<id>` is not a folder: its ticket is held by a
     set-aside claim (nothing in it can be read, so nothing can be known free), or, with
-    no ticket, the id is set aside."""
+    no ticket, the id is set aside. Claim files in such a folder (one that can't be
+    rewritten) are all set aside, so they still fence."""
     files = list(claim_files)  # a store lists each path once: no duplicates
     aside: dict[int, str] = {}  # index in `files` -> why; indices, as hashing claims is slow
-    holding: dict[TicketId, str] = dict.fromkeys(not_folders, NOT_A_FOLDER)
+    unwritable = set(not_folders)
+    holding: dict[TicketId, str] = dict.fromkeys(unwritable, NOT_A_FOLDER)
 
     def put_aside(index: int, why: str, *, holds: bool) -> None:
         aside.setdefault(index, why)
@@ -63,7 +66,9 @@ def assemble(
 
     for index, claim in enumerate(files):  # step 1
         end = claim.lease_until if isinstance(claim, Claim) else claim.ended_at
-        if claim.claimed_at > end:
+        if claim.ticket_id in unwritable:
+            put_aside(index, NOT_A_FOLDER, holds=True)
+        elif claim.claimed_at > end:
             put_aside(index, "a claim's times are out of order", holds=True)
 
     first: dict[ClaimHash, int] = {}

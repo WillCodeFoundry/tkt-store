@@ -158,12 +158,28 @@ Each entry of `tickets` is the ticket in its on-branch form and its open claim, 
 - Reads, each taken from a single snapshot: `show` prints `{"ticket": {…}, "claim": {…}
   or null, "status": "…", "held_aside": null}` (or a refused object: `NOT_FOUND` for an
   unknown id, `SET_ASIDE` for one set aside); `list` prints a JSON array of those
-  objects, leaving set-aside tickets out. `held_aside` names the check that failed when
-  the ticket is held by a set-aside claim (status `claimed`, `claim` null); `log` prints
-  a JSON array of history entries `{"revision", "at", "op", "ticket_ids", "agent",
-  "claim_hash", "phase", "reason"}`, skipping commits that break the format.
+  objects without the ticket's `body` (only `show` and the commands that write a
+  ticket print it), leaving set-aside tickets out. `held_aside` names the check that
+  failed when the ticket is held by a set-aside claim (status `claimed`, `claim` null);
+  `log` prints a JSON array of history entries `{"revision", "at", "op", "ticket_ids",
+  "agent", "claim_hash", "phase", "reason"}`, skipping commits that break the format.
 - Output is never partial: a result is printed only once it is complete, and a failure
   prints only the error object. Check the exit code first.
+- Text prints as itself in any script, but a character that is not printable (a
+  control, a format or invisible character, an unusual space, an unassigned code point)
+  is written as a JSON `\uXXXX` escape, so the JSON reads back the stored value. If
+  stdout cannot encode some text (a legacy locale), all non-ASCII is escaped.
+- Output differs between Python versions only in which characters are escaped, so
+  compare it as parsed JSON, never as text.
+- A failed git command is reported by category only, never with git's text, which can
+  quote the server or a file name read from the store: for the remote, it refused
+  access, was not found or is not configured, could not be reached, refused the push,
+  or an unrecognised failure; locally, the clone is not a git repository, or a local git
+  command failed. git's text is logged for an operator in `tkt-store/git-errors.log` in
+  the clone's git directory (moved to `….1` past 1 MiB). An agent never reads that log:
+  report the error to an operator instead.
+  A failure tkt did not foresee prints `internal error (<type>)` with exit 4, never a
+  traceback.
 
 ## Exit codes
 
@@ -173,4 +189,4 @@ Each entry of `tickets` is the ticket in its on-branch form and its open claim, 
 | 1 | Refused by the rules (e.g. already claimed, not holder, blocked, invalid input, stale edit, not found, set aside) |
 | 2 | Usage error (missing or conflicting flags) |
 | 3 | Retries exhausted after repeated conflicts; nothing written — re-run the same command |
-| 4 | Store error (git failure, remote unreachable or not configured, not a protocol 2 store, or its `tickets`/`claims` not folders). A failure during the push may mean the commit landed: re-run the same command, which converges either way |
+| 4 | Store error (git failure, remote unreachable or not configured, not a protocol 2 store, or its `tickets`/`claims` not folders), or an internal error. A failure during the push may mean the commit landed: re-run the same command, which converges either way |

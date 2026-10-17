@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import cached_property
 from types import MappingProxyType
@@ -307,6 +307,12 @@ class TicketState:
 _EMPTY: Mapping[Any, Any] = MappingProxyType({})
 
 
+def _empty() -> Mapping[Any, Any]:
+    """A default factory, not a default: before Python 3.12 a mapping proxy is
+    unhashable, and dataclasses refuse an unhashable default as mutable."""
+    return _EMPTY
+
+
 @dataclass(frozen=True)
 class Snapshot:
     """An immutable view of the store at one revision: the valid tickets and claims, and
@@ -318,16 +324,16 @@ class Snapshot:
 
     revision: Revision | None
     tickets: Mapping[TicketId, Ticket]
-    claims: Mapping[TicketId, Claim] = _EMPTY
+    claims: Mapping[TicketId, Claim] = field(default_factory=_empty)
     """The valid open claim of each held ticket."""
-    ended: Mapping[ClaimHash, EndedClaim] = _EMPTY
+    ended: Mapping[ClaimHash, EndedClaim] = field(default_factory=_empty)
     """Every valid ended claim, by hash."""
-    set_aside: Mapping[TicketId, str] = _EMPTY
+    set_aside: Mapping[TicketId, str] = field(default_factory=_empty)
     """Ticket ids set aside, with the check that failed: an invalid ticket file, or a
     claims folder with no ticket. No op may act on them (`SET_ASIDE`)."""
-    held_aside: Mapping[TicketId, str] = _EMPTY
+    held_aside: Mapping[TicketId, str] = field(default_factory=_empty)
     """Valid tickets held by a set-aside claim: only `cancel` may act on them."""
-    fenced: Mapping[ClaimHash, str] = _EMPTY
+    fenced: Mapping[ClaimHash, str] = field(default_factory=_empty)
     """Hashes with no valid claim file but a set-aside one, or whose claim lies on a
     set-aside ticket: they fence (never claim again) but can't be acted on."""
 

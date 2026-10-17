@@ -81,7 +81,9 @@ _REFUSED_BEYOND_C0 = (
     (0xFFA0, 0xFFA0),  # halfwidth hangul filler
     (0xFFF0, 0xFFFB),  # unassigned specials, interlinear annotation controls: invisible
     (0x13430, 0x1343F),  # egyptian hieroglyph format controls
+    (0x16FE4, 0x16FE4),  # khitan small script filler: renders blank
     (0x1BCA0, 0x1BCA3),  # shorthand format controls: invisible
+    (0x1D159, 0x1D159),  # musical symbol null notehead: renders blank
     (0x1D173, 0x1D17A),  # musical symbol formatting controls
     (0xE0000, 0xE0FFF),  # tags, variation selectors supplement, the rest of the block:
     #                      invisible to people, read by LLMs, can smuggle hidden data
@@ -94,6 +96,9 @@ presentation selectors U+FE0E and U+FE0F stay allowed (one at a time); zero-widt
 joiners (U+200C, U+200D) and tag characters do not, which rules out some Persian and
 Indic spellings, joined emoji sequences and subdivision flags."""
 
+REFUSED_BEYOND_C0_RE = re.compile(f"[{_cps(*_REFUSED_BEYOND_C0)}]")
+"""One code point free text never holds, besides C0 controls: output escapes these too
+(cli), so a value that reached the store by any path still never prints raw."""
 _REFUSED = re.compile(f"[{_cps(_C0, *_REFUSED_BEYOND_C0)}]")
 _REFUSED_IN_BODY = re.compile(f"[{_cps(*_C0_BUT_NEWLINE_AND_TAB, *_REFUSED_BEYOND_C0)}]")
 _SELECTOR_RUN = re.compile(f"[{_cps((0xFE0E, 0xFE0F))}]{{2}}")

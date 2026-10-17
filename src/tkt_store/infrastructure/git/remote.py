@@ -121,30 +121,35 @@ def publish(git: GitRunner, remote: str, ref: str, new: Revision, base: Revision
     pushes would turn a lost race into a StoreError. Neither publishes anything.
 
     A failure without a status line (a timeout, a dropped connection) is the GitError
-    itself, a StoreError that may hide a push that landed."""
+    itself, a StoreError that may hide a push that landed. No message quotes a status
+    line or git's text: the reason is the server's, and a server can write anything
+    there, tabs and line breaks included (ADR 0005); git's text is in the log the
+    GitError names."""
     try:
         git(
             "push", "--porcelain", f"--force-with-lease={ref}:{base or ''}",
             "--", remote, f"{new}:{ref}",
         )  # fmt: skip
     except GitError as error:
-        status = [line for line in error.stdout.decode().splitlines() if line.startswith("!")]
+        status = [
+            line
+            for line in error.stdout.decode(errors="replace").splitlines()
+            if line.startswith("!")
+        ]
         if any("\t[rejected]" in line for line in status):
             raise Conflict(base, None) from error
         if not status:
             raise
-        reasons = "; ".join(line.split("\t")[-1] for line in status)
+        refused = f"push to {remote} refused by the server (its reason is omitted)"
         try:
             head = remote_head(git, remote, ref)
         except GitError as check:
-            raise StoreError(
-                f"push to {remote} {reasons}, and the branch could not be re-read: {check}"
-            ) from error
+            raise StoreError(f"{refused}, and the branch could not be re-read: {check}") from error
         if head == new:
             return
         if head != base:
             raise Conflict(base, head) from error
-        raise StoreError(f"push to {remote} {reasons}: {error.stderr.strip()}") from error
+        raise StoreError(f"{refused}, and the branch did not move{error.logged}") from error
 
 
 def remote_head(git: GitRunner, remote: str, ref: str) -> Revision | None:

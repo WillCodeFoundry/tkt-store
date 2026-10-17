@@ -7,11 +7,12 @@ from dataclasses import replace
 
 import pytest
 
-from tkt_store.domain.occupancy import after, assemble
+from tkt_store.domain.occupancy import NOT_A_FOLDER, after, assemble
 from tkt_store.domain.outcomes import WriteClaim
 from tkt_store.domain.ticket import (
     AgentId,
     Claim,
+    ClaimFile,
     ClaimId,
     EndedBy,
     EndedClaim,
@@ -125,3 +126,13 @@ def test_a_claims_folder_that_is_not_a_folder_holds_its_ticket() -> None:
     s = assemble(Revision("r1"), {T1: tkt()}, {}, [], not_folders=[T1, T2])
     assert s.held_aside == {T1: "its claims folder is not a folder"}
     assert s.set_aside == {T2: "its claims folder is not a folder"}  # no ticket: the id
+
+
+def test_claims_in_a_folder_that_is_not_one_are_set_aside_and_fence() -> None:
+    """A folder that can't be rewritten (it holds a name with '/'): its ticket is held,
+    and every claim in it is set aside, so its hashes still fence."""
+    files: list[ClaimFile] = [opened(H1), ended(H2, by=EndedBy.RELEASED)]
+    snapshot = assemble(None, {T1: tkt()}, {}, files, not_folders=[T1])
+    assert not snapshot.claims and not snapshot.ended
+    assert snapshot.held_aside == {T1: NOT_A_FOLDER}
+    assert snapshot.fenced == {H1: NOT_A_FOLDER, H2: NOT_A_FOLDER}

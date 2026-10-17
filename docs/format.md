@@ -97,7 +97,7 @@ ticket read is checked against the same rules.
   | U+0000–001F (a body may hold U+0009 tab and U+000A newline), U+007F–009F | controls; line ends are newlines only, so `\r\n` is refused |
   | U+D800–DFFF; U+FDD0–FDEF and U+xFFFE–xFFFF in every plane | surrogates, noncharacters (RFC 9839) |
   | U+E000–F8FF, U+F0000–10FFFF | private use |
-  | U+00AD, U+034F, U+115F–1160, U+17B4–17B5, U+2800, U+3164, U+FFA0 | invisible characters and fillers |
+  | U+00AD, U+034F, U+115F–1160, U+17B4–17B5, U+2800, U+3164, U+FFA0, U+16FE4, U+1D159 | invisible characters and fillers |
   | U+061C, U+200B–200F, U+2028–202E, U+2060–206F, U+FEFF | zero-width characters and joiners, bidi marks and controls, line and paragraph separators |
   | U+180B–180F, U+FE00–FE0D | variation selectors other than U+FE0E/FE0F (text and emoji presentation) |
   | U+FFF0–FFFB, U+13430–1343F, U+1BCA0–1BCA3, U+1D173–1D17A | format controls and specials |
@@ -151,8 +151,10 @@ appears anywhere can never claim again.
 **Reading claims.** A file under `claims/` is a claim only if its mode is `100644`, its
 blob is git's empty blob and its path matches the pattern above; anything else is an
 unknown file, preserved, and no part of it is used (renaming a claim file to anything
-else has the effect of deleting it). A `claims/<id>` that is not a folder holds its
-ticket by a set-aside claim, or sets the id aside when there is no ticket. The claims
+else has the effect of deleting it). A `claims/<id>` that is not a folder, or a folder
+holding a name with `/` (which git never writes, and no commit can rewrite), holds its
+ticket by a set-aside claim, or sets the id aside when there is no ticket. A name with
+`/` in the root, `tickets/` or `claims/` refuses the store. The claims
 are then checked in this order, the same for every reader; a claim set aside still
 fences its hash (it can never claim again):
 

@@ -56,6 +56,7 @@ from tkt_store.domain import fields
 from tkt_store.domain.occupancy import assemble
 from tkt_store.domain.outcomes import Change, OpRecord, WriteClaim, WriteTicket
 from tkt_store.domain.ticket import ClaimFile, Revision, Snapshot, Ticket, TicketId
+from tkt_store.infrastructure.clock import SystemClock
 from tkt_store.infrastructure.git import remote as sync
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.cache import Cached, CloneCache
@@ -65,14 +66,35 @@ from tkt_store.infrastructure.git.wire import DEFAULT_REF
 CACHE_PATH = "tkt-store/cache"
 """Where the clone cache's shard files live, relative to the clone's git directory
 (ADR 0006)."""
+ERROR_LOG_PATH = "tkt-store/git-errors.log"
+"""Where git's text for a failed remote command is logged for an operator, relative to
+the clone's git directory: error messages carry only its category (ADR 0005)."""
 TREE_MODE = "040000"
 BLOB_MODE = "100644"
+
+
+def _is_partial(git: GitRunner) -> bool:
+    """True if the clone may lack objects: a promisor remote (`git clone --filter` sets
+    `remote.<name>.promisor`) or `extensions.partialClone`."""
+    try:
+        found = git("config", "--get-regexp", r"^(extensions\.partialclone|remote\..*\.promisor)$")
+    except GitError as error:
+        if error.returncode == 1:  # none set
+            return False
+        raise
+    for line in found.decode(errors="replace").splitlines():
+        key, _, value = line.partition(" ")
+        if key == "extensions.partialclone" or value.lower() not in ("false", "no", "off", "0"):
+            return True
+    return False
 
 
 class GitStore:
     """A Store backed by one ref, published to a remote and cached in a clone.
 
     `remote` is the shared remote's name (normally "origin"); it has no default here.
+    git errors carry only a category (ADR 0005): `GitStore.at` logs git's text in the
+    clone's git directory; a runner built without `log=` keeps it nowhere.
     """
 
     def __init__(
@@ -102,13 +124,20 @@ class GitStore:
 
     @classmethod
     def at(cls, repo: Path, *, remote: str, ref: str = DEFAULT_REF) -> GitStore:
-        """The production wiring: git_runner(repo), with the clone cache in the clone's
-        git directory."""
+        """The production wiring: git_runner(repo), with the clone cache and the error
+        log in the clone's git directory. A partial clone is refused: git would fetch
+        missing objects during local commands, one by one, and their errors could quote
+        the server (ADR 0005)."""
         git = git_runner(repo)
         try:
             git_dir = Path(git("rev-parse", "--absolute-git-dir").decode().strip())
         except GitError:
             return cls(git, remote=remote, ref=ref)  # not a repository: the snapshot says so
+        if _is_partial(git):
+            raise StoreError(
+                f"{repo} is a partial clone (made with --filter): tkt needs a full clone"
+            )
+        git = git_runner(repo, log=git_dir / ERROR_LOG_PATH, now=SystemClock().now)
         return cls(git, remote=remote, ref=ref, cache=CloneCache(git_dir / CACHE_PATH))
 
     def snapshot(self) -> Snapshot:
@@ -159,14 +188,26 @@ class GitStore:
     def _check_layout(self, revision: Revision) -> None:
         """`tickets` and `claims`, where present, must be folders: the store's own layout,
         like `tkt-store.json`. Anything else is a StoreError that names no value, since
-        nothing could be written until an operator repairs it (ADR 0007)."""
+        nothing could be written until an operator repairs it (ADR 0007); so is a name
+        with '/' in the root, `tickets/` or `claims/`, which git never writes and no
+        commit could rewrite (`git mktree` refuses it; checked here for the root, by
+        `_tickets` and `_claims` for theirs)."""
         for entry in _entries(self._git("ls-tree", "-z", revision)):
+            self._check_name(revision, entry.name, depth=0)
             name = entry.name.decode(errors="replace")
             if name in (wire.TICKETS_DIR, wire.CLAIMS_DIR) and entry.kind != "tree":
                 raise StoreError(
                     f"{self._ref} at {revision}: {name} is not a folder; an operator must "
                     "repair the store"
                 )
+
+    def _check_name(self, revision: Revision, path: bytes, *, depth: int) -> None:
+        """A StoreError if `path`, listed `depth` folders down, has a '/' of its own."""
+        if path.count(b"/") > depth:
+            raise StoreError(
+                f"{self._ref} at {revision} holds a file name with '/', which git never "
+                "writes; an operator must repair the store"
+            )
 
     def _tickets(
         self, revision: Revision
@@ -184,6 +225,7 @@ class GitStore:
             if not raw:
                 continue
             meta, name = raw.split(b"\t", 1)
+            self._check_name(revision, name, depth=1)
             mode, kind, oid, size = meta.decode().split()
             ticket_id = wire.ticket_id_of(name.decode(errors="replace"))
             if ticket_id is None:
@@ -226,6 +268,7 @@ class GitStore:
         not_folders: list[TicketId] = []
         unread: dict[str, list[TicketId]] = {}
         for entry in _entries(listing):
+            self._check_name(revision, entry.name, depth=1)
             ticket_id = wire.claims_folder_of(entry.name.decode(errors="replace"))
             if ticket_id is None:
                 continue
@@ -238,19 +281,31 @@ class GitStore:
             else:
                 unread.setdefault(entry.oid, []).append(ticket_id)
         trees = list(unread)
+        unwritable: list[ClaimFile] = []
         for tree, data in zip(trees, self._read_objects(trees, "tree"), strict=True):
-            names = self._claim_names(data)
+            try:
+                names = self._claim_names(data)
+            except wire.SlashInName as slash:
+                # It can't be rewritten: not a folder, so its ticket is held aside, while
+                # its claims (all set aside by assemble) still fence. Never kept: it is
+                # read again on every snapshot.
+                not_folders.extend(unread[tree])
+                for ticket_id in unread[tree]:
+                    unwritable.extend(_Folder.of(ticket_id, slash.names).claims)
+                continue
             for ticket_id in unread[tree]:
                 folders[ticket_id] = (tree, _Folder.of(ticket_id, names))
         self._folders = {(ticket_id, tree): folder for ticket_id, (tree, folder) in folders.items()}
         claims = [claim for _tree, folder in folders.values() for claim in folder.claims]
-        return claims, not_folders, folders
+        return claims + unwritable, not_folders, folders
 
     def _claim_names(self, tree: bytes) -> tuple[str, ...]:
         """`wire.claim_names` of a raw tree, with this repository's empty blob; a tree that
-        does not parse is a StoreError."""
+        does not parse is a StoreError (one holding a name with '/', wire.SlashInName)."""
         try:
             return wire.claim_names(tree, bytes.fromhex(self._empty_blob()))
+        except wire.SlashInName:
+            raise
         except wire.Invalid as invalid:
             raise StoreError("cannot parse a claims folder's tree") from invalid
 
@@ -367,8 +422,15 @@ class GitStore:
 
     def _edit_tree(self, tree: str | None, edits: dict[str, str | None]) -> str:
         """`tree` (None: empty) with `edits` applied, paths relative to it; returns the new
-        tree's id. Only the subtrees an edit touches are read and rewritten."""
+        tree's id. Only the subtrees an edit touches are read and rewritten. A name with
+        a '/' (which git never writes, but a forged tree can hold) is a StoreError that
+        names no value: mktree would refuse it, echoing the name."""
         entries = {} if tree is None else _by_name(self._git("ls-tree", "-z", tree))
+        if any(b"/" in name for name in entries):
+            raise StoreError(
+                f"{self._ref} holds a file name with '/', which git never writes; an "
+                "operator must repair the store"
+            )
         nested: dict[str, dict[str, str | None]] = {}
         for path, oid in edits.items():
             head, slash, rest = path.partition("/")

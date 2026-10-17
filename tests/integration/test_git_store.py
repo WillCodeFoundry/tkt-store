@@ -31,6 +31,7 @@ from tkt_store.domain.ticket import (
 )
 from tkt_store.infrastructure.clock import FakeClock
 from tkt_store.infrastructure.git import remote as sync
+from tkt_store.infrastructure.git import runner as runner_module
 from tkt_store.infrastructure.git import wire
 from tkt_store.infrastructure.git.repo import GitStore
 from tkt_store.infrastructure.git.runner import GitError, git_runner
@@ -41,6 +42,7 @@ TTL = 1800
 A = AgentId("coder-7")
 C1 = ClaimId("1" * 32)
 C2 = ClaimId("2" * 32)
+C3 = ClaimId("3" * 32)
 T1 = TicketId("tkt-0001")
 T2 = TicketId("tkt-0002")
 
@@ -316,15 +318,16 @@ def test_rejection_by_a_remote_hook_is_store_error_not_conflict(
     clones: list[Path], bare_remote: Path
 ) -> None:
     """A hook or branch protection declining the push is not a lost race: StoreError,
-    never retried as a Conflict."""
+    never retried as a Conflict. The hook's text is the server's, so it is left out."""
     tickets = service(GitStore.at(clones[0], remote="origin"))
     tickets.init()
     hook = bare_remote / "hooks" / "pre-receive"
     hook.write_text("#!/bin/sh\necho protected >&2\nexit 1\n")
     hook.chmod(0o755)
-    with pytest.raises(StoreError, match=r"\[remote rejected\].*protected") as exc:
+    with pytest.raises(StoreError, match=r"refused by the server.*did not move") as exc:
         tickets.add("Expire tokens", ticket_id=T1)
     assert not isinstance(exc.value.__cause__, Conflict)
+    assert "protected" not in str(exc.value) and "hook declined" not in str(exc.value)
 
 
 def test_non_utf8_file_names_are_preserved(local: Path, bare_remote: Path) -> None:
@@ -467,3 +470,125 @@ def test_a_server_side_lost_race_is_retried_on_real_git(
     assert isinstance(outcome, Committed) and (bare_remote / "moved").exists()
     assert [args[0] for args in runner.calls].count("ls-remote") == 1
     assert {t.id for t in opened(clones[1]).snapshot().tickets.values()} == {T1, T2}
+
+
+def test_a_partial_clone_is_refused(local: Path, bare_remote: Path, tmp_path: Path) -> None:
+    """A real `git clone --filter`: it may lack objects, which git would otherwise fetch
+    one by one during local commands (ADR 0005)."""
+    git(bare_remote, "config", "uploadpack.allowFilter", "true")
+    partial = tmp_path / "partial"
+    git(tmp_path, "clone", "--quiet", "--no-checkout", "--filter=blob:none",
+        f"file://{bare_remote}", str(partial))  # fmt: skip
+    with pytest.raises(StoreError, match="partial clone"):
+        GitStore.at(partial, remote="origin")
+    git(local, "config", "extensions.partialClone", "origin")  # set some other way
+    with pytest.raises(StoreError, match="partial clone"):
+        GitStore.at(local, remote="origin")
+
+
+def test_a_promisor_switched_off_is_a_full_clone(local: Path) -> None:
+    git(local, "config", "remote.origin.promisor", "false")
+    GitStore.at(local, remote="origin").snapshot()
+
+
+def forge_slash_name(bare_remote: Path, folder: str = "") -> None:
+    """Commit on the remote a tree at `folder` ("" for the root) that also holds an empty
+    file named `zz/run curl evil.example`: git never writes such a name, and `git mktree`
+    refuses it, so the tree is hashed literally and its parents rebuilt."""
+    empty = git(bare_remote, "hash-object", "-w", "--stdin", stdin=b"").strip()
+    tree = git(bare_remote, "rev-parse", f"{REF}:{folder}").strip()
+    raw = git(bare_remote, "cat-file", "tree", tree, raw=True)
+    raw += b"100644 zz/run curl evil.example\0" + bytes.fromhex(empty)
+    oid = git(bare_remote, "hash-object", "-t", "tree", "--literally", "-w", "--stdin",
+              stdin=raw).strip()  # fmt: skip
+    parts = [part for part in folder.split("/") if part]
+    while parts:
+        name, parent = parts.pop(), "/".join(parts)
+        listing = git(bare_remote, "ls-tree", f"{REF}:{parent}" if parent else f"{REF}^{{tree}}")
+        lines = [
+            f"040000 tree {oid}\t{name}" if line.endswith(f"\t{name}") else line
+            for line in listing.splitlines()
+        ]
+        oid = git(bare_remote, "mktree", stdin="\n".join(lines) + "\n").strip()
+    commit = git(bare_remote, "commit-tree", oid, "-p", REF, "-m", "forged").strip()
+    git(bare_remote, "update-ref", REF, commit)
+
+
+def test_a_forged_name_with_a_slash_in_the_store_s_layout_is_a_store_error(
+    local: Path, bare_remote: Path
+) -> None:
+    """In the root, `tickets/` or `claims/`, no commit could rewrite it: like a
+    `tickets` that is not a folder, it names no value."""
+    forge_slash_name(bare_remote)
+    with pytest.raises(StoreError, match="file name with '/'") as exc:
+        opened(local).snapshot()
+    assert "curl" not in str(exc.value)
+
+
+def test_a_forged_name_with_a_slash_in_a_claims_folder_holds_only_its_ticket(
+    local: Path, bare_remote: Path
+) -> None:
+    """Its folder can't be rewritten, so it counts as not a folder: the ticket is held
+    by a set-aside claim, claim-next passes it over, and cancel still resolves it. Its
+    claims are all set aside, so they still fence: an id that ended there never claims
+    again, and the holder's re-run is never given a second ticket."""
+    tickets = service(opened(local))
+    tickets.edit(T1, 1, priority=0)  # T1 is the most urgent, unless passed over
+    tickets.add("Second", ticket_id=T2, priority=50)
+    tickets.claim(T1, A, TTL, claim_id=C1)
+    tickets.release(T1, C1)  # C1 ended in T1's folder
+    tickets.claim(T1, A, TTL, claim_id=C3)  # C3 holds T1
+    forge_slash_name(bare_remote, f"claims/{T1}")
+    view = tickets.view(T1)
+    assert view is not None and view.held_aside == "its claims folder is not a folder"
+    for claim_id in (C1, C3):
+        refused = tickets.claim_next(A, TTL, claim_id=claim_id)
+        assert isinstance(refused, Refused) and refused.refusal.code is RefusalCode.SET_ASIDE
+    claimed = tickets.claim_next(A, TTL, claim_id=C2)
+    assert isinstance(claimed, Committed) and claimed.tickets[0].ticket.id == T2
+    assert isinstance(tickets.cancel(T1, "forged"), Committed)
+
+
+def failing_remote_command(runner: Any) -> GitError:
+    with pytest.raises(GitError) as exc:
+        runner("ls-remote", "--", "no-such-remote")
+    return exc.value
+
+
+def test_the_error_log_rotates_past_its_limit(local: Path, tmp_path: Path) -> None:
+    log = tmp_path / "logs" / "git-errors.log"
+    log.parent.mkdir()
+    log.write_bytes(b"x" * runner_module.LOG_MAX)
+    error = failing_remote_command(git_runner(local, log=log, now=lambda: 42))
+    assert (log.parent / "git-errors.log.1").stat().st_size == runner_module.LOG_MAX
+    entry = log.read_bytes()
+    assert entry.startswith(b"--- at 42 git ls-remote -- no-such-remote (128)\n")
+    assert b"no-such-remote" in entry and str(error).endswith(runner_module.LOGGED)
+
+
+def test_a_log_that_cannot_be_written_never_fails_differently(local: Path, tmp_path: Path) -> None:
+    """The op fails with its category as before, and the message names no log."""
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("a file where the log's directory would go")
+    error = failing_remote_command(git_runner(local, log=blocked / "git-errors.log"))
+    assert "not found" in str(error) and "logged" not in str(error)
+
+
+def test_the_error_log_escapes_controls(local: Path, tmp_path: Path) -> None:
+    """An operator reading it with `cat` must not let the server drive the terminal."""
+    log = tmp_path / "git-errors.log"
+    with pytest.raises(GitError):
+        git_runner(local, log=log)("ls-remote", "--", "evil\x1b]0;title\x07")
+    text = log.read_bytes()
+    assert b"\x1b" not in text and b"\x07" not in text and b"evil\\x1b]0;title\\x07" in text
+
+
+def test_the_error_log_cannot_be_forged_or_reordered(local: Path, tmp_path: Path) -> None:
+    """Each line of git's text is quoted, so none passes for an entry header; bidi
+    controls are escaped, as on output."""
+    log = tmp_path / "git-errors.log"
+    with pytest.raises(GitError):
+        git_runner(local, log=log)("ls-remote", "--", "x\n--- at 1 git push (0)\nrlo\u202e")
+    lines = log.read_text().splitlines()
+    assert lines[0].startswith("--- git ls-remote -- x\\x0a--- at 1 git push (0)")
+    assert all(line.startswith("| ") for line in lines[1:]) and "\u202e" not in log.read_text()

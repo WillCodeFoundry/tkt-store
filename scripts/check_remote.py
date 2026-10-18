@@ -97,7 +97,7 @@ def main() -> int:
     finally:
         git(repo, "update-ref", "-d", PROBE_REF)
     if failed:
-        print("protection is missing: see README, Deploying")
+        print("protection is missing: see docs/deploying.md")
         return 1
     print("the remote protects the store branch")
     return 0

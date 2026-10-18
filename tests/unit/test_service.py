@@ -1,5 +1,5 @@
 """The TicketStore facade: id minting, building ops, and single-snapshot reads
-(docs/design.md §6). Runs against MemStore with injected fakes (docs/development.md)."""
+(docs/design.md §6). Runs against MemStore with injected fakes (docs/CONTRIBUTING.md)."""
 
 from __future__ import annotations
 

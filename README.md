@@ -61,104 +61,49 @@ safe. See `docs/cli.md`.
 
 ## Deploying
 
-Keep the store in its own repository; `tkt` uses only the `tkt-store` branch. Requires
-git 2.29 or later.
+Keep the store in its own repository (`tkt` uses only its `tkt-store` branch), give
+every agent process its own full clone and its own git identity, let agents use only
+`tkt` (never plain git) on the store, and use a remote that refuses force pushes and
+deletion of the branch. Requires git 2.29 or later. The details, and why each matters:
+[`docs/deploying.md`](docs/deploying.md).
 
-**One clone per process.** Give every process that runs `tkt` its own clone of the store
-repository, and never let two processes use the same clone, for example by mounting one
-clone into several containers. Each clone keeps a cache of what it has already read in
-`.git/tkt-store/cache/`; deleting it is always safe (the next command reads the store in
-full once). When a git command fails, tkt's error says only what kind of failure it
-was; git's own message is in `.git/tkt-store/git-errors.log`. It may quote
-the server, and the remote's URL as git printed it, credentials included if the URL
-holds them, so read it yourself rather than passing it to an agent. Partial clones
-(`git clone --filter`) are refused: make a full clone.
+## Getting started as a developer
 
-**Agents use only `tkt`, never git, on the store.** `tkt` validates what it writes (and,
-from 0.2.0, everything it reads), never checks out files (so no checkout hooks, filters
-or symlinks are ever involved), and writes only by compare-and-swap; from 0.2.0 it also
-refuses to act as another agent's holder. Plain git does none of that: an agent running
-it can forge tickets and history that other agents then trust. Make each clone without a
-checkout (`git clone --no-checkout`; from 0.2.0, `tkt clone`), and give agents only the
-`tkt` command for the store. The security model behind this is in `docs/design.md` §8
-and ADR 0005.
-
-**One git identity per agent.** From 0.2.0, `tkt` records who did each operation as the
-commit author, the identity git itself uses (`user.name` and `user.email`), and refuses
-to write without one. Give each agent its own, for example a name such as `coder-7` and
-a GitHub noreply address: the store's history is readable by everyone with access to the
-repository, and GitHub can refuse pushes that would expose a private address.
-
-The remote's repository is shared by all clones, so it needs the same care. A remote
-given as a file path (a bare repository) is only safe when every clone is on the same
-machine as that repository, with the same filesystem. If clones live in VMs or sandboxes
-(Docker Desktop, Docker Sandboxes) or on other machines, don't mount the remote's
-directory into them: git's locking may not hold across that boundary, and two agents
-could both get the same claim. A path remote is also a security risk: every agent can
-write the repository's files, so a compromised agent can plant a hook or change its
-config, and that hook then runs inside every other agent that pushes. Use a path remote
-only for agents that fully trust each other; otherwise serve it over the network (a
-hosting service, SSH, or `git daemon`), so that only its own machine writes to it.
-
-**Any git server works as the remote:** a hosting service such as GitHub, a bare
-repository over SSH or `git daemon`, or, when every clone is on the same machine as the
-repository, a bare repository's path. Every `tkt` write is one fetch and one push. The
-server must:
-
-- **accept direct pushes to `tkt-store`:** no pull-request, status-check or
-  signed-commit requirement on that branch (store commits are unsigned);
-- **refuse force pushes and deletion of `tkt-store`,** however your server does that,
-  e.g. a ruleset on GitHub, or `receive.denyNonFastForwards` and `receive.denyDeletes`
-  on a plain bare repository. `tkt` itself never does either; this protects the history
-  from other writers.
-
-`git daemon` is for trusted local agents only (e.g. agents in containers or VMs on one
-host). It runs no code from the agents, but it has no authentication: anything that can
-reach its port can push anything with plain git, forged tickets included. Bind it to
-loopback, and use SSH if you need authentication:
+You need [uv](https://docs.astral.sh/uv/) and git 2.29 or later; uv fetches the Python
+in `.python-version` (3.11, the oldest supported, as CI uses) if you have none. Do not
+use `pip`. Once per clone:
 
 ```sh
-git daemon --reuseaddr --base-path=/srv/git --export-all \
-  --enable=receive-pack --listen=127.0.0.1 --port=9418
+git clone https://github.com/WillCodeFoundry/tkt-store.git
+cd tkt-store
+uv sync --group dev        # .venv from uv.lock, with the dev tools (they are opt-in)
+uv run pre-commit install  # git hooks that run the checks on commit and push
 ```
 
-Agents then clone `git://<host>/tkt.git`; from a Docker Sandbox the host is
-`host.docker.internal`, once the port is allowed (`sbx policy allow network
-localhost:9418`).
-
-**Check the protection** once the store exists (`tkt init`). The script tries a
-non-fast-forward push and a deletion of the store branch, reports whether each was
-refused, and restores the branch if either was accepted:
+From then on the checks run themselves: on `git commit`, ruff, mypy and the tests that
+need no git (about 8 s); on `git push`, the whole suite (about a minute). A failing
+check stops the commit or push and says why. To check work without committing:
 
 ```sh
-uv run python scripts/check_remote.py --repo /work/tasks --remote origin
+uv run pre-commit run                        # what a commit checks
+uv run pre-commit run --hook-stage pre-push  # the whole suite
 ```
 
-## Layout
+The rules for changes (tooling, checks, tests, commits) are in
+[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
-| Path | Purpose |
+## Documentation
+
+| Document | What |
 |---|---|
-| `docs/design.md` | Concepts, module boundaries, invariants, failure model |
-| `docs/format.md` | On-branch layout, ticket schema, commit trailers |
-| `docs/cli.md` | Commands, exit codes, JSON output |
-| `docs/development.md` | Setup, checks, testing, commit rules |
-| `docs/decisions/` | Architecture decision records |
-| `src/tkt_store/` | The package (layered; see below) |
-| `tests/` | Unit, contract, integration and property tests |
-| `scripts/` | `check_remote.py`: checks a store's remote is protected; `bench.py`: the ADR 0001 benchmark (dedicated test repositories only) |
+| [`docs/design.md`](docs/design.md) | Concepts, module boundaries, invariants, failure model: the authority |
+| [`docs/format.md`](docs/format.md) | On-branch layout, ticket schema, commit trailers |
+| [`docs/cli.md`](docs/cli.md) | Commands, exit codes, JSON output |
+| [`docs/deploying.md`](docs/deploying.md) | Running a store: clones, identities, the remote |
+| [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Tooling, checks, testing, commit rules |
+| [`docs/decisions/`](docs/decisions/) | Architecture decision records |
 
-The package is organised in layers, with dependencies pointing inward only
-(enforced by `tests/unit/test_architecture.py`):
-
-| Layer | Modules | Depends on |
-|---|---|---|
-| `domain/` | `ticket`, `status`, `operations`, `outcomes`, `rules`, `errors` | nothing but itself |
-| `application/` | `store`, `clock`, `ids` (ports), `transaction`, `service`, `history`, `errors` | `domain` |
-| `infrastructure/` | `git/{runner,wire,remote,repo}`, `memory`, `clock`, `ids` | `domain`, `application` |
-| interface | `cli` | `application` (and `domain` types) + the composition root (`__init__`: `open_store`, `new_id_source`); never `infrastructure` |
-| root | `open_store()` in `__init__` (composition root) | every layer |
-
-## Development
-
-Setting up a clone, the checks (they run themselves on commit and push), testing and
-the commit rules: [`docs/development.md`](docs/development.md).
+The code is in `src/tkt_store/` (layered: [`docs/design.md`](docs/design.md) §3), its
+tests in `tests/` (unit, contract, integration, property and security), and `scripts/`
+holds `check_remote.py` (checks a store's remote is protected) and `bench.py` (the ADR
+0001 benchmark, for dedicated test repositories only).

@@ -1,32 +1,24 @@
-# Development
+# Contributing
 
-How to work on tkt-store: set up a clone, run the checks, write tests, commit. What the
-code must do is in [`design.md`](design.md), the authority on concepts, boundaries and
-invariants: if code and design disagree, one of them is wrong, so fix it or amend the
-design in the same change, never silently.
+The rules for working on tkt-store: tooling, checks, tests and commits. To set up a
+clone, follow *Getting started* in the [README](../README.md). What the code must do is
+in [`design.md`](design.md), the authority on concepts, boundaries and invariants: if
+code and design disagree, one of them is wrong, so fix it or amend the design in the
+same change, never silently.
 
-## Setup
+## Setup details
+
+The README's setup ends with `uv run pre-commit install`, which installs both git hooks
+(`pre-commit` and `pre-push`, from `default_install_hook_types` in
+`.pre-commit-config.yaml`); check with `ls .git/hooks/pre-commit .git/hooks/pre-push`.
+It refuses to install if git's `core.hooksPath` is set: unset it, or point it at a
+directory that runs these hooks. A plain `uv sync` (without `--group dev`) installs none
+of the dev tools, so the hooks would fail.
+
+## Tooling
 
 This project uses [uv](https://docs.astral.sh/uv/) for environments, dependencies and
 running tools. Do not use `pip`.
-
-Once per clone; you need uv and git 2.29 or later, and uv fetches the Python in
-`.python-version` (3.11, the oldest supported, as CI uses) if you have none:
-
-```sh
-git clone https://github.com/WillCodeFoundry/tkt-store.git
-cd tkt-store
-uv sync --group dev    # .venv from uv.lock, with the dev tools (they are opt-in)
-uv run pre-commit install
-```
-
-The last command installs both git hooks (`pre-commit` and `pre-push`, from
-`default_install_hook_types` in `.pre-commit-config.yaml`); check with
-`ls .git/hooks/pre-commit .git/hooks/pre-push`. It refuses to install if git's
-`core.hooksPath` is set: unset it, or point it at a directory that runs these hooks. A
-plain `uv sync` installs none of the dev tools, so the hooks would fail.
-
-## Tooling
 
 - `uv sync --group dev` sets up (dev tools are an opt-in group), `uv add` /
   `uv add --dev` change dependencies, `uv run <tool>` runs a tool.

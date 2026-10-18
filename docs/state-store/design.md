@@ -283,8 +283,8 @@ README's requirements on credentials). Logging never fails an operation.
 
 Two processes fetching in one clone at once can fail to lock the private ref
 (`RemoteFailed`, since it happens in `fetch`); nothing is corrupted, and no wrong state
-is ever reported, because every commit is still a compare-and-swap on the remote. Within one process,
-snapshots and stores are not thread-safe.
+is ever reported, because every commit is still a compare-and-swap on the remote.
+Within one process, snapshots and stores are not thread-safe.
 
 ## 10. Open questions
 

@@ -20,10 +20,9 @@ state-store provides its callers, without a server, with shared state that:
   anything older is refused, and the caller decides again;
 - is **durable and auditable**: a commit that returns is kept, and every change can be
   traced;
-- needs nothing beyond a git remote the writers can already reach.
+- needs nothing the writers cannot already reach.
 
-It deliberately does not provide per-key conflict detection, queries, locks, expiry or
-retries. The exact contract is in the [README](../README.md#guarantees).
+The exact contract, and what it leaves out, are in the [README](../README.md#guarantees).
 
 ## Alternatives rejected
 

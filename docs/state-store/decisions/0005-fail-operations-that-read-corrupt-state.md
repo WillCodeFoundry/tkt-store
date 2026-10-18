@@ -25,4 +25,4 @@ result, and skipping it would mean deciding without the entry that mattered.
 ## Consequences
 
 - A bad entry blocks the operations that touch it until an operator repairs the branch
-  ([design](../design.md#4-checks-on-what-is-read)).
+  ([design](../design.md#4-corrupt-entries-in-git)).

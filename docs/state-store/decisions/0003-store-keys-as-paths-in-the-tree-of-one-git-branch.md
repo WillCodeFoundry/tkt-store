@@ -32,5 +32,3 @@ commit messages) would mean keeping them consistent.
 ## Consequences
 
 - git's history is the audit trail.
-- A commit rewrites the trees on the paths of the keys it changes, so how callers lay
-  out their namespaces matters ([README](../README.md#keys)).

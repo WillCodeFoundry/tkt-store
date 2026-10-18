@@ -27,13 +27,15 @@ class Entry:
 
     `kind` is None for anything the store never writes (for git: a symlink, an
     executable, a submodule); the snapshot treats that as corrupt. `size` is a value's
-    size, known before reading it; `ref` is how the base finds the entry's content
-    again (an object id for git)."""
+    size, known before reading it; `empty` says a namespace holds nothing, which the
+    store never writes either (for git: the empty tree's id); `ref` is how the base
+    finds the entry's content again (an object id for git)."""
 
     name: str
     kind: Kind | None
     size: int | None
     ref: str
+    empty: bool = False
 
 
 class Base(Protocol):

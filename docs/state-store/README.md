@@ -9,7 +9,7 @@ you started from, otherwise it is rejected and you start again from a new snapsh
 > behaviour is a strict expected failure until the code it covers lands.
 
 It is general-purpose: keys are strings, values are bytes, and it interprets neither.
-This document is the specification: what state-store promises. How the git store keeps
+This document is the specification: what state-store promises. How the stores keep
 those promises is in [`design.md`](design.md), and why it is built this way is in
 [`decisions/`](decisions/README.md), starting with
 [what it provides](decisions/0001-provide-consistent-all-or-nothing-shared-state.md).
@@ -26,7 +26,7 @@ those promises is in [`design.md`](design.md), and why it is built this way is i
 | **revision** | The id of one committed state of the store; `None` before the first commit. |
 | **snapshot** | An immutable view of the store at one revision. A *taken* snapshot comes from the store object; a *derived* snapshot is a taken one plus changes. |
 | **change** | Setting a key to a value, or removing it, in a derived snapshot. |
-| **commit** | Publishing a derived snapshot's changes, as the store's next revision. |
+| **commit** | Publishing a derived snapshot's changes as the store's next revision, only if the store is still at the revision the snapshot was taken at: a **compare-and-swap**. |
 
 ## Example
 
@@ -47,8 +47,7 @@ while True:
         continue  # someone committed first: decide again on the new state
 ```
 
-A real caller bounds the loop and backs off between attempts; the store never retries
-by itself, because only the caller can redo its decision on new data.
+A real caller bounds the loop and backs off between attempts.
 
 ## Interface
 
@@ -95,13 +94,15 @@ class StateSnapshot:                       # immutable
 
 ## Guarantees
 
+The errors named here are described under [Errors](#errors).
+
 1. **Consistent reads.** Every read from a snapshot sees the same revision, however long
    after the snapshot was taken.
 2. **All or nothing.** A commit publishes every change of its snapshot, or none.
-3. **Commits apply one at a time, each on the latest revision.** A commit lands only if
-   the store has not changed since its snapshot was taken. So the revisions form a
-   single line, and every commit was decided on the revision just before it: two
-   writers that read the same keys and write different ones cannot both land.
+3. **Commits apply one at a time, each on the latest revision.** Every commit is a
+   compare-and-swap, so the revisions form a single line, and every commit was decided
+   on the revision just before it: two writers that read the same keys and write
+   different ones cannot both land.
 4. **Durable when `commit` returns.** When the outcome cannot be known (the connection
    failed during the commit), `commit` says so (`UnknownOutcome`) instead of guessing.
 5. **An audit trail.** Every commit is recorded with its message and author. The store
@@ -109,7 +110,8 @@ class StateSnapshot:                       # immutable
 6. **It fails loudly.** An operation that depends on something the store would never
    have written fails with `StoreError` (category `CORRUPT`) instead of skipping it;
    operations that do not depend on it are unaffected, and a commit never carries it
-   forward. Repairing it is described in [the design](design.md#4-checks-on-what-is-read).
+   forward. Repairing it is described in
+   [the design](design.md#4-corrupt-entries-in-git).
 
 For the git store these hold under the preconditions in *Git store*.
 
@@ -127,13 +129,13 @@ For the git store these hold under the preconditions in *Git store*.
 |---|---|---|
 | `StaleSnapshot` | The store changed since the snapshot was taken. Nothing was published. | Takes a new snapshot and decides again. |
 | `UnknownOutcome` (a `StaleSnapshot`) | The connection failed during the commit: it may or may not have landed. | The same; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
-| `StoreError` | Anything else; `.category` says what. Never retried by the store. | Stops; an operator acts. |
+| `StoreError` | Anything else; `.category` says what. | Stops; an operator acts. |
 | `KeyCollision` (a `ValueError`) | A write would make a key both a value and a namespace. It can come from data another writer stored, not only from this caller's code. | Treats it as a conflict between writers: stops. |
 | `ValueError` | A caller bug: an invalid key, namespace, branch or remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
 
-Any operation that reads stored state can raise `StoreError`: `get`, `keys` and
-`with_value` (which checks collisions against the stored state) as well as `snapshot`
-and `commit`. No error message contains a stored value or name, nor text from outside
+In the git store, any operation that reads stored state can raise `StoreError`: `get`,
+`keys` and `with_value` (which checks collisions against the stored state) as well as
+`snapshot` and `commit`. No error message contains a stored value or name, nor text from outside
 state-store.
 
 ## Keys
@@ -176,8 +178,9 @@ What applies to `GitStateStore` only.
 - `remote` is the name of a remote configured in the clone, not a URL, with exactly
   one URL, used for both fetching and pushing (no `pushurl`, no rewriting that makes
   them differ).
-- `branch` is a plain branch name (`state`): not `refs/heads/…`, `@` or `HEAD`, and
-  not starting with `-`.
+- `remote` holds only `A-Z a-z 0-9 . _ -` and does not start with `-`.
+- `branch` is a plain branch name (`state`) that git accepts as `refs/heads/<branch>`:
+  it does not start with `refs/` or `-`, is not `@` or `HEAD`, and holds no `@{`.
 - Nobody runs git against the clone or the branch by hand while writers are active.
 - Credentials are kept out of the remote's URL (use a credential helper): the operator
   log can quote the URL, and anything that can read the clone can read the log.

@@ -16,21 +16,19 @@ The interface ([README](../README.md#interface)) is built on these choices:
 
 - **Reads go through a snapshot:** an immutable view of one committed state, consistent
   however long it is kept.
-- **Changes derive new snapshots,** leaving the original untouched, as `pathlib`'s
-  `with_name` returns a new path.
+- **Changes derive new snapshots,** leaving the original untouched.
 - **Commits are compare-and-swap on the whole store:** a commit lands only if the store
   has not changed at all since its snapshot was taken.
 - **The caller only has to tell two outcomes apart:** start again from a new snapshot,
   or stop. A caller's own bug is a `ValueError`.
 - **One snapshot implementation for every store,** so the stores' semantics cannot
   drift.
-- **Plain names:** "snapshot" and "commit", not figurative ones, and not
-  "serializable", which reads as encoding.
 
 ## Alternatives rejected
 
-- **A mutable transaction object** (`tx.put(…)`, `tx.commit()`): a snapshot is
-  expected to be read-only, so changing one in place would be confusing.
+- **A mutable transaction object** (`tx.put(…)`, `tx.commit()`): any code holding it
+  would see it change underneath; an immutable snapshot can be passed around and kept
+  safely.
 - **Retrying inside the store:** it cannot redo the caller's decision.
 - **More error types:** a caller only ever needs to know whether to start again or stop.
 

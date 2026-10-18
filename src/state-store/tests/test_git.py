@@ -221,7 +221,7 @@ def test_a_url_rewrite_that_applies_to_both_directions_is_accepted(
     assert open_store(make_clone()).snapshot().get("a") == b"1"
 
 
-# --- Checks on what is read (§4) ----------------------------------------------------------
+# --- Checks on what is read (§1, §4) ------------------------------------------------------
 
 
 def forge_bad_namespace(clone: Path, bad: tuple[str, str, str]) -> None:
@@ -235,13 +235,14 @@ def forge_bad_namespace(clone: Path, bad: tuple[str, str, str]) -> None:
 
 
 BAD_ENTRIES: dict[str, tuple[str, bytes | str, str]] = {
-    # kind: (mode, content (or a submodule's commit id), name)
+    # kind: (mode, content (or the id of a submodule's commit or of a tree), name)
     "symlink": (SYMLINK, b"/etc/passwd", "link"),
     "executable": (EXECUTABLE, b"#!/bin/sh\n", "run"),
     "submodule": (SUBMODULE, "1" * 40, "sub"),
     "bad name": (REGULAR, b"", ".hidden"),
     "oversized": (REGULAR, b"x" * (MAX_VALUE_SIZE + 1), "big"),
     "duplicate": (REGULAR, b"other", "ok"),
+    "empty namespace": (DIRECTORY, EMPTY_TREE, "empty"),
 }
 BAD_KINDS = list(BAD_ENTRIES)
 
@@ -267,7 +268,9 @@ def test_listing_a_namespace_with_a_bad_entry_fails(make_clone: MakeClone, kind:
     assert_corrupt(caught)
 
 
-@pytest.mark.parametrize("kind", ["symlink", "executable", "submodule", "oversized", "duplicate"])
+@pytest.mark.parametrize(
+    "kind", ["symlink", "executable", "submodule", "oversized", "duplicate", "empty namespace"]
+)
 def test_reading_a_bad_entry_fails(make_clone: MakeClone, kind: str) -> None:
     _, snap = corrupt_snapshot(make_clone, kind)
     with pytest.raises(StoreError) as caught:

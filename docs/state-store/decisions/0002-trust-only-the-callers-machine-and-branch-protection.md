@@ -32,10 +32,11 @@ The kinds of threat this leaves:
 - **The caller's machine is trusted fully** (the process, its clone, the git binary,
   git's configuration and credentials): anyone who can change these can already run
   code there.
-- **The remote is trusted only to refuse force pushes and deletion of the branch**, and
-  to be the same server for fetching and pushing.
+- **The remote is trusted only to apply pushes and report their outcome truthfully**,
+  to refuse force pushes and deletion of the branch, and to be the same server for
+  fetching and pushing. Nothing could detect a remote that lies about outcomes.
 - **Nothing else is trusted:** not the entries on the branch, whoever wrote them, nor
-  anything the remote sends back.
+  any text the remote sends back (its hooks can write anything there).
 
 Against code execution, corruption, data loss, injected text and leaked credentials,
 state-store:
@@ -46,8 +47,9 @@ state-store:
   ([0005](0005-fail-operations-that-read-corrupt-state.md));
 - never rewrites or deletes the branch, and commits only by compare-and-swap
   ([0004](0004-use-immutable-snapshots-and-compare-and-swap-commits.md));
-- puts only a category in its errors, never stored values or names, nor anything git or
-  the remote printed; git's own output goes to a log in the clone, for an operator.
+- keeps stored data and outside text out of its errors
+  ([README](../README.md#errors)); git's own output goes to a log in the clone, for an
+  operator.
 
 Impersonation, denial of service and disclosure are not defended.
 
@@ -68,5 +70,4 @@ Impersonation, denial of service and disclosure are not defended.
 - Anyone who can read the remote can read every value, so the store must not hold
   secrets.
 - A deployment must meet the git store's preconditions and requirements
-  ([README](../README.md#git-store)): among them, a protected branch, writers that use
-  only state-store, and credentials kept out of the remote's URL.
+  ([README](../README.md#git-store)).

@@ -6,10 +6,10 @@ both stores; the rest is about the git store.
 ## 1. Snapshots and changes
 
 Each store supplies a read-only view of one committed state: it lists a namespace's
-entries (each one's name, whether it is a value or a namespace, and a value's size) and
-reads a value. Everything else is common to both stores, in one implementation: the
-checks on what is read (§4), the merging of changes, and remembering what was read.
-So both stores have the same semantics, and only the git store knows git.
+entries (each one's name, whether it is a value or a namespace, a value's size, and
+whether a namespace is empty) and reads a value. Everything else is common to both stores, in one implementation
+([0004](decisions/0004-use-immutable-snapshots-and-compare-and-swap-commits.md)): the
+checks on what is read, the merging of changes, and remembering what was read.
 
 **A taken snapshot** is a committed state and its revision. Each namespace is listed,
 and each value read, at most once per taken snapshot; every snapshot derived from it
@@ -25,6 +25,27 @@ changes: added keys appear, removed ones disappear, nested keys do not count.
 `with_value(k)` raises `KeyCollision` if any proper prefix of `k` is a value, or if `k`
 is a namespace that still holds a value. This reads the committed state, so it can
 raise `StoreError`. `without(k)` reads nothing and never fails on a valid key.
+
+**Checks on what is read.** An entry of a listed namespace is valid when:
+
+- its name is a valid key segment ([README](README.md#keys));
+- it is a value or a namespace, and nothing else;
+- a value's size, from the listing, is at most `MAX_VALUE_SIZE`;
+- no other entry in the same namespace has the same name;
+- it is not an empty namespace (the store never writes one).
+
+Anything else is `StoreError(CORRUPT)` for any operation that touches it:
+
+- `get` checks the entries on its key's path only, so a bad entry elsewhere does not
+  stop it;
+- `keys` checks every entry of the namespace it lists, since its answer depends on all
+  of them;
+- `commit` checks every entry of every namespace it rebuilds, so a bad entry next to a
+  changed key is never carried into a new commit.
+
+The error names the key or namespace and the check that failed, never the offending
+name or content. The store does not check values: they are bytes, and what they mean
+is the caller's.
 
 **A commit** first checks its arguments, then works out whether the snapshot changes
 anything (a change can set a value a key already has); only then does it publish, by
@@ -50,8 +71,9 @@ stores.
 | store never committed to | the branch does not exist |
 | store emptied | a commit whose tree is the empty tree |
 
-Nothing else is written, and nothing else is accepted on reading (§4). Git does not
-store empty trees, which is why a namespace disappears with its last value.
+Nothing else is written, and nothing else is accepted on reading (§1, §4). The store
+drops trees left empty (§5), which is why a namespace disappears with its last value;
+the root is the only tree that can be empty.
 
 ## 3. Taking a snapshot and reading
 
@@ -87,40 +109,24 @@ for a missing path, and would mean telling that failure apart from others):
 | list a namespace | `git ls-tree -l -z <tree id>` |
 | read a value | `git cat-file blob <blob id>` |
 
-`get("a/b/c")` lists the root, `a` and `a/b`, checks the entries on that path (§4), and
+`get("a/b/c")` lists the root, `a` and `a/b`, checks the entries on that path (§1), and
 finds `c`. A missing segment, or a segment that is a value where a namespace is needed,
 means there is no value: `None`. A value's size is checked from the listing before the
 blob is read. `keys("a/b")` walks to `a/b` the same way (nothing there: `[]`), lists
 it, and checks every entry in it.
 
-**Old snapshots stay readable** while git keeps their objects. Once the private ref has
-moved on, an older commit's objects are unreachable, and git only prunes those older
-than `gc.pruneExpire` (two weeks by default). Snapshots are meant to live for one
-decision, seconds, not weeks.
+**Old snapshots stay readable.** Under the preconditions the branch only moves
+forward, so every revision a snapshot was taken at stays reachable from the private
+ref, and git never prunes its objects.
 
-## 4. Checks on what is read
+## 4. Corrupt entries in git
 
-An entry in a listed tree is valid when:
-
-- its name is a valid key segment ([README](README.md#keys));
-- it is a value (`100644 blob`) or a namespace (`040000 tree`);
-- a blob's size, from the listing, is at most `MAX_VALUE_SIZE`;
-- no other entry in the same tree has the same name (`git mktree` accepts duplicates,
-  so a forged tree can hold them).
-
-Anything else (`100755`, `120000` symlinks, `160000` submodules, other names, repeated
-names, oversized blobs) is `StoreError(CORRUPT)` for any operation that touches it:
-
-- `get` checks the entries on its key's path only, so a bad entry elsewhere does not
-  stop it;
-- `keys` checks every entry of the namespace it lists, since its answer depends on all
-  of them;
-- `commit` checks every entry of every tree it rebuilds, so a bad entry next to a
-  changed key is never carried into a new commit.
-
-The error names the key or namespace and the check that failed, never the offending
-name or content. The store does not check values: they are bytes, and what they mean
-is the caller's.
+The git store lists a tree entry as a value only for `100644 blob`, and as a namespace
+only for `040000 tree`; anything else (`100755` executables, `120000` symlinks,
+`160000` submodules) is neither, so the checks in §1 reject it. A forged tree can also
+hold repeated names or empty subtrees, since `git mktree` accepts both. The empty tree
+has one fixed id, so an empty subtree is recognised from its parent's listing, without
+listing it.
 
 **Repairing a corrupt branch takes plain git.** Since a commit refuses to rebuild a tree
 holding a bad entry, even a commit that only removes it (`without("bad/link")`) is
@@ -132,7 +138,7 @@ fast-forward push, after which the store reads it normally.
 1. **Check the arguments.** The snapshot must come from this store object, and the
    message must hold no NUL character; else `ValueError`, even if nothing would change.
 2. **Build the new tree.** Only trees on the path of a changed key are rebuilt, deepest
-   first, and each is listed and checked in full (§4) first; every other entry keeps its
+   first, and each is listed and checked in full (§1) first; every other entry keeps its
    object id, so untouched namespaces are never listed. This is why a commit's cost
    grows with the namespaces on its keys' paths. New values are written with
    `git hash-object -w --stdin`, new trees with `git mktree -z`. Trees left empty are
@@ -203,8 +209,8 @@ caller's, except that:
 The exact lists are in `state_store/runner.py`.
 
 `core.hooksPath=/dev/null` turns every hook off. Plumbing commands run none, but
-`fetch`, `update-ref` and `push` can run hooks; turning hooks off once is simpler than
-reasoning per command (`--no-verify` on `push` is redundant).
+`fetch`, `update-ref`, `push` and `gc --auto` can run hooks; turning hooks off once is
+simpler than reasoning per command (`--no-verify` on `push` is redundant).
 
 **The minimum git version is 2.15**, set by the newest option the store relies on:
 `rev-parse --is-shallow-repository`. Below that, `core.hooksPath` (2.9) is a security
@@ -215,10 +221,9 @@ CI runs a recent git.
 
 `GitStateStore(repo, remote=…, branch=…)` checks, without contacting the remote:
 
-- `branch` does not start with `refs/` or `-`, is not `@` or `HEAD`, holds no `@{`,
-  and `git check-ref-format refs/heads/<branch>` accepts it (which alone would accept
-  `-x` and `HEAD`); `remote` is non-empty, holds only `A-Z a-z 0-9 . _ -` and does not
-  start with `-`. Else `ValueError`.
+- `branch` and `remote` follow the README's rules, else `ValueError`. Whether git
+  accepts the branch is asked of `git check-ref-format refs/heads/<branch>`, which
+  alone would accept `-x` and `HEAD`, hence the README's other rules.
 - `repo` is the top level of a non-bare repository (`git rev-parse
   --is-bare-repository` is `false`, and `git rev-parse --show-toplevel` is `repo`,
   both compared after resolving symlinks, so `-C` never walks up into an enclosing
@@ -233,7 +238,7 @@ CI runs a recent git.
   can land on one server while the outcome says it was stale; with a separate push URL,
   `ls-remote` would check a different server from the one pushed to.
 
-Any of the last two failing is `StoreError(NOT_A_CLONE)`.
+Either of the last two checks failing is `StoreError(NOT_A_CLONE)`.
 
 ## 8. Errors and the operator log
 
@@ -244,10 +249,9 @@ most the category, never the text. Local commands have their own, shorter list, 
 in `LOCAL`, so a local "Permission denied" is never mistaken for a remote refusing
 access. The wordings are in `state_store/runner.py`.
 
-An error's message names the operation and the category only, and nothing the store
-raises carries git's or the server's text, not even in a printed traceback.
-
-git's text goes to `<git dir>/state-store/git-errors.log` instead: appended under a
+An error's message names the operation and the category only, and the README's rule
+that errors carry no outside text holds even for a printed traceback. git's text goes
+to `<git dir>/state-store/git-errors.log` instead: appended under a
 header line, with every non-printable character but tab escaped and each line prefixed
 with `| ` so no line can pass for a header. A log that would pass 1 MiB is first moved
 to `git-errors.log.1`. The log may quote the server or the remote's URL (see the
@@ -264,5 +268,3 @@ snapshots and stores are not thread-safe.
 
 - **`keys` and nested namespaces.** `keys` lists values only. No caller needs to list
   namespaces yet; add it if one does.
-- **The size limits.** `MAX_VALUE_SIZE` (1 MiB) and the key limits are fixed constants;
-  callers keep their own, smaller limits.

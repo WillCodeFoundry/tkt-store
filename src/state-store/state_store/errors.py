@@ -17,7 +17,8 @@ class StaleSnapshot(Exception):
 
 
 class UnknownOutcome(StaleSnapshot):
-    """The connection failed during the commit: the commit may or may not have landed.
+    """The commit's outcome could not be read (for example, the connection failed): it
+    may or may not have landed.
 
     Take a new snapshot and decide again; it shows whether the commit landed. A caller
     whose changes are not safe to repeat checks for them first."""

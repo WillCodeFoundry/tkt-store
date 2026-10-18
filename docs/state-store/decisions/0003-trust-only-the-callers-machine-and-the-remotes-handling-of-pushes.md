@@ -9,7 +9,8 @@ on a branch of a git remote
 ([0002](0002-store-keys-as-paths-in-the-tree-of-one-git-branch.md)). Anyone with push
 access to the remote can write anything to the branch, with plain git or a buggy or
 compromised program.
-Callers may be automated, and may pass an error from state-store on to an AI agent.
+A user of state-store may pass its errors on to whatever reads them, and that reader
+may act on their text.
 state-store does not control the remote: it may be a hosting service, a server over
 SSH, or a bare repository.
 
@@ -22,8 +23,8 @@ The kinds of threat this leaves:
   result.
 - **Data loss:** history is rewritten or the branch deleted, or one commit silently
   overwrites another.
-- **Injected text:** a stored value or name, or a message from the remote, reaches an
-  AI agent through an error, carrying instructions.
+- **Injected text:** a stored value or name, or a message from the remote, reaches
+  whatever reads an error, carrying instructions.
 - **Leaked credentials:** git's output quotes the remote's URL, credentials included.
 - **Impersonation:** a writer commits under another writer's name.
 - **Denial of service:** a writer keeps others from committing, or blocks reads.

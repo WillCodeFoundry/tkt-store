@@ -293,8 +293,9 @@ def test_a_commit_never_rebuilds_a_namespace_with_a_bad_entry(
     make_clone: MakeClone, kind: str
 ) -> None:
     store, snap = corrupt_snapshot(make_clone, kind)
+    next_to_it = snap.with_value("bad/new", b"")  # its path holds no bad entry
     with pytest.raises(StoreError) as caught:
-        store.commit(snap.with_value("bad/new", b""), "next to a bad entry")
+        store.commit(next_to_it, "next to a bad entry")
     assert_corrupt(caught)
     store.commit(snap.with_value("good/b", b""), "elsewhere")
 
@@ -341,6 +342,20 @@ def test_errors_never_echo_a_name_that_was_read(make_clone: MakeClone) -> None:
 # --- Hooks, configuration and environment (§6) --------------------------------------------
 
 
+def pack_count(clone: Path) -> int:
+    return len(list((clone / ".git" / "objects" / "pack").glob("*.pack")))
+
+
+def make_gc_due(clone: Path) -> None:
+    """More packs than the limit of one, so the maintenance after the next fetch runs gc
+    (unreachable objects only go to a pack when written to one directly)."""
+    for data in (b"1", b"2", b"3"):
+        run_git(
+            clone, "pack-objects", "-q", ".git/objects/pack/pack", stdin=blob(clone, data).encode()
+        )
+    run_git(clone, "config", "gc.autoPackLimit", "1")
+
+
 def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
     clone = make_clone()
     marker = tmp_path / "hook-ran"
@@ -352,30 +367,26 @@ def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
             hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
             hook.chmod(0o755)
     run_git(clone, "config", "core.hooksPath", str(tmp_path / "hooks"))
-    run_git(clone, "config", "gc.auto", "1")  # so the maintenance after each fetch runs gc
+    make_gc_due(clone)
+    packs = pack_count(clone)
     store = open_store(clone)
     snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
     store.commit(snap.with_value("a", b"2"), "two")
     store.snapshot().keys()
+    assert pack_count(clone) < packs  # gc ran, so `pre-auto-gc` would have
     assert not marker.exists()
 
 
-def test_automatic_maintenance_runs_in_the_foreground(
-    make_clone: MakeClone, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Nothing keeps running in the clone after a store operation returns."""
+def test_automatic_maintenance_runs_in_the_foreground(make_clone: MakeClone) -> None:
+    """gc has finished by the time a snapshot returns, even where the clone's
+    configuration says to detach it."""
     clone = make_clone()
     run_git(clone, "config", "maintenance.autoDetach", "true")
     run_git(clone, "config", "gc.autoDetach", "true")
-    trace = tmp_path / "trace"
-    monkeypatch.setenv("GIT_TRACE", str(trace))
-    store = open_store(clone)
-    store.commit(store.snapshot().with_value("a", b"1"), "one")
-    store.snapshot()
-    monkeypatch.delenv("GIT_TRACE")
-    started = [line for line in trace.read_text().splitlines() if "run_command" in line]
-    assert any("maintenance run" in line for line in started)
-    assert not [line for line in started if " --detach" in line]
+    make_gc_due(clone)
+    packs = pack_count(clone)
+    open_store(clone).snapshot()
+    assert pack_count(clone) < packs
 
 
 def test_tags_are_never_pushed(make_clone: MakeClone, bare_remote: Path) -> None:

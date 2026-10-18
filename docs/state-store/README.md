@@ -5,8 +5,7 @@ your changes, and commit one: it lands only if nothing has changed since the sna
 you started from, otherwise it is rejected and you start again from a new snapshot.
 
 > **Status: skeleton.** This document, the interface and the tests exist; the
-> implementation does not yet (only the error types do). Every test of unimplemented
-> behaviour is a strict expected failure until the code it covers lands.
+> implementation does not yet (only the error types do).
 
 It is general-purpose: keys are strings, values are bytes, and it interprets neither.
 This document is the specification: what state-store promises. How the stores keep
@@ -103,8 +102,8 @@ The errors named here are described under [Errors](#errors).
    compare-and-swap, so the revisions form a single line, and every commit was decided
    on the revision just before it: two writers that read the same keys and write
    different ones cannot both land.
-4. **Durable when `commit` returns.** When the outcome cannot be known (the connection
-   failed during the commit), `commit` says so (`UnknownOutcome`) instead of guessing.
+4. **Durable when `commit` returns.** When the outcome cannot be known (for example, the
+   connection failed during the commit), `commit` says so (`UnknownOutcome`) instead of guessing.
 5. **An audit trail.** Every commit is recorded with its message and its author, as the
    writer's git identity gives it; nothing verifies that identity
    ([0003](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)). The store
@@ -124,13 +123,14 @@ For the git store these hold under the preconditions in *Git store*.
   keys, and one of them must start again (what that costs:
   [decision 0001](decisions/0001-provide-consistent-all-or-nothing-shared-state.md)).
 - **Lock, query, index or expire.** There are `get`, `keys`, and an atomic batch write.
+- **Keep values secret** ([why](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)).
 
 ## Errors
 
 | Error | Meaning | The caller |
 |---|---|---|
 | `StaleSnapshot` | The store changed since the snapshot was taken. Nothing was published. | Takes a new snapshot and decides again. |
-| `UnknownOutcome` (a `StaleSnapshot`) | The connection failed during the commit: it may or may not have landed. | The same; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
+| `UnknownOutcome` (a `StaleSnapshot`) | The commit's outcome could not be read (for example, the connection failed during the commit): it may or may not have landed. | The same; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
 | `StoreError` | Anything else; `.category` says what. | Stops; an operator acts. |
 | `KeyCollision` (a `ValueError`) | A write would make a key both a value and a namespace. It can come from data another writer stored, not only from this caller's code. | Treats it as a conflict between writers: stops. |
 | `ValueError` | A caller bug: an invalid key, namespace or branch name, an empty remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
@@ -167,9 +167,11 @@ What applies to `GitStateStore` only.
 
 **Preconditions** for the guarantees:
 
-- **The remote applies pushes and reports their outcome truthfully**
-  ([0003](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)). Guarantees 2 to 4 depend on it: nothing can detect a remote that
-  does not.
+- **The remote applies pushes and reports their outcome truthfully, and fetching,
+  `ls-remote` and pushing all see the same state of it** (not replicas that lag
+  behind)
+  ([0003](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)).
+  Guarantees 2 to 4 depend on it: nothing can detect a remote that does not.
 - **The remote refuses force pushes and deletion of the branch** (a ruleset on GitHub;
   `receive.denyNonFastForwards` and `receive.denyDeletes` on a bare repository).
   Guarantee 1 depends on it for old snapshots, which stay readable only while history
@@ -191,7 +193,7 @@ What applies to `GitStateStore` only.
   them differ).
 - `branch` is a plain branch name (`state`) that git accepts as `refs/heads/<branch>`:
   it does not start with `refs/` or `-`, and is not `@` or `HEAD`.
-- Nobody runs git against the clone or the branch by hand while writers are active.
+- Nobody runs git against the clone by hand while writers are active.
 - Credentials are kept out of the remote's URL (use a credential helper): the operator
   log (below) can quote the URL, and anything that can read the clone can read it.
 

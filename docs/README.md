@@ -9,9 +9,9 @@ why it is the way it is (`decisions/`).
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Where changes are specified, decision records, tooling, checks, testing, commit rules |
 | **tkt-store** | |
 | [`tkt-store/README.md`](tkt-store/README.md) | What it promises: TBD |
-| [`tkt-store/design.md`](tkt-store/design.md) | How it keeps those promises using state-store: TBD |
+| [`tkt-store/design.md`](tkt-store/design.md) | How it keeps those promises: TBD |
 | [`tkt-store/decisions/`](tkt-store/decisions/README.md) | Its decisions: none yet |
-| **state-store**, the component that keeps tkt-store's state | |
+| **state-store**, a component of tkt-store | |
 | [`state-store/README.md`](state-store/README.md) | What it promises: interface, guarantees, errors, keys |
 | [`state-store/design.md`](state-store/design.md) | How it keeps those promises on git |
 | [`state-store/decisions/`](state-store/decisions/README.md) | Its decisions |

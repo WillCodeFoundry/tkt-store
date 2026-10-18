@@ -33,8 +33,9 @@ pytestmark = pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="
         (
             "error: cannot lock ref 'refs/state-store/state': Unable to create"
             " '/c/.git/refs/state-store/state.lock': Permission denied",
-            Category.LOCAL,
+            Category.UNRECOGNISED,
         ),
+        ("error: cannot open '.git/FETCH_HEAD': Permission denied", Category.UNRECOGNISED),
         ("something nobody has seen before", Category.UNRECOGNISED),
         ("error: cannot run ssh: No such file or directory", Category.UNRECOGNISED),
         ("git: 'remote-https' is not a git command. ... command not found", Category.UNRECOGNISED),
@@ -67,7 +68,7 @@ def test_local_failures_are_never_remote_ones(
 
 
 def test_the_first_matching_category_wins() -> None:
-    both = "Permission denied ... Connection refused"
+    both = "Permission denied (publickey) ... Connection refused"
     assert category("push", both) is Category.AUTH
 
 

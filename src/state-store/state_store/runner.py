@@ -38,11 +38,11 @@ DROPPED_VARIABLES = frozenset(
 )
 """Inherited variables that would make git read another repository, object store, index,
 graft, shallow or replace data, or ref namespace (state-store design §6): those
-`git rev-parse --local-env-vars` lists, except the configuration variables, plus
-`GIT_NAMESPACE`. `GIT_NO_REPLACE_OBJECTS` is set again in `FIXED_VARIABLES`. The
-caller's configuration variables (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, …: how
-CI injects credentials) are kept; the store's own `-c` settings come after them and
-win."""
+`git rev-parse --local-env-vars` lists, except the caller's configuration variables,
+plus `GIT_NAMESPACE`. `GIT_NO_REPLACE_OBJECTS` is set again in `FIXED_VARIABLES`. The
+caller's configuration variables (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` and its
+keys: how CI injects credentials) are kept; the store's own `-c` settings come after
+them and win."""
 
 FIXED_VARIABLES = {
     "GIT_TERMINAL_PROMPT": "0",
@@ -55,13 +55,13 @@ NOT_A_CLONE_WORDING = ("not a git repository (or any of the parent", "cannot cha
 
 REMOTE_WORDING: tuple[tuple[Category, tuple[str, ...]], ...] = (
     (Category.NOT_A_CLONE, NOT_A_CLONE_WORDING),
-    # a remote command's local step, such as fetch writing the private ref
-    (Category.LOCAL, ("cannot lock ref", "Unable to create")),
     (
         Category.AUTH,
         (
             "Authentication failed",
-            "Permission denied",
+            # ssh's wording only: a bare "Permission denied" can be the clone's own files
+            "Permission denied (",
+            "Permission denied, please try again",
             "could not read Username",
             "could not read Password",
             "terminal prompts disabled",

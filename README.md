@@ -2,20 +2,19 @@
 
 A ticket store for coordinating AI agents, kept on a git branch.
 
-> **Status: being rebuilt.** The previous implementation is release 0.1.0 (tag
-> `v0.1.0`). This rebuild designs tkt-store again, starting from how it stores its
-> state; anything about tkt-store beyond what is specified below is TBD.
+> **Status:** everything about tkt-store beyond its component state-store is TBD.
 
 ## Overview
 
-| Part | What it is | Status |
-|---|---|---|
-| **tkt-store** | Tickets and claims for coordinating agents, and the interface agents use | TBD |
-| **state-store**, a component of tkt-store | Where tkt-store keeps all of its state: a key/value store on a git branch, with snapshot reads and all-or-nothing commits that land only if nothing changed since the snapshot. It knows nothing about tickets. | Specified; a skeleton (interface and tests), not yet implemented |
+| Part | What it is |
+|---|---|
+| **tkt-store** | TBD |
+| **state-store**, a component of tkt-store | A key/value store on a git branch ([details and status](docs/state-store/README.md)) |
 
 ## Prerequisites
 
-- [git](https://git-scm.com/) 2.15 or later.
+- [git](https://git-scm.com/) 2.31 or later, for the tests (state-store's own minimum is
+  in [its requirements](docs/state-store/README.md#git-store)).
 - [uv](https://docs.astral.sh/uv/), which manages the environment, the dependencies and
   the tools. It fetches the Python version in `.python-version` (3.11) if you have none.
   Do not use `pip`.
@@ -36,14 +35,12 @@ and the rules for commits are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
 ## Usage
 
-How agents use tkt-store is TBD. The interface of state-store is in
+How to use tkt-store is TBD. The interface of state-store is in
 [`docs/state-store/README.md`](docs/state-store/README.md).
 
 ## Documentation
 
-All documentation is in [`docs/`](docs/README.md), which maps it: tkt-store and
-state-store each have a directory with what they promise, how they keep those promises,
-and the decisions behind them.
+All documentation is in [`docs/`](docs/README.md), which maps it.
 
 ## Contributing
 
@@ -54,7 +51,7 @@ which document specifies each kind of change, and the rules every change follows
 
 | Path | What |
 |---|---|
-| `docs/` | All documentation: `CONTRIBUTING.md`, and a directory each for tkt-store and state-store |
+| `docs/` | All documentation ([map](docs/README.md)) |
 | `src/tkt-store/` | tkt-store: no code yet (TBD) |
 | `src/state-store/` | state-store: the `state_store` package and its tests in `tests/` |
 | `pyproject.toml` | The uv workspace: its members (the packages under `src/`), the dev tools and their settings |

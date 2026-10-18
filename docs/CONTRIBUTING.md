@@ -6,15 +6,9 @@ started* in the [README](../README.md).
 
 ## Where changes are specified
 
-Read the document for your change before making it. If code and its document disagree,
-one of them is wrong: fix it, or amend the document in the same change, never silently.
-
-| Change | Specified in |
-|---|---|
-| What tkt-store promises, and how it keeps that using state-store | [`tkt-store/README.md`](tkt-store/README.md), [`tkt-store/design.md`](tkt-store/design.md) (both TBD) |
-| What state-store promises: its interface, guarantees, errors, keys | [`state-store/README.md`](state-store/README.md) |
-| How state-store keeps those promises on git | [`state-store/design.md`](state-store/design.md) |
-| A decision: why something is the way it is | [`state-store/decisions/`](state-store/decisions/README.md), or [`tkt-store/decisions/`](tkt-store/decisions/README.md) (none yet); see *Decision records* below |
+Read the document for your change before making it: [`README.md`](README.md) in this
+directory maps them. If code and its document disagree, one of them is wrong: fix it, or
+amend the document in the same change, never silently.
 
 ## Decision records
 

@@ -37,8 +37,8 @@ raise `StoreError`. `without(k)` reads nothing and never fails on a valid key.
 
 Anything else is `StoreError(CORRUPT)` for any operation that touches it:
 
-- `get` checks the entries on its key's path only, so a bad entry elsewhere does not
-  stop it;
+- `get` and `with_value` check the entries on their key's path only, so a bad entry
+  elsewhere does not stop them;
 - `keys` checks every entry of the namespace it lists, since its answer depends on all
   of them;
 - `commit` checks every entry of every namespace it rebuilds, so a bad entry next to a
@@ -262,9 +262,9 @@ Either of the last two checks failing is `StoreError(NOT_A_CLONE)`.
 
 A failed git command becomes a `StoreError`. For the commands that talk to the remote
 (`fetch`, `push`, `ls-remote`), the category comes from git's own wording; anything
-unrecognised is `UNRECOGNISED`. Their list starts with the wording of local failures
-they can hit (a ref they cannot lock), which are `LOCAL`, so a "Permission denied" on
-the clone is never mistaken for a remote refusing access. A server can imitate git's
+unrecognised is `UNRECOGNISED`. Only ssh's own "Permission denied" counts as `AUTH`,
+so a local permission problem during a remote command (the clone's own files) is
+`UNRECOGNISED`, never mistaken for a remote refusing access. A server can imitate git's
 wording, so it chooses at most the category, never the text. Local commands have their
 own, shorter list, ending in `LOCAL`. The wordings are in `state_store/runner.py`.
 
@@ -278,8 +278,8 @@ README's requirements on credentials). Logging never fails an operation.
 
 ## 9. Concurrency within one clone
 
-Two processes fetching in one clone at once can fail to lock the private ref
-(`StoreError(LOCAL)`); nothing is corrupted, and no wrong state is ever reported,
+Two processes fetching in one clone at once can fail to lock the private ref, a
+`StoreError`; nothing is corrupted, and no wrong state is ever reported,
 because every commit is still a compare-and-swap on the remote. Within one process,
 snapshots and stores are not thread-safe.
 

@@ -20,7 +20,7 @@ store empty trees, which is why a namespace disappears with its last value.
 ## 2. Taking a snapshot
 
 ```
-git fetch --no-tags --no-write-fetch-head -- <remote> +refs/heads/<branch>:refs/state-store/<remote>/<branch>
+git fetch --no-tags -- <remote> +refs/heads/<branch>:refs/state-store/<remote>/<branch>
 git rev-parse --verify --quiet refs/state-store/<remote>/<branch>^{commit}
 ```
 
@@ -220,6 +220,14 @@ turning hooks off once is simpler than reasoning per command. (`--no-verify` on 
 is belt and braces.) git 2.53 has no hooks configured outside `core.hooksPath`; check
 again when the minimum git version moves.
 
+**The minimum git version is 2.15**, set by the newest option the store relies on:
+`rev-parse --is-shallow-repository` (2.15). Below it, `core.hooksPath` (2.9) is a hard
+security floor: an older git silently ignores the setting and would run hooks. The
+other options are older still (`user.useConfigOnly` 2.8, `remote get-url` 2.7,
+`push --force-with-lease`), except `GIT_NO_LAZY_FETCH` (2.44), which older versions
+ignore harmlessly since partial clones are refused. No minimum is tested yet: CI runs a
+recent git.
+
 ## 8. Opening a store
 
 `GitStateStore(repo, remote=…, branch=…)` checks, without contacting the remote:
@@ -232,7 +240,7 @@ again when the minimum git version moves.
   --is-bare-repository` is `false`, and `git rev-parse --show-toplevel` is `repo`,
   both compared after resolving symlinks, so `-C` never walks up into an enclosing
   repository), not shallow (`git rev-parse --is-shallow-repository`) and not partial:
-  no remote has `promisor` set to true (`git config --type=bool --get-regexp
+  no remote has `promisor` set to true (`git config --bool --get-regexp
   '^remote\..*\.promisor$'`, each value checked, since an explicit `false` is listed
   too) and there is no `extensions.partialClone` (which git 2.53 no longer writes, but
   older versions did).

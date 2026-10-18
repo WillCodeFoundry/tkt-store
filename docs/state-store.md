@@ -9,7 +9,8 @@ you started from, otherwise it is rejected and you start again from a new snapsh
 > behaviour is a strict expected failure until the code it covers lands.
 
 It is tkt-store's storage layer, where tkt-store keeps all of its state, and knows
-nothing about tickets: keys are strings, values are bytes. How it maps onto git is in [`state-store-design.md`](state-store-design.md).
+nothing about tickets: keys are strings, values are bytes. How it maps onto git is in
+[`state-store-design.md`](state-store-design.md).
 
 ## Why
 
@@ -191,7 +192,7 @@ everything ever stored.
 
 ## Requirements
 
-- git 2.29 or later.
+- git 2.15 or later (why: [the design](state-store-design.md), §7).
 - A full, non-bare clone, made without a checkout (`git clone --no-checkout`), given as
   its top-level directory. Shallow, partial and bare clones are refused. One store
   (one branch) per clone.

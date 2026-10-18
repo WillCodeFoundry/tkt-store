@@ -6,39 +6,40 @@ A ticket store for coordinating AI agents, kept on a git branch.
 > 0.1.0 (tag `v0.1.0`). This rebuild designs tkt-store again, layer by layer; anything
 > about tkt-store beyond what is specified below is TBD.
 
-## How it is built
+## Overview
 
 tkt-store is built in layers, each a package of its own under `src/`:
 
-| Layer | What it is | Status | Specified in |
-|---|---|---|---|
-| **The ticket layer** | tkt-store's tickets and claims, and the interface agents use: its guarantees, commands and usage | TBD | TBD |
-| **state-store**, the storage layer | Where tkt-store keeps all of its state: a key/value store on a git branch, with snapshot reads and all-or-nothing commits that land only if nothing changed since the snapshot. It knows nothing about tickets. | Specified; a skeleton (interface and tests), not yet implemented | [`docs/state-store.md`](docs/state-store.md), [`docs/state-store-design.md`](docs/state-store-design.md) |
+| Layer | What it is | Status |
+|---|---|---|
+| **The ticket layer** | tkt-store's tickets and claims, and the interface agents use | TBD |
+| **state-store**, the storage layer | Where tkt-store keeps all of its state: a key/value store on a git branch, with snapshot reads and all-or-nothing commits that land only if nothing changed since the snapshot. It knows nothing about tickets. | Specified; a skeleton (interface and tests), not yet implemented |
 
-## Getting started as a developer
+## Prerequisites
 
-You need [uv](https://docs.astral.sh/uv/) and git 2.29 or later; uv fetches the Python
-in `.python-version` (3.11, the oldest supported, as CI uses) if you have none. Do not
-use `pip`. Once per clone:
+- [git](https://git-scm.com/) 2.15 or later.
+- [uv](https://docs.astral.sh/uv/), which manages the environment, the dependencies and
+  the tools. It fetches the Python version in `.python-version` (3.11) if you have none.
+  Do not use `pip`.
+
+## Getting started
+
+Once per clone:
 
 ```sh
 git clone https://github.com/WillCodeFoundry/tkt-store.git
 cd tkt-store
-uv sync --group dev        # .venv from uv.lock, with the dev tools (they are opt-in)
+uv sync --group dev        # the environment, from uv.lock, with the dev tools
 uv run pre-commit install  # git hooks that run the checks on commit and push
 ```
 
-From then on the checks run themselves: on `git commit`, ruff, mypy and the tests that
-need no git; on `git push`, the whole suite. A failing check stops the commit or push
-and says why. To check work without committing:
+From then on, committing and pushing run the checks. How the checks work, how to test,
+and the rules for commits are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
-```sh
-uv run pre-commit run                        # what a commit checks
-uv run pre-commit run --hook-stage pre-push  # the whole suite
-```
+## Usage
 
-The rules for changes (where each change is specified, tooling, checks, tests, commits)
-are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
+How agents use tkt-store is TBD, with the ticket layer. The interface of state-store,
+the storage layer, is in [`docs/state-store.md`](docs/state-store.md).
 
 ## Documentation
 
@@ -50,7 +51,12 @@ are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
 The ticket layer's documents are TBD.
 
-## Repository layout
+## Contributing
+
+Read [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) before changing anything: it says
+which document specifies each kind of change, and the rules every change follows.
+
+## Project layout
 
 | Path | What |
 |---|---|

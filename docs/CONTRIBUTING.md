@@ -1,8 +1,8 @@
 # Contributing
 
 The rules for working on tkt-store: where each kind of change is specified, tooling,
-checks, tests and commits. To set up a clone, follow *Getting started as a developer*
-in the [README](../README.md).
+checks, tests and commits. To set up a clone, follow *Prerequisites* and *Getting
+started* in the [README](../README.md).
 
 ## Where changes are specified
 

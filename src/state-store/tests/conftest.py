@@ -34,7 +34,7 @@ def isolated_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 @pytest.fixture
 def bare_remote(tmp_path: Path) -> Path:
-    """A bare repository acting as the shared remote, protected as state-store.md requires."""
+    """A bare repository acting as the shared remote, protected as state-store README requires."""
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "--bare", "--quiet", str(remote)], check=True)
     run_git(remote, "config", "receive.denyNonFastForwards", "true")

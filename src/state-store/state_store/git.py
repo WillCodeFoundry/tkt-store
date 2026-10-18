@@ -1,5 +1,5 @@
 """`GitStateStore`: the store on a branch of a remote, through a local clone
-(state-store-design.md).
+(state-store design).
 
 Snapshots fetch the branch into a private ref and read its commit lazily (§2-3).
 Commits build only the trees on the paths of changed keys, make one commit on the
@@ -19,13 +19,13 @@ PRIVATE_REF = "refs/state-store/{remote}/{branch}"
 class GitStateStore:
     """The store on `branch` of `remote`, read and written through the clone at `repo`.
 
-    Opening checks the names and the clone without contacting the remote (state-store-design.md §8):
+    Opening checks the names and the clone without contacting the remote (state-store design §8):
     `ValueError` for an invalid branch or remote name, `StoreError(NOT_A_CLONE)` for a
     path that is not the top level of a full, non-bare clone, or a remote that is not
     configured with exactly one URL for both fetching and pushing.
 
     Every git failure becomes one of the store's errors raised `from None`, so no
-    traceback carries git's or the server's text (state-store-design.md §9)."""
+    traceback carries git's or the server's text (state-store design §9)."""
 
     def __init__(
         self, repo: str | os.PathLike[str], *, remote: str = "origin", branch: str
@@ -33,9 +33,9 @@ class GitStateStore:
         raise NotImplementedError
 
     def snapshot(self) -> StateSnapshot:
-        """The branch's current state on the remote (state-store-design.md §2)."""
+        """The branch's current state on the remote (state-store design §2)."""
         raise NotImplementedError
 
     def commit(self, snapshot: StateSnapshot, message: str) -> StateSnapshot:
-        """See `StateStore.commit`; how, and every outcome: state-store-design.md §6."""
+        """See `StateStore.commit`; how, and every outcome: state-store design §6."""
         raise NotImplementedError

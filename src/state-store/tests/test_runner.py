@@ -1,5 +1,5 @@
 """How a failed git command is categorised, and the operator log
-(state-store-design.md §9): no git."""
+(state-store design §9): no git."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def test_the_first_matching_category_wins() -> None:
     assert category("push", both) is Category.AUTH
 
 
-# --- The operator log (state-store-design.md §9) ---------------------------------------
+# --- The operator log (state-store design §9) ---------------------------------------
 
 
 def test_a_failure_is_logged_under_a_header_with_each_line_prefixed(tmp_path: Path) -> None:

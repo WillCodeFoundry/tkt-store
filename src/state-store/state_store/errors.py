@@ -1,4 +1,4 @@
-"""What can go wrong, as the caller needs to tell it apart (state-store.md, *Errors*).
+"""What can go wrong, as the caller needs to tell it apart (state-store README, *Errors*).
 
 A caller either starts again from a new snapshot (`StaleSnapshot`, including
 `UnknownOutcome`) or stops (`StoreError`, `ValueError`, including `KeyCollision`). No
@@ -30,7 +30,7 @@ class KeyCollision(ValueError):
 
 
 class Category(Enum):
-    """What kind of `StoreError` it is (state-store.md, *Errors*)."""
+    """What kind of `StoreError` it is (state-store README, *Errors*)."""
 
     CORRUPT = "the branch holds something the store would never write"
     REFUSED = "the remote refused the commit"

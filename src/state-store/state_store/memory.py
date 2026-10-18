@@ -1,5 +1,5 @@
 """`MemoryStateStore`: the same semantics in memory, for tests of code built on the
-store (state-store-design.md §11). One instance stands for one remote that many writers share."""
+store (state-store design §11). One instance stands for one remote that many writers share."""
 
 from __future__ import annotations
 

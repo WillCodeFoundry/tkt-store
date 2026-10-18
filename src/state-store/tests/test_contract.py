@@ -1,4 +1,4 @@
-"""The contract every store keeps (state-store.md, *Interface* and *Guarantees*), run against
+"""The contract every store keeps (state-store README, *Interface* and *Guarantees*), run against
 `MemoryStateStore` and `GitStateStore` alike, so they never drift apart."""
 
 from __future__ import annotations

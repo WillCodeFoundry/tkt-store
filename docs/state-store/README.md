@@ -10,7 +10,7 @@ you started from, otherwise it is rejected and you start again from a new snapsh
 
 It is tkt-store's storage layer, where tkt-store keeps all of its state, and knows
 nothing about tickets: keys are strings, values are bytes. How it maps onto git is in
-[`state-store-design.md`](state-store-design.md).
+[`design.md`](design.md).
 
 ## Why
 
@@ -118,7 +118,7 @@ Implementations:
    value) is a `StoreError`, never skipped. A read fails only if it touches the bad
    entry: `get` checks the entries on its key's path, `keys` checks the whole namespace
    it lists. A commit checks every namespace it rewrites, so it never carries a bad
-   entry into a new commit; repairing one takes plain git (see [the design](state-store-design.md)).
+   entry into a new commit; repairing one takes plain git (see [the design](design.md)).
 
 These hold under two preconditions:
 
@@ -169,7 +169,7 @@ stored state) can raise `StoreError` too, never only `snapshot` and `commit`.
 
 No error message ever contains text git or the remote printed, or a value read from
 the store; git's own text goes to a log in the clone's git directory, for an operator
-(see [the design](state-store-design.md)).
+(see [the design](design.md)).
 
 ## Keys
 
@@ -192,7 +192,7 @@ everything ever stored.
 
 ## Requirements
 
-- git 2.15 or later (why: [the design](state-store-design.md), §7).
+- git 2.15 or later (why: [the design](design.md), §7).
 - A full, non-bare clone, made without a checkout (`git clone --no-checkout`), given as
   its top-level directory. Shallow, partial and bare clones are refused. One store
   (one branch) per clone.
@@ -204,7 +204,7 @@ everything ever stored.
 - `branch` is a plain branch name (`tkt-store`): not `refs/heads/…`, `@` or `HEAD`, and
   not starting with `-`.
 - Nobody runs git against the clone or the branch by hand while writers are active.
-- Keep credentials out of the remote's URL: the operator log (see [the design](state-store-design.md)) may quote
+- Keep credentials out of the remote's URL: the operator log (see [the design](design.md)) may quote
   it, and anything that can read the clone can read the log.
 
 ## Testing

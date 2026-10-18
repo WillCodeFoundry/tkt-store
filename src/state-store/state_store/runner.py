@@ -1,4 +1,4 @@
-"""Running git: the one place this package starts a process (state-store-design.md §7, §9).
+"""Running git: the one place this package starts a process (state-store design §7, §9).
 
 Every command is an argument list, never a shell, run in the clone with hooks off,
 prompts off, lazy fetches off, replace objects off, untranslated messages, and the
@@ -36,7 +36,7 @@ DROPPED_VARIABLES = frozenset(
     }
 )
 """Inherited variables that would make git read another repository, object store, index,
-graft, shallow or replace data, or ref namespace (state-store-design.md §7). The
+graft, shallow or replace data, or ref namespace (state-store design §7). The
 caller's configuration variables (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, …: how CI
 injects credentials) are kept; the store's own `-c` settings come after them and win."""
 

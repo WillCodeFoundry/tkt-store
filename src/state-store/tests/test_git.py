@@ -1,5 +1,5 @@
 """What only `GitStateStore` has: the layout on the branch, opening a clone, checks on
-what is read, hooks, errors and push outcomes (state-store-design.md)."""
+what is read, hooks, errors and push outcomes (state-store design)."""
 
 from __future__ import annotations
 
@@ -294,7 +294,7 @@ def test_a_commit_never_carries_a_bad_entry_forward(make_clone: MakeClone, kind:
 
 
 def test_a_bad_entry_cannot_be_removed_through_the_store(make_clone: MakeClone) -> None:
-    """Repair takes plain git (state-store-design.md §5): the store never rebuilds a
+    """Repair takes plain git (state-store design §5): the store never rebuilds a
     corrupt tree."""
     store, snap = corrupt_snapshot(make_clone, "symlink")
     with pytest.raises(StoreError) as caught:
@@ -514,7 +514,7 @@ def test_a_branch_created_by_someone_else_is_read(make_clone: MakeClone) -> None
 
 
 def test_a_ref_merely_ending_like_the_branch_is_not_the_branch(make_clone: MakeClone) -> None:
-    """`ls-remote` matches on the end of a ref name (state-store-design.md §2): only the
+    """`ls-remote` matches on the end of a ref name (state-store design §2): only the
     exact ref counts."""
     forger = make_clone()
     root = tree(forger, [(REGULAR, blob(forger, b"decoy"), "a")])

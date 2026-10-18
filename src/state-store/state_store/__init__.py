@@ -1,5 +1,5 @@
 """A key/value store on a git branch: snapshot reads, all-or-nothing commits that land
-only if nothing changed since the snapshot (state-store.md)."""
+only if nothing changed since the snapshot (state-store README)."""
 
 from state_store.errors import (
     Category,

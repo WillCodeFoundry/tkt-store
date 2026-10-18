@@ -39,14 +39,14 @@ and the rules for commits are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 ## Usage
 
 How agents use tkt-store is TBD, with the ticket layer. The interface of state-store,
-the storage layer, is in [`docs/state-store.md`](docs/state-store.md).
+the storage layer, is in [`docs/state-store/README.md`](docs/state-store/README.md).
 
 ## Documentation
 
 | Document | What |
 |---|---|
-| [`docs/state-store.md`](docs/state-store.md) | state-store: what it promises (interface, guarantees, errors, keys) |
-| [`docs/state-store-design.md`](docs/state-store-design.md) | state-store: how it keeps those promises on git |
+| [`docs/state-store/README.md`](docs/state-store/README.md) | state-store: what it promises (interface, guarantees, errors, keys) |
+| [`docs/state-store/design.md`](docs/state-store/design.md) | state-store: how it keeps those promises on git |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Where changes are specified, tooling, checks, testing, commit rules |
 
 The ticket layer's documents are TBD.
@@ -60,7 +60,7 @@ which document specifies each kind of change, and the rules every change follows
 
 | Path | What |
 |---|---|
-| `docs/` | All documentation |
+| `docs/` | All documentation: project-wide documents at the top, and a directory per layer (`docs/state-store/`) holding that layer's specification, design and decisions |
 | `src/state-store/` | The storage layer: the `state_store` package and its tests in `tests/` |
 | `src/tkt-store/` | The ticket layer: no code yet (TBD) |
 | `pyproject.toml` | The uv workspace: its members (the packages under `src/`), the dev tools and their settings |

@@ -1,4 +1,4 @@
-"""The key grammar and size limits (state-store.md, *Keys*). Pure: no git, no IO.
+"""The key grammar and size limits (state-store README, *Keys*). Pure: no git, no IO.
 
 A key is one or more segments joined by `/`. A segment is 1 to `MAX_SEGMENT_LENGTH`
 characters from `A-Z a-z 0-9 . _ -` and starts with a letter, digit or `_`. A key is at

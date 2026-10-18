@@ -1,4 +1,4 @@
-"""The key grammar and size limits (state-store.md, *Keys*): pure, no git."""
+"""The key grammar and size limits (state-store README, *Keys*): pure, no git."""
 
 from __future__ import annotations
 

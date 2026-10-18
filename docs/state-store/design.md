@@ -1,7 +1,7 @@
 # state-store: design
 
-How `GitStateStore` maps the interface in [state-store.md](state-store.md) onto git. That
-document states what the store promises; this one states how it keeps the promise.
+How `GitStateStore` maps the interface in the [README](README.md) onto git. The README
+states what the store promises; this document states how it keeps the promise.
 
 ## 1. Layout on the branch
 
@@ -99,7 +99,7 @@ value (a namespace, or nothing at all) changes nothing.
 
 An entry in a listed tree is valid when:
 
-- its name is a valid key segment (state-store.md, *Keys*);
+- its name is a valid key segment ([README](README.md), *Keys*);
 - it is a value (`100644 blob`) or a namespace (`040000 tree`): an `Entry` whose kind
   is not *none*;
 - a blob's size, from the listing, is at most `MAX_VALUE_SIZE`;
@@ -136,8 +136,9 @@ fast-forward push, after which the store reads it normally.
    dropped.
 3. **No change, no commit.** If the new root tree is the commit's tree (the empty tree
    when `revision` is `None`), nothing changed: the snapshot it derives from is
-   returned, and the remote is not contacted. This is the rule in state-store.md that a snapshot
-   changing nothing commits nothing and checks nothing.
+   returned, and the remote is not contacted. This is the rule in the
+   [README](README.md) that a snapshot changing nothing commits nothing and checks
+   nothing.
 4. **Make the commit.**
    `git -c user.useConfigOnly=true commit-tree <tree> [-p <revision>] -F -` with the
    message on stdin. git takes the author from its configuration; with

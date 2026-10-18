@@ -1,4 +1,4 @@
-# 0003: Corrupt state stops the operation that reads it
+# 0004: Corrupt state stops the operation that reads it
 
 **Status:** accepted (2026-10-18)
 
@@ -6,9 +6,8 @@
 
 The writers sharing a store may be buggy, confused or compromised, and anyone with
 push access can write anything to the branch. A broken or forged entry must never lead
-a caller to a wrong decision. An earlier design set invalid files aside and carried on
-without them, which took a lot of machinery and could decide on a view that was missing
-exactly the file that mattered.
+a caller to a wrong decision, and skipping it would let a decision be made on a view
+missing exactly the entry that mattered.
 
 ## Decision
 
@@ -21,8 +20,8 @@ exactly the file that mattered.
 
 ## Alternatives rejected
 
-- **Set the bad entry aside and carry on** (the previous design): decisions made on an
-  incomplete view, and machinery to track what was set aside.
+- **Set the bad entry aside and carry on:** decisions made on an incomplete view, and
+  machinery to track what was set aside.
 - **Stop the whole store on any corruption:** a larger blast radius than needed when
   every read is a direct, keyed lookup.
 

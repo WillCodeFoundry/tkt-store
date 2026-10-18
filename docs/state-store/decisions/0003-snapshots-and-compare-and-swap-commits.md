@@ -1,12 +1,13 @@
-# 0002: A key/value interface of immutable snapshots and compare-and-swap commits
+# 0003: A key/value interface of immutable snapshots and compare-and-swap commits
 
 **Status:** accepted (2026-10-18)
 
 ## Context
 
-A caller needs to read several keys as they were at one moment, and to change several
-keys together, all or nothing, while other writers change the same store concurrently.
-The interface should hide git entirely, and be as small as that allows.
+Callers need the promises of [0001](0001-what-state-store-provides.md) in a form they
+can use: read several keys as they were at one moment, change several keys together,
+and learn when someone else committed first. The interface should hide git entirely,
+and be as small as that allows.
 
 ## Decision
 
@@ -34,15 +35,10 @@ The interface should hide git entirely, and be as small as that allows.
 
 - **A mutable transaction object** (`tx.put(…)`, `tx.commit()`): a snapshot reads as
   read-only, and changing one in place confuses that.
-- **Conflict detection per key** (snapshot isolation): two writers that read the same
-  keys and write different ones could both land, deciding on views already out of date.
-- **An object-store interface** (S3-like): atomic per object only.
 - **Retrying inside the store:** it cannot redo the caller's decision.
 - **More error types:** a caller only ever needs to know whether to start again or stop.
 
 ## Consequences
 
-- Any two concurrent commits conflict, even on unrelated keys, and one starts again;
-  throughput is about one commit per round trip to the remote.
 - Every caller writes the same small loop: take a snapshot, decide, commit, and start
   again on `StaleSnapshot`.

@@ -1,15 +1,14 @@
-# 0001: The store is files at the tip of one git branch
+# 0002: The store is files at the tip of one git branch
 
 **Status:** accepted (2026-10-18)
 
 ## Context
 
-state-store's callers are many writers sharing state concurrently. They need it
-durable and auditable, a change can span several keys and must land whole or not at
-all, and they should not need a server to get it. An earlier design on a git branch
-kept the same facts in two forms at once (files in the tree, and again in commit
-messages), with a per-clone cache and state encoded in file names, and much of its
-complexity came from keeping those consistent.
+state-store promises consistent, all-or-nothing shared state without a server
+([0001](0001-what-state-store-provides.md)). Every writer can already reach a git
+remote, and a git branch gives durability, history and compare-and-swap updates. The
+same facts held in more than one form (say, files and commit messages) would have to
+be kept consistent, which is where complexity comes from.
 
 ## Decision
 
@@ -24,7 +23,6 @@ complexity came from keeping those consistent.
 
 ## Alternatives rejected
 
-- **A database:** needs a server.
 - **Object storage with conditional writes:** atomic per object only, so a change
   spanning several keys cannot land whole.
 - **Events in commit messages, with the state rebuilt by replaying them:** reads grow
@@ -36,8 +34,7 @@ complexity came from keeping those consistent.
 
 ## Consequences
 
-- Throughput is about one commit per round trip to the remote, and any two concurrent
-  commits conflict, even on unrelated keys; one starts again.
+- Every commit is a push, so it costs a round trip to the remote.
 - The audit trail is git's history, for free.
 - Nothing may write to the branch with plain git: whatever bypasses state-store also
   bypasses its checks.

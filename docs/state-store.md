@@ -8,8 +8,8 @@ you started from, otherwise it is rejected and you start again from a new snapsh
 > implementation does not yet (only the error types do). Every test of unimplemented
 > behaviour is a strict expected failure until the code it covers lands.
 
-It is the bottom layer of tkt-store, and knows nothing about tickets: keys are
-strings, values are bytes. How it maps onto git is in [`state-store-design.md`](state-store-design.md).
+It is tkt-store's storage layer, where tkt-store keeps all of its state, and knows
+nothing about tickets: keys are strings, values are bytes. How it maps onto git is in [`state-store-design.md`](state-store-design.md).
 
 ## Why
 

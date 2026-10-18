@@ -1,3 +1,8 @@
+# One job per check, running each tool directly. The same commands are the hooks in
+# .pre-commit-config.yaml (what runs locally); keep the two in step when changing a
+# check. Python comes from .python-version (the requires-python floor), as it does
+# locally; newer Pythons run weekly (latest-deps.yml). Actions are pinned to commit
+# SHAs, kept current by Dependabot (.github/dependabot.yml).
 name: ci
 
 on:
@@ -17,10 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
           enable-cache: true
       - run: uv sync --locked --group dev
       - run: uv run ruff format --check .
@@ -30,10 +36,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
           enable-cache: true
       - run: uv sync --locked --group dev
       - run: uv run mypy
@@ -42,10 +49,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.11" # the requires-python floor; newer ones run weekly
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
           enable-cache: true
       - run: uv sync --locked --group dev
       - run: uv run pytest

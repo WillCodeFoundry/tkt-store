@@ -12,23 +12,18 @@ small as that allows.
 
 ## Decision
 
-- **Keys and values:** keys are path-like strings grouped in namespaces; values are
-  bytes, never interpreted.
-- **Reads go through a snapshot:** an immutable view of one committed state (`get`,
-  `keys`), consistent however long it is kept.
-- **Changes derive new snapshots:** `with_value` and `without` return a new snapshot
-  carrying the change and leave the original untouched; the names follow `pathlib`'s
-  `with_name`, which also returns a new object.
-- **Commits are compare-and-swap:** `store.commit(snapshot, message)` publishes a
-  snapshot's changes only if the store has not changed at all since the snapshot was
-  taken, so commits apply one at a time, each on the latest state.
-- **Two outcomes for the caller:** `StaleSnapshot` means take a new snapshot and decide
-  again (`UnknownOutcome`, a kind of it, when a push may or may not have landed);
-  `StoreError` means stop. A caller's own bug is a `ValueError` (`KeyCollision`, a kind
-  of it, for a key that is both a value and a namespace).
-- **No retries inside the store:** only the caller can redo its decision on new data.
-- **Two implementations, one snapshot class:** `GitStateStore` and `MemoryStateStore`
-  share `StateSnapshot`, so their semantics cannot drift.
+The interface ([README](../README.md#interface)) is built on these choices:
+
+- **Reads go through a snapshot:** an immutable view of one committed state, consistent
+  however long it is kept.
+- **Changes derive new snapshots,** leaving the original untouched, as `pathlib`'s
+  `with_name` returns a new path.
+- **Commits are compare-and-swap on the whole store:** a commit lands only if the store
+  has not changed at all since its snapshot was taken.
+- **The caller only has to tell two outcomes apart:** start again from a new snapshot,
+  or stop. A caller's own bug is a `ValueError`.
+- **One snapshot implementation for every store,** so the stores' semantics cannot
+  drift.
 - **Plain names:** "snapshot" and "commit", not figurative ones, and not
   "serializable", which reads as encoding.
 

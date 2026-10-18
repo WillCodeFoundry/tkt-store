@@ -40,8 +40,8 @@ The kinds of threat this leaves:
 Against code execution, corruption, data loss, injected text and leaked credentials,
 state-store:
 
-- never runs hooks, checks out files, uses a shell or lets the environment point git at
-  another repository, and always puts remote names after `--`;
+- never leads git to run code from the branch or the remote
+  ([design](../design.md#6-running-git));
 - checks everything it reads, and stops the operation that reads a bad entry
   ([0005](0005-fail-operations-that-read-corrupt-state.md));
 - never rewrites or deletes the branch, and commits only by compare-and-swap
@@ -67,8 +67,6 @@ Impersonation, denial of service and disclosure are not defended.
   operations with a bad entry, until an operator steps in.
 - Anyone who can read the remote can read every value, so the store must not hold
   secrets.
-- A deployment must protect the branch on the remote, have writers use only state-store
-  on the branch, and keep credentials out of the remote's URL (in a credential helper
-  instead), since the operator log can quote it.
-- The tests cover each defence: forged entries, hooks, environment variables, error
-  text and lost push outcomes.
+- A deployment must meet the git store's preconditions and requirements
+  ([README](../README.md#git-store)): among them, a protected branch, writers that use
+  only state-store, and credentials kept out of the remote's URL.

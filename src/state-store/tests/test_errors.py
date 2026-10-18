@@ -1,4 +1,4 @@
-"""The error types themselves (state-store README, *Errors*; state-store design §9).
+"""The error types themselves (state-store README, *Errors*; state-store design §8).
 These are already implemented, so unlike the rest of the suite they are not expected failures."""
 
 from __future__ import annotations

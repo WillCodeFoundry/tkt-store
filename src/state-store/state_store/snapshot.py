@@ -1,5 +1,5 @@
 """Snapshots, and what a store gives them to read from (state-store README, *Interface*;
-state-store design §3-5).
+state-store design §1, §4).
 
 `StateSnapshot` is one class for every store. A store supplies a `Base`, a read-only
 view of one committed state in its own terms; `CachedBase` remembers what was read from

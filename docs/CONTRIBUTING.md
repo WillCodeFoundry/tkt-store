@@ -24,8 +24,8 @@ their `decisions/` directory.
 
 - Its title is the decision as a short instruction ("Use …", "Store …"), and its file
   name is the number and the title, in lowercase with hyphens:
-  `0003-store-values-as-files-on-one-git-branch.md`. Number it in sequence within its
-  directory, and add it to that directory's index.
+  `0003-store-keys-as-paths-in-the-tree-of-one-git-branch.md`. Number it in sequence
+  within its directory, and add it to that directory's index.
 - A decision is never edited to say something else: a later one supersedes it, and both
   say so in their status.
 - Update the specification or design the decision changes in the same change.

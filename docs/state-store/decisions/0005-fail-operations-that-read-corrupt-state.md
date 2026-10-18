@@ -14,7 +14,6 @@ result, and skipping it would mean deciding without the entry that mattered.
 - Anything on the branch that state-store would never have written is a `StoreError`
   for the operation that reads it: never skipped, never partly used.
 - Operations that do not read it are unaffected.
-- An operator repairs the branch with plain git.
 
 ## Alternatives rejected
 
@@ -25,6 +24,5 @@ result, and skipping it would mean deciding without the entry that mattered.
 
 ## Consequences
 
-- A bad entry blocks the operations that touch it until an operator repairs it,
-  including any commit that would rewrite the tree holding it
-  ([design](../design.md), §5).
+- A bad entry blocks the operations that touch it until an operator repairs the branch
+  ([design](../design.md#4-checks-on-what-is-read)).

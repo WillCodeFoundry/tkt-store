@@ -43,7 +43,7 @@ def open_store(path: Path, **kwargs: str) -> GitStateStore:
     return GitStateStore(path, **{"remote": "origin", "branch": BRANCH, **kwargs})
 
 
-# --- Layout on the branch (§1) ------------------------------------------------------------
+# --- Layout on the branch (§2) ------------------------------------------------------------
 
 
 def test_values_are_regular_blobs_and_namespaces_are_trees(
@@ -99,7 +99,7 @@ def test_without_an_identity_nothing_is_committed(make_clone: MakeClone) -> None
     assert caught.value.category is Category.NO_IDENTITY
 
 
-# --- Opening a store (§8) ---------------------------------------------------------------
+# --- Opening a store (§7) ---------------------------------------------------------------
 
 
 def seed_remote(make_clone: MakeClone) -> None:
@@ -221,7 +221,7 @@ def test_a_url_rewrite_that_applies_to_both_directions_is_accepted(
     assert open_store(make_clone()).snapshot().get("a") == b"1"
 
 
-# --- Checks on what is read (§5) ----------------------------------------------------------
+# --- Checks on what is read (§4) ----------------------------------------------------------
 
 
 def forge_bad_namespace(clone: Path, bad: tuple[str, str, str]) -> None:
@@ -294,7 +294,7 @@ def test_a_commit_never_carries_a_bad_entry_forward(make_clone: MakeClone, kind:
 
 
 def test_a_bad_entry_cannot_be_removed_through_the_store(make_clone: MakeClone) -> None:
-    """Repair takes plain git (state-store design §5): the store never rebuilds a
+    """Repair takes plain git (state-store design §4): the store never rebuilds a
     corrupt tree."""
     store, snap = corrupt_snapshot(make_clone, "symlink")
     with pytest.raises(StoreError) as caught:
@@ -332,7 +332,7 @@ def test_errors_never_echo_a_name_that_was_read(make_clone: MakeClone) -> None:
     assert secret not in shown(caught.value)
 
 
-# --- Hooks, configuration and environment (§7) --------------------------------------------
+# --- Hooks, configuration and environment (§6) --------------------------------------------
 
 
 def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
@@ -422,7 +422,7 @@ def test_inherited_configuration_is_kept(
     assert open_store(make_clone()).snapshot().get("a") == b"1"
 
 
-# --- Errors and push outcomes (§6, §9) -----------------------------------------------------
+# --- Errors and push outcomes (§5, §8) -----------------------------------------------------
 
 
 def install_server_hook(bare_remote: Path, name: str, script: str) -> None:
@@ -514,7 +514,7 @@ def test_a_branch_created_by_someone_else_is_read(make_clone: MakeClone) -> None
 
 
 def test_a_ref_merely_ending_like_the_branch_is_not_the_branch(make_clone: MakeClone) -> None:
-    """`ls-remote` matches on the end of a ref name (state-store design §2): only the
+    """`ls-remote` matches on the end of a ref name (state-store design §3): only the
     exact ref counts."""
     forger = make_clone()
     root = tree(forger, [(REGULAR, blob(forger, b"decoy"), "a")])

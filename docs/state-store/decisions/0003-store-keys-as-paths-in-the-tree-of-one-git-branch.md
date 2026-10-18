@@ -1,4 +1,4 @@
-# 0003: Store values as files on one git branch
+# 0003: Store keys as paths in the tree of one git branch
 
 **Status:** accepted
 
@@ -12,12 +12,11 @@ commit messages) would mean keeping them consistent.
 
 ## Decision
 
-- state-store holds its values as files, keys to values, in the tree at the tip of one
-  branch of one remote.
+- state-store holds each value as a file whose path is its key, in the tree at the tip
+  of one branch of one remote.
 - The current state is always read directly from the tip. History is never read to
   work out what is true now; commit messages are for people reading `git log`, never
   data.
-- Every change is one commit, published by compare-and-swap on that one branch.
 
 ## Alternatives rejected
 
@@ -32,5 +31,6 @@ commit messages) would mean keeping them consistent.
 
 ## Consequences
 
-- Every commit is a push, so it costs a round trip to the remote.
 - git's history is the audit trail.
+- A commit rewrites the trees on the paths of the keys it changes, so how callers lay
+  out their namespaces matters ([README](../README.md#keys)).

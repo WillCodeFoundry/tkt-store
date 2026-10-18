@@ -1,4 +1,4 @@
-"""Running git: the one place this package starts a process (state-store design §7, §9).
+"""Running git: the one place this package starts a process (state-store design §6, §8).
 
 Every command is an argument list, never a shell, run in the clone with hooks off,
 prompts off, lazy fetches off, replace objects off, untranslated messages, and the
@@ -36,13 +36,16 @@ DROPPED_VARIABLES = frozenset(
     }
 )
 """Inherited variables that would make git read another repository, object store, index,
-graft, shallow or replace data, or ref namespace (state-store design §7). The
-caller's configuration variables (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, …: how CI
-injects credentials) are kept; the store's own `-c` settings come after them and win."""
+graft, shallow or replace data, or ref namespace (state-store design §6): those
+`git rev-parse --local-env-vars` lists, plus `GIT_NAMESPACE`. `GIT_NO_REPLACE_OBJECTS`
+is set again in `FIXED_VARIABLES`. The caller's configuration variables
+(`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, …: how CI injects credentials) are kept;
+the store's own `-c` settings come after them and win (verified with git 2.53 for both
+variables)."""
 
 FIXED_VARIABLES = {
     "GIT_TERMINAL_PROMPT": "0",
-    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_NO_LAZY_FETCH": "1",  # git 2.44+; ignoring it is harmless: partial clones are refused
     "GIT_NO_REPLACE_OBJECTS": "1",
     "LC_ALL": "C",
 }
@@ -144,5 +147,6 @@ class Runner:
 
     def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
         """`git -C <repo> -c core.hooksPath=/dev/null <args>`'s stdout; `GitFailure` on a
-        non-zero exit, after logging git's text for an operator."""
+        non-zero exit, after logging git's text for an operator. git 2.53 has no hooks
+        configured outside `core.hooksPath`; check again when the minimum git moves."""
         raise NotImplementedError

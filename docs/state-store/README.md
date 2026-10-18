@@ -81,7 +81,7 @@ class StateSnapshot:                       # immutable
   snapshot of the new revision, without changes. The message is any text without NUL
   characters, empty included.
 - **A snapshot that changes nothing commits nothing.** `commit` returns the taken
-  snapshot it derives from, without contacting anything, so this is not a freshness
+  snapshot it derives from, without contacting the remote, so this is not a freshness
   check: the store may have moved on. Writing a value a key already has, or removing a
   key that has none, changes nothing.
 
@@ -105,7 +105,9 @@ The errors named here are described under [Errors](#errors).
    different ones cannot both land.
 4. **Durable when `commit` returns.** When the outcome cannot be known (the connection
    failed during the commit), `commit` says so (`UnknownOutcome`) instead of guessing.
-5. **An audit trail.** Every commit is recorded with its message and author. The store
+5. **An audit trail.** Every commit is recorded with its message and its author, as the
+   writer's git identity gives it; nothing verifies that identity
+   ([0003](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)). The store
    never reads that history to answer a read: a read always sees the revision itself.
 6. **It fails loudly.** An operation that depends on something the store would never
    have written fails with `StoreError` (category `CORRUPT`) instead of skipping it;
@@ -133,9 +135,9 @@ For the git store these hold under the preconditions in *Git store*.
 | `KeyCollision` (a `ValueError`) | A write would make a key both a value and a namespace. It can come from data another writer stored, not only from this caller's code. | Treats it as a conflict between writers: stops. |
 | `ValueError` | A caller bug: an invalid key, namespace or branch name, an empty remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
 
-In the git store, any operation can raise `StoreError`: `snapshot` and `commit` when
-git fails, and `get`, `keys`, `with_value` (which checks collisions against the stored
-state) and `commit` also when what they read is corrupt.
+In the git store, every operation but `without` can raise `StoreError`: when git fails,
+or, for `get`, `keys`, `with_value` (which checks collisions against the stored state)
+and `commit`, when what it reads is corrupt.
 
 An error's message holds only state-store's own text: the operation, the category, and
 the check that failed. It never holds a key (the caller knows which key it passed), a
@@ -165,10 +167,11 @@ What applies to `GitStateStore` only.
 
 **Preconditions** for the guarantees:
 
-- **The remote refuses non-fast-forward pushes and deletion of the branch** (a ruleset
-  on GitHub; `receive.denyNonFastForwards` and `receive.denyDeletes` on a bare
-  repository). The store never does either, and compare-and-swap does not depend on
-  it, but it stops other writers rewriting history.
+- **The remote refuses force pushes and deletion of the branch** (a ruleset on GitHub;
+  `receive.denyNonFastForwards` and `receive.denyDeletes` on a bare repository).
+  Guarantee 1 depends on it for old snapshots, which stay readable only while history
+  is never rewritten (why: [the design](design.md#3-taking-a-snapshot-and-reading)).
+  The store never does either, and compare-and-swap does not depend on it.
 - **Every writer goes through state-store.** Guarantee 3 depends on it: a commit made
   with plain git can land without having been decided on the revision before it, and
   nothing can tell.
@@ -186,7 +189,7 @@ What applies to `GitStateStore` only.
   it does not start with `refs/` or `-`, is not `@` or `HEAD`, and holds no `@{`.
 - Nobody runs git against the clone or the branch by hand while writers are active.
 - Credentials are kept out of the remote's URL (use a credential helper): the operator
-  log can quote the URL, and anything that can read the clone can read the log.
+  log (below) can quote the URL, and anything that can read the clone can read it.
 
 **Error categories** (`StoreError.category`):
 

@@ -25,8 +25,9 @@ class GitStateStore:
     clone, or a remote that is not configured with exactly one URL for both fetching and
     pushing.
 
-    Every git failure becomes one of the store's errors raised `from None`, so no
-    traceback carries git's or the server's text (state-store design §8)."""
+    Every git failure becomes one of the store's outcomes, and errors are raised
+    `from None`, so the README's rule on messages holds in tracebacks too (state-store
+    design §8)."""
 
     def __init__(
         self, repo: str | os.PathLike[str], *, remote: str = "origin", branch: str

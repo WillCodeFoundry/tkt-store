@@ -3,10 +3,10 @@
 Every command is an argument list, never a shell, run in the clone with hooks off,
 git's automatic maintenance in the foreground, prompts off, lazy fetches off, replace
 objects off, untranslated messages, and the inherited variables that would point git at
-other repository data removed. A failure
-becomes a `GitFailure` that carries git's exit code, output and the category of its
-message; git's text itself goes only to the operator log, never into an exception's
-message, arguments or repr, and the store raises its own errors `from None`.
+other repository data removed. A failure becomes a `GitFailure` that carries git's exit
+code, output and the category of its message; git's text itself goes only to the
+operator log, never into an exception's message, arguments or repr, and the store raises
+its own errors `from None`.
 """
 
 from __future__ import annotations
@@ -41,8 +41,7 @@ graft, shallow or replace data, or ref namespace (state-store design §6): those
 `git rev-parse --local-env-vars` lists, plus `GIT_NAMESPACE`. `GIT_NO_REPLACE_OBJECTS`
 is set again in `FIXED_VARIABLES`. The caller's configuration variables
 (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, …: how CI injects credentials) are kept;
-the store's own `-c` settings come after them and win (verified with git 2.53 for both
-variables)."""
+the store's own `-c` settings come after them and win."""
 
 FIXED_VARIABLES = {
     "GIT_TERMINAL_PROMPT": "0",
@@ -112,7 +111,8 @@ LOG_MAX = 1024 * 1024
 
 class GitFailure(Exception):
     """A git command exited non-zero. Never reaches a caller: the store turns it into
-    `StaleSnapshot`, `UnknownOutcome` or `StoreError(category)`, raised `from None`.
+    one of its own outcomes (state-store design §5, §8); any error it raises is raised
+    `from None`.
 
     Its message and `args` are only the command and the category; `stdout` (which can
     quote the server, e.g. a push's `[remote rejected] (<reason>)`) is an attribute,
@@ -147,8 +147,8 @@ class Runner:
         raise NotImplementedError
 
     def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
-        """The stdout of `git -C <repo> -c core.hooksPath=/dev/null -c gc.autoDetach=false
-        <args>`; `GitFailure` on a non-zero exit, after logging git's text for an operator.
-        git 2.53 has no hooks configured outside `core.hooksPath`; check again when the
-        minimum git moves."""
+        """The stdout of `git -C <repo> <settings> <args>`, where the settings turn hooks
+        off and keep automatic maintenance in the foreground (`core.hooksPath=/dev/null`,
+        `maintenance.autoDetach=false`, `gc.autoDetach=false`); `GitFailure` on a non-zero
+        exit, after logging git's text for an operator."""
         raise NotImplementedError

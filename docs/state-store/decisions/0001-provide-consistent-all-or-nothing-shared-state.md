@@ -18,8 +18,8 @@ state-store provides its callers, without a server, with shared state that:
 - changes **all or nothing**, across any number of keys;
 - changes **one commit at a time, each decided on the latest state**: a commit based on
   anything older is refused, and the caller decides again;
-- is **durable and auditable**: a commit that returns is kept, and every change can be
-  traced;
+- is **durable and auditable**: a commit that returns is kept, and every change is
+  recorded with its message and the author the writer gave;
 - needs nothing the writers cannot already reach.
 
 The exact contract, and what it leaves out, are in the [README](../README.md#guarantees).

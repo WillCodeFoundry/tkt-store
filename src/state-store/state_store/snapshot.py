@@ -104,8 +104,8 @@ class StateStore(Protocol):
         Arguments are checked first: `ValueError` for a snapshot from another store
         object or a message holding NUL, even when nothing changes. Then a snapshot
         that changes nothing is returned as the snapshot it derives from, without
-        contacting anything. Otherwise `StaleSnapshot` (or `UnknownOutcome`) or
-        `StoreError`."""
+        contacting the remote (it can still raise `StoreError`). Otherwise
+        `StaleSnapshot` (or `UnknownOutcome`) or `StoreError`."""
         ...
 
 
@@ -123,7 +123,7 @@ class StateSnapshot:
 
     @property
     def revision(self) -> str | None:
-        """The commit this snapshot was taken from; None before the store's first commit."""
+        """The revision this snapshot was taken at; None before the store's first commit."""
         raise NotImplementedError
 
     @property

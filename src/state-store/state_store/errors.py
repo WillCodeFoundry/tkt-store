@@ -1,8 +1,8 @@
 """What can go wrong, as the caller needs to tell it apart (state-store README, *Errors*).
 
 A caller either starts again from a new snapshot (`StaleSnapshot`, including
-`UnknownOutcome`) or stops (`StoreError`, `ValueError`, including `KeyCollision`). No
-message carries text git or a remote printed, nor a value read from the store.
+`UnknownOutcome`) or stops (`StoreError`, `ValueError`, including `KeyCollision`). What
+a message may hold: state-store README, *Errors*.
 """
 
 from __future__ import annotations
@@ -46,8 +46,7 @@ class Category(Enum):
 class StoreError(Exception):
     """A failure the store cannot recover from; an operator acts. Never retried.
 
-    `detail` names the operation or the check that failed: never a key, a value, nor text
-    from git or the remote (state-store README, *Errors*)."""
+    `detail` is what the README's *Errors* allows a message to hold."""
 
     def __init__(self, category: Category, detail: str = "") -> None:
         self.category = category

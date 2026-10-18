@@ -136,8 +136,8 @@ listing it.
 
 **Repairing a corrupt branch takes plain git.** Since a commit refuses to rebuild a tree
 holding a bad entry, even a commit that only removes it (`without("bad/link")`) is
-`StoreError(CORRUPT)`. An operator repairs the branch with an ordinary git commit and a
-fast-forward push, after which the store reads it normally.
+`StoreError(CORRUPT)`. With writers stopped, an operator repairs the branch with an
+ordinary git commit and a fast-forward push, after which the store reads it normally.
 
 ## 5. Committing
 
@@ -200,8 +200,8 @@ store says it does not know.
 ## 6. Running git
 
 Every command is run as an argument list, never through a shell, as
-`git -C <repo> -c core.hooksPath=/dev/null -c gc.autoDetach=false <command> …`, with
-remote names after `--`.
+`git -C <repo> -c core.hooksPath=/dev/null -c maintenance.autoDetach=false
+-c gc.autoDetach=false <command> …`, with remote names after `--`.
 No command reads or writes a working tree or the index. The environment is the
 caller's, except that:
 
@@ -222,8 +222,9 @@ turning hooks off once is simpler than reasoning per command.
 **Housekeeping is git's.** Each commit writes a few loose objects, and lost races leave
 unreachable ones. `fetch` already runs git's automatic maintenance afterwards, which
 packs objects and prunes unreachable ones older than two weeks once enough have built
-up. Every snapshot fetches, so the store runs no `gc` of its own. `gc.autoDetach=false`
-keeps that maintenance in the foreground, so no git process outlives the command that
+up. Every snapshot fetches, so the store runs no `gc` of its own. The two `autoDetach`
+settings keep that maintenance in the foreground (git reads `maintenance.autoDetach`
+first, and older versions only `gc.autoDetach`), so no git process outlives the command that
 started it, and nothing runs in the clone between the store's commands.
 
 **The minimum git version is 2.15**, set by the newest option the store relies on:
@@ -281,5 +282,7 @@ snapshots and stores are not thread-safe.
 
 ## 10. Open questions
 
+- **Hooks defined elsewhere.** The store assumes git finds hooks only through
+  `core.hooksPath` (§6). Recheck if git adds another way to define them.
 - **`keys` and nested namespaces.** `keys` lists values only. No caller needs to list
   namespaces yet; add it if one does.

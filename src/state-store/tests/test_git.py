@@ -12,6 +12,7 @@ from state_store import (
     MAX_VALUE_SIZE,
     Category,
     GitStateStore,
+    StaleSnapshot,
     StateSnapshot,
     StoreError,
     UnknownOutcome,
@@ -357,6 +358,24 @@ def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
     assert not marker.exists()
 
 
+def test_automatic_maintenance_runs_in_the_foreground(
+    make_clone: MakeClone, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing keeps running in the clone after a store operation returns."""
+    clone = make_clone()
+    run_git(clone, "config", "maintenance.autoDetach", "true")
+    run_git(clone, "config", "gc.autoDetach", "true")
+    trace = tmp_path / "trace"
+    monkeypatch.setenv("GIT_TRACE", str(trace))
+    store = open_store(clone)
+    store.commit(store.snapshot().with_value("a", b"1"), "one")
+    store.snapshot()
+    monkeypatch.delenv("GIT_TRACE")
+    started = [line for line in trace.read_text().splitlines() if "run_command" in line]
+    assert any("maintenance run" in line for line in started)
+    assert not [line for line in started if " --detach" in line]
+
+
 def test_tags_are_never_pushed(make_clone: MakeClone, bare_remote: Path) -> None:
     clone = make_clone()
     run_git(clone, "config", "push.followTags", "true")
@@ -460,6 +479,26 @@ def test_a_push_refused_while_the_branch_is_unchanged_is_refused(
     with pytest.raises(StoreError) as caught:
         store.commit(snap.with_value("a", b"2"), "refused")
     assert caught.value.category is Category.REFUSED
+    assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
+
+
+def test_a_push_refused_while_the_branch_moved_elsewhere_is_stale(
+    make_clone: MakeClone, bare_remote: Path
+) -> None:
+    """The remote's refusal is not trusted for its text, only for whether the branch moved."""
+    store = open_store(make_clone())
+    snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
+    other = open_store(make_clone(), branch="other")
+    other.commit(other.snapshot().with_value("b", b"1"), "elsewhere")
+    install_server_hook(
+        bare_remote,
+        "pre-receive",
+        "env -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES"
+        f" git update-ref refs/heads/{BRANCH} refs/heads/other\n" + REFUSING_HOOK,
+    )
+    with pytest.raises(StaleSnapshot) as caught:
+        store.commit(snap.with_value("a", b"2"), "refused after the branch moved")
+    assert not isinstance(caught.value, UnknownOutcome)
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
 
 

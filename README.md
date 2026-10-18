@@ -43,13 +43,9 @@ the storage layer, is in [`docs/state-store/README.md`](docs/state-store/README.
 
 ## Documentation
 
-| Document | What |
-|---|---|
-| [`docs/state-store/README.md`](docs/state-store/README.md) | state-store: what it promises (interface, guarantees, errors, keys) |
-| [`docs/state-store/design.md`](docs/state-store/design.md) | state-store: how it keeps those promises on git |
-| [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Where changes are specified, tooling, checks, testing, commit rules |
-
-The ticket layer's documents are TBD.
+All documentation is in [`docs/`](docs/README.md), which maps it: each layer has a
+directory with what it promises, how it keeps those promises, and the decisions behind
+it (the ticket layer's are TBD).
 
 ## Contributing
 

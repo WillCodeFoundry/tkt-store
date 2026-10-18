@@ -11,9 +11,10 @@ one of them is wrong: fix it, or amend the document in the same change, never si
 
 | Change | Specified in |
 |---|---|
+| What the ticket layer promises, and how it keeps that on state-store | [`tkt-store/README.md`](tkt-store/README.md), [`tkt-store/design.md`](tkt-store/design.md) (both TBD) |
 | What state-store promises: its interface, guarantees, errors, keys | [`state-store/README.md`](state-store/README.md) |
 | How state-store keeps those promises on git | [`state-store/design.md`](state-store/design.md) |
-| tkt-store's ticket layer | TBD: designed as it is rebuilt on state-store |
+| A decision: why something is the way it is | the layer's `decisions/`, or [`decisions/`](decisions/README.md) when it cuts across layers; how to write one is there |
 
 ## Setup details
 

@@ -29,6 +29,8 @@ into a small key/value interface, so its callers never need to know git.
 | **namespace** | A key prefix: `inbox` holds `inbox/item-1`. `""` is the root. |
 | **snapshot** | An immutable view of every key at one moment (one commit of the branch), plus any changes derived from it. |
 | **commit** | Publishing a snapshot's changes as the store's new state. |
+| **`GitStateStore`** | The store itself, kept on a git branch and used through a local clone. |
+| **`MemoryStateStore`** | The same semantics in memory, for tests of code that uses the store. |
 
 ## Example
 
@@ -88,12 +90,11 @@ class StateSnapshot:                       # immutable
   not a freshness check: the store may have moved on. Writing a value a key already
   has, or removing a key that has none, changes nothing.
 
-Implementations:
+Constructors:
 
-- `GitStateStore(repo, *, remote="origin", branch)`: the real store, in a clone at
-  `repo`.
-- `MemoryStateStore()`: the same semantics in memory, for tests of code built on the
-  store. One instance stands for one remote that many writers share.
+- `GitStateStore(repo, *, remote="origin", branch)`: the store on `branch` of `remote`,
+  through the clone at `repo`.
+- `MemoryStateStore()`: one instance stands for one remote that many writers share.
 
 ## Guarantees
 

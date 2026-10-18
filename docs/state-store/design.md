@@ -1,7 +1,7 @@
 # state-store: design
 
-How `GitStateStore` maps the interface in the [README](README.md) onto git. The README
-states what the store promises; this document states how it keeps the promise.
+How `GitStateStore`, the git implementation of the interface in the [README](README.md),
+keeps the promises the README makes.
 
 ## 1. Layout on the branch
 
@@ -60,10 +60,12 @@ for a missing path, and would mean telling that failure apart from others):
 | list a namespace | `git ls-tree -l -z <tree id>` |
 | read a value | `git cat-file blob <blob id>` |
 
-The git store turns each listed line into a store-neutral `Entry`: its name, its kind
-(value for `100644 blob`, namespace for `040000 tree`, *none* for anything else), a
-value's size, and its object id. Everything after that (the checks in §5, the overlay,
-the caches) is shared code in `snapshot.py`, which the memory store uses too.
+Each store gives its snapshots a **`Base`**: a read-only view of one committed state,
+which lists a namespace's entries and reads a value. The git store's `Base` turns each
+listed line into a store-neutral `Entry`: its name, its kind (value for `100644 blob`,
+namespace for `040000 tree`, *none* for anything else), a value's size, and its object
+id. Everything after that (the checks in §5, the overlay, the caches) is shared code in
+`snapshot.py`, which the memory store uses too.
 
 Each tree is listed at most once per taken snapshot, and values are read at most once
 (`CachedBase`, shared by every snapshot derived from it), so `get` and `keys` on the

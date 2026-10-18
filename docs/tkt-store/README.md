@@ -1,14 +1,16 @@
-# tkt-store: the ticket layer
+# tkt-store
 
-tkt-store's tickets and claims, and the interface agents use. It keeps all of its state
-in [state-store](../state-store/README.md), the storage layer below it.
+Tickets and claims for coordinating AI agents, and the interface agents use. tkt-store
+keeps all of its state in [state-store](../state-store/README.md), its storage
+component.
 
-> **Status: TBD.** This layer is designed as the rebuild reaches it. Each section below
-> is a placeholder for what this document will specify.
+> **Status: TBD.** tkt-store is designed as the rebuild reaches it. Each section below
+> is a placeholder for what this document will specify; the decisions already made are
+> in [`decisions/`](decisions/README.md).
 
 ## Model
 
-TBD: the terms this layer defines (tickets, claims and the rest).
+TBD: the terms tkt-store defines (tickets, claims and the rest).
 
 ## Interface
 
@@ -16,7 +18,7 @@ TBD: how agents use tkt-store.
 
 ## Guarantees
 
-TBD: what this layer promises, and under which preconditions.
+TBD: what tkt-store promises, and under which preconditions.
 
 ## What it does not do
 

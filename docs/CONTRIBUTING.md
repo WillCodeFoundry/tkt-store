@@ -11,10 +11,42 @@ one of them is wrong: fix it, or amend the document in the same change, never si
 
 | Change | Specified in |
 |---|---|
-| What the ticket layer promises, and how it keeps that on state-store | [`tkt-store/README.md`](tkt-store/README.md), [`tkt-store/design.md`](tkt-store/design.md) (both TBD) |
+| What tkt-store promises, and how it keeps that using state-store | [`tkt-store/README.md`](tkt-store/README.md), [`tkt-store/design.md`](tkt-store/design.md) (both TBD) |
 | What state-store promises: its interface, guarantees, errors, keys | [`state-store/README.md`](state-store/README.md) |
 | How state-store keeps those promises on git | [`state-store/design.md`](state-store/design.md) |
-| A decision: why something is the way it is | the layer's `decisions/`, or [`decisions/`](decisions/README.md) when it cuts across layers; how to write one is there |
+| A decision: why something is the way it is | [`tkt-store/decisions/`](tkt-store/decisions/README.md) (binding on all of tkt-store) or [`state-store/decisions/`](state-store/decisions/README.md); see *Decision records* below |
+
+## Decision records
+
+A decision record says what was decided, why, and what was rejected; the specification
+and design documents say what is. Each component keeps its own in its `decisions/`
+directory; tkt-store's bind all of tkt-store, state-store included.
+
+- Name it `NNNN-short-title.md`, numbered in sequence within its directory, and add it
+  to that directory's index.
+- A decision is never edited to say something else: a later one supersedes it, and both
+  say so in their status.
+- Update the specification or design the decision changes in the same change.
+
+Every record has this shape:
+
+```markdown
+# NNNN: Title, stated as the decision
+
+**Status:** proposed | accepted (date) | superseded by NNNN
+
+## Context
+What forces the decision: the problem, the constraints, what is known.
+
+## Decision
+What was decided, stated plainly.
+
+## Alternatives rejected
+Each option considered and not taken, with the reason.
+
+## Consequences
+What follows from the decision, good and bad, and what it rules out.
+```
 
 ## Setup details
 

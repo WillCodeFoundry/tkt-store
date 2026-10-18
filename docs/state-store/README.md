@@ -8,17 +8,17 @@ you started from, otherwise it is rejected and you start again from a new snapsh
 > implementation does not yet (only the error types do). Every test of unimplemented
 > behaviour is a strict expected failure until the code it covers lands.
 
-It is tkt-store's storage layer, where tkt-store keeps all of its state, and knows
-nothing about tickets: keys are strings, values are bytes. How it maps onto git is in
+It is the component of tkt-store that keeps all of tkt-store's state, and knows nothing
+about tickets: keys are strings, values are bytes. How it maps onto git is in
 [`design.md`](design.md).
 
 ## Why
 
-tkt needs shared state that many agents change concurrently, with changes that span
-several keys and must land together or not at all, without running a server. A git
+tkt-store needs shared state that many agents change concurrently, with changes that
+span several keys and must land together or not at all, without running a server. A git
 branch on a remote that every agent can push to gives durability, an audit trail and,
 through compare-and-swap pushes, a single order of changes. This package turns that
-into a small key/value interface, so nothing above it needs to know git.
+into a small key/value interface, so the rest of tkt-store never needs to know git.
 
 ## Model
 

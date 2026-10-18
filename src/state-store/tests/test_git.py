@@ -502,6 +502,7 @@ def test_a_refused_first_push_is_refused_without_the_servers_text(
         store.commit(store.snapshot().with_value("a", b""), "refused")
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
     assert "SERVER-SAYS-RUN-THIS" in (clone / ".git" / LOG_NAME).read_text()
+    assert run_git(bare_remote, "for-each-ref").strip() == ""
 
 
 def test_a_push_refused_while_the_branch_is_unchanged_is_refused(
@@ -513,6 +514,22 @@ def test_a_push_refused_while_the_branch_is_unchanged_is_refused(
     with pytest.raises(CommitRefused) as caught:
         store.commit(snap.with_value("a", b"2"), "refused")
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
+    assert run_git(bare_remote, "rev-parse", f"refs/heads/{BRANCH}").strip() == snap.revision
+
+
+def test_a_push_refused_while_the_branch_was_deleted_is_refused(
+    make_clone: MakeClone, bare_remote: Path
+) -> None:
+    store = open_store(make_clone())
+    snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
+    install_server_hook(
+        bare_remote,
+        "pre-receive",
+        "env -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES"
+        f" git update-ref -d refs/heads/{BRANCH}\n" + REFUSING_HOOK,
+    )
+    with pytest.raises(CommitRefused):
+        store.commit(snap.with_value("a", b"2"), "refused, branch gone")
 
 
 def test_a_push_refused_while_the_branch_moved_elsewhere_is_stale(
@@ -533,6 +550,26 @@ def test_a_push_refused_while_the_branch_moved_elsewhere_is_stale(
         store.commit(snap.with_value("a", b"2"), "refused after the branch moved")
     assert not isinstance(caught.value, UnknownOutcome)
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
+
+
+def test_a_push_refused_while_the_branch_moved_and_cannot_be_fetched_is_unknown(
+    make_clone: MakeClone, bare_remote: Path
+) -> None:
+    """The branch moved elsewhere, and the fetch that would show whether our commit is
+    in its history fails (the server can no longer send packs; `ls-remote` still works)."""
+    store = open_store(make_clone())
+    snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
+    other = open_store(make_clone(), branch="other")
+    other.commit(other.snapshot().with_value("b", b"1"), "elsewhere")
+    install_server_hook(
+        bare_remote,
+        "pre-receive",
+        "env -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES"
+        f" git update-ref refs/heads/{BRANCH} refs/heads/other\n"
+        "git config --global uploadpack.packObjectsHook false\n" + REFUSING_HOOK,
+    )
+    with pytest.raises(UnknownOutcome):
+        store.commit(snap.with_value("a", b"2"), "refused, then unfetchable")
 
 
 def test_a_push_refused_after_the_remote_applied_it_is_a_success(

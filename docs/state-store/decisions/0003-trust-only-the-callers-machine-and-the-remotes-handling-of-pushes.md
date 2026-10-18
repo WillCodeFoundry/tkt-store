@@ -32,9 +32,9 @@ The kinds of threat this leaves:
 
 ## Decision
 
-- **The caller's machine is trusted fully** (the process, its clone, the git binary,
-  git's configuration and credentials): anyone who can change these can already run
-  code there.
+- **The caller's machine is trusted fully** (the process, its local repository, the
+  git binary, git's configuration and credentials): anyone who can change these can
+  already run code there.
 - **The remote is trusted only to apply pushes and report their outcome truthfully**,
   to refuse force pushes and deletion of the branch, and to show fetching, `ls-remote`
   and pushing the same state. Nothing could detect a remote that does not.
@@ -51,8 +51,8 @@ state-store:
 - never rewrites or deletes the branch, and commits only by compare-and-swap
   ([0004](0004-use-immutable-snapshots-and-compare-and-swap-commits.md));
 - keeps stored data and outside text out of its errors
-  ([README](../README.md#errors)); git's own output goes to a log in the clone, for an
-  operator.
+  ([README](../README.md#errors)); git's own output goes to a log in the local
+  repository, for an operator.
 
 Impersonation, denial of service and disclosure are not defended.
 

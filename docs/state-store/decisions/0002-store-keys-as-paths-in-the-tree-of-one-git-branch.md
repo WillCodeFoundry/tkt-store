@@ -26,8 +26,8 @@ commit messages) would mean keeping them consistent.
   with all of history, which then needs checkpoints.
 - **Several branches** (for example one per kind of data): a change spanning two
   cannot be atomic, and reads of two are not consistent with each other.
-- **A per-clone cache of decoded state:** unnecessary when every read is a direct, keyed
-  lookup, and it brings invalidation.
+- **A cache of decoded state in the local repository:** unnecessary when every read is
+  a direct, keyed lookup, and it brings invalidation.
 
 ## Consequences
 

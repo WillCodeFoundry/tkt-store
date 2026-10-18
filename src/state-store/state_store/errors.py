@@ -9,7 +9,8 @@ from __future__ import annotations
 
 
 class StaleSnapshot(Exception):
-    """The store changed since the snapshot was taken. Nothing was published.
+    """The store changed since the snapshot was taken. Nothing was published, unless it
+    is an `UnknownOutcome`.
 
     Take a new snapshot and decide again."""
 

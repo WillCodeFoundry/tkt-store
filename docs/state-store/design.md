@@ -196,8 +196,8 @@ The remote's reason inside `[remote rejected] (…)` is never parsed: a server c
 anything there. Only where the branch is decides: a server's `update` hook runs after
 the pushed objects are stored, so it can apply the update and still report a refusal,
 and another writer can then commit on top before the store looks. Checking ancestry
-tells that apart from a lost race, so `StaleSnapshot` always means nothing was
-published.
+tells that apart from a lost race, so a `StaleSnapshot` that is not an `UnknownOutcome`
+always means nothing was published.
 
 Why no `ls-remote` after a broken connection: the server applies an update once it has
 the pack and the commands, even if the client is gone, so a commit can land *after* an
@@ -234,10 +234,10 @@ settings keep that maintenance in the foreground (git reads `maintenance.autoDet
 first, and older versions only `gc.autoDetach`), so no git process outlives the command
 that started it, and nothing runs in the clone between the store's commands.
 
-**The minimum git version is 2.15**, set by the newest option the store relies on:
-`rev-parse --is-shallow-repository`. It is also above 2.9, the version that added
-`core.hooksPath`, which the store needs to turn hooks off. No minimum is tested yet: CI
-runs a recent git.
+**The minimum git version** ([README](README.md#git-store)) is set by the newest option
+the store relies on: `rev-parse --is-shallow-repository`. It is also above 2.9, the
+version that added `core.hooksPath`, which the store needs to turn hooks off. No
+minimum is tested yet: CI runs a recent git.
 
 ## 7. Opening a store
 

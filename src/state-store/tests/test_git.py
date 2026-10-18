@@ -502,6 +502,19 @@ def test_a_push_refused_while_the_branch_moved_elsewhere_is_stale(
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
 
 
+def test_a_push_refused_after_the_remote_applied_it_is_a_success(
+    make_clone: MakeClone, bare_remote: Path
+) -> None:
+    """An `update` hook runs once the objects are in the repository: it can apply the
+    update and still report a refusal. Only where the branch is decides."""
+    store = open_store(make_clone())
+    snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
+    install_server_hook(bare_remote, "update", 'git update-ref "$1" "$3"\n' + REFUSING_HOOK)
+    landed = store.commit(snap.with_value("a", b"2"), "applied, then refused")
+    assert landed.revision == run_git(bare_remote, "rev-parse", f"refs/heads/{BRANCH}").strip()
+    assert open_store(make_clone()).snapshot().get("a") == b"2"
+
+
 def test_a_push_whose_status_is_lost_has_an_unknown_outcome(
     make_clone: MakeClone, bare_remote: Path
 ) -> None:

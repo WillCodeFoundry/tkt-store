@@ -190,7 +190,9 @@ from that line, never from the remote's text; there must be exactly one, for
 | No usable status after any other failure (the connection broke, a timeout, an unrecognised error) | | `UnknownOutcome` |
 
 The remote's reason inside `[remote rejected] (…)` is never parsed: a server can write
-anything there. Only whether the branch moved decides.
+anything there. Only whether the branch moved decides: a server's `update` hook runs
+after the pushed objects are stored, so it can apply the update and still report a
+refusal, which is why a refused push can end in success.
 
 Why no `ls-remote` after a broken connection: the server applies an update once it has
 the pack and the commands, even if the client is gone, so a commit can land *after* an

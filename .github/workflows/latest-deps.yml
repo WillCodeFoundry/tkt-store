@@ -1,7 +1,7 @@
 # Weekly: the whole suite on every supported Python against the newest dependency
 # versions pyproject.toml allows (ignoring uv.lock), so upstream drift and breakage on
-# newer Pythons show up without blocking PRs (which test the floor). Mutation testing
-# stays out.
+# newer Pythons show up without blocking PRs (which test the floor). It runs the pre-push
+# stage of .pre-commit-config.yaml (the whole suite), as git's pre-push hook does.
 name: latest-deps
 
 on:
@@ -24,6 +24,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: ${{ matrix.python }} # overrides .python-version
       - run: uv sync --upgrade --group dev
-      - run: uv run pytest
+      - run: uv run pre-commit run --hook-stage pre-push

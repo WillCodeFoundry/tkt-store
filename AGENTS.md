@@ -54,38 +54,37 @@ dependencies, `uv run <tool>` to run tools. Never use `pip` or `pip install`.
 `uv.lock` is tracked and CI installs from it exactly (`uv sync --locked`). Commit it
 whenever dependencies change; refresh versions deliberately with `uv lock --upgrade`.
 It pins only the development environment: consumers of the package resolve from
-`pyproject.toml`. A small weekly CI job (`latest-deps`) runs the fast tests on every
+`pyproject.toml`. A weekly CI job (`latest-deps`) runs the whole suite on every
 supported Python against the newest allowed versions, ignoring the lockfile.
 
-## Before committing
+## Checks
 
-Run these explicitly; they must pass (they are what CI runs):
+The checks are defined once, as hooks in `.pre-commit-config.yaml`, in two stages:
 
-```sh
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy
-uv run pytest
-```
+- **pre-commit**: ruff format, ruff check, mypy, and the tests that need no git;
+- **pre-push**: the whole test suite.
+
+Everything runs those hooks the way git's own hooks do (`pre-commit run`, plus
+`--hook-stage pre-push` for that stage, and no file arguments, so what is checked is
+what is staged) rather than its own copy of the commands:
+
+| Who | Runs |
+|---|---|
+| git, once hooks are installed (`uv run pre-commit install --hook-type pre-commit --hook-type pre-push`) | each stage on commit and on push |
+| the Claude Code hook (`.claude/hooks/pre-commit-checks.sh`) | the same stage before a `git commit` or `git push`, unless git's own hook for it is pre-commit's (then git runs it, so it never runs twice) |
+| CI (`.github/workflows/ci.yml`) | one job per hook, listed from `.pre-commit-config.yaml` when CI runs |
+| you, to check work without committing | `uv run pre-commit run`, and `uv run pre-commit run --hook-stage pre-push` for the whole suite |
+
+To add or change a check, change `.pre-commit-config.yaml` and nothing else: CI gives a
+new hook its own job by itself. Give every hook a `stages` entry. Local runs and CI use
+the same Python (`.python-version`, the requires-python floor).
 
 pytest is quiet and strict about markers by default (`addopts = "-q --strict-markers"`
-in `pyproject.toml`); use `-vv` to list individual tests.
+in `pyproject.toml`); to see individual tests, run pytest itself with `-vv`.
 
-Two hooks back this up; they are a safety net, not the check:
-
-- `pre-commit` (`.pre-commit-config.yaml`, all `repo: local` hooks run via `uv run`, so
-  no version is pinned outside the `dev` group) installs as two git hook types with
-  `uv run pre-commit install --hook-type pre-commit --hook-type pre-push`:
-  - **pre-commit**: ruff format, ruff check, mypy and the tests that need no git
-    (`pytest -m "not git"`, about 8 s);
-  - **pre-push**: the whole suite (`uv run pytest`, about a minute), as CI's test job
-    runs it, so a push is never green locally and red on GitHub for a reason this
-    already caught.
-
-  Do not invoke pre-commit directly in place of the commands above.
-- For Claude Code, `.claude/hooks/pre-commit-checks.sh` blocks any `git commit` that
-  carries a `Co-Authored-By` trailer, uses `--no-verify` or `--no-gpg-sign`, or would
-  be unsigned, and runs the four commands above first.
+The Claude Code hook also enforces the commit policy: it blocks a commit that carries a
+`Co-Authored-By` trailer, uses `--no-gpg-sign` or would be unsigned, and any commit or
+push with `--no-verify`.
 
 Commits are signed and carry no co-author trailers. Never use `--no-verify`.
 Every tool's version is pinned once, in the `dev` group of `pyproject.toml`.

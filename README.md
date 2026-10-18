@@ -163,7 +163,8 @@ This project uses [uv](https://docs.astral.sh/uv/) for environments,
 dependencies and running tools. Do not use `pip`.
 
 **Set up a clone for development** (once per clone). You need uv and git 2.29 or later;
-uv fetches a suitable Python (3.11 or later) if you have none.
+uv fetches the Python in `.python-version` (3.11, the oldest supported, as CI uses) if
+you have none.
 
 ```sh
 git clone https://github.com/WillCodeFoundry/tkt-store.git
@@ -179,20 +180,19 @@ dev tools, so the hooks would fail.
 
 **Checks run themselves:** just commit and push. On `git commit` the hooks run ruff,
 mypy and the tests that need no git (about 8 s); on `git push`, the whole suite (about a
-minute), as CI's test job runs it. A failing check stops the commit or push and says
-why. There is no need to run them first: that only runs them twice.
+minute). A failing check stops the commit or push and says why. There is no need to run
+them first: that only runs them twice. The checks are defined once, in
+`.pre-commit-config.yaml`; CI runs the same hooks, one job each.
 
-To check work without committing, run the same commands CI runs:
+To check work without committing (what is staged, as a commit would):
 
 ```sh
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy
-uv run pytest
+uv run pre-commit run                        # what a commit checks
+uv run pre-commit run --hook-stage pre-push  # the whole suite
 ```
 
 Every tool's version is pinned once, in the `dev` group of `pyproject.toml`; the hooks
 run it with `uv run`.
 
-`uv.lock` is tracked; commit it whenever dependencies change. See `AGENTS.md` for the
-commit rules and the Claude Code hook.
+`uv.lock` is tracked; commit it whenever dependencies change. See `AGENTS.md` for how
+the checks are wired, the commit rules and the Claude Code hook.

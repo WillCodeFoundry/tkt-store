@@ -217,8 +217,8 @@ caller's, except that:
 
 The exact lists are in `state_store/runner.py`.
 
-`core.hooksPath=/dev/null` turns every hook off. Plumbing commands run none, but
-`fetch` (with the maintenance it starts), `update-ref` and `push` can run hooks;
+`core.hooksPath=/dev/null` turns every hook off. `fetch` (with the maintenance it
+starts), `update-ref` and `push` can run hooks, and the other commands run none;
 turning hooks off once is simpler than reasoning per command.
 
 **Housekeeping is git's.** Each commit writes a few loose objects, and lost races leave
@@ -226,13 +226,13 @@ unreachable ones. `fetch` already runs git's automatic maintenance afterwards, w
 packs objects and prunes unreachable ones older than two weeks once enough have built
 up. Every snapshot fetches, so the store runs no `gc` of its own. The two `autoDetach`
 settings keep that maintenance in the foreground (git reads `maintenance.autoDetach`
-first, and older versions only `gc.autoDetach`), so no git process outlives the command that
-started it, and nothing runs in the clone between the store's commands.
+first, and older versions only `gc.autoDetach`), so no git process outlives the command
+that started it, and nothing runs in the clone between the store's commands.
 
 **The minimum git version is 2.15**, set by the newest option the store relies on:
-`rev-parse --is-shallow-repository`. Below that, `core.hooksPath` (2.9) is a security
-floor: an older git ignores the setting and would run hooks. No minimum is tested yet:
-CI runs a recent git.
+`rev-parse --is-shallow-repository`. It is also above 2.9, the version that added
+`core.hooksPath`, which the store needs to turn hooks off. No minimum is tested yet: CI
+runs a recent git.
 
 ## 7. Opening a store
 
@@ -240,8 +240,8 @@ CI runs a recent git.
 
 - `branch` follows the README's rules and `remote` is not empty, else `ValueError`.
   Whether git accepts the branch is asked of `git check-ref-format
-  refs/heads/<branch>`, which alone would accept `-x` and `HEAD`, hence the README's
-  other rules.
+  refs/heads/<branch>`, which alone would accept the `refs/…`, `-…`, `@` and `HEAD`
+  forms, hence the README's other rules.
 - `repo` is the top level of a non-bare repository (`git rev-parse
   --is-bare-repository` is `false`, and `git rev-parse --show-toplevel` is `repo`,
   both compared after resolving symlinks, so `-C` never walks up into an enclosing
@@ -252,8 +252,8 @@ CI runs a recent git.
 - `remote` is configured, with exactly one URL (`git config --get-all
   remote.<remote>.url`), no `remote.<remote>.pushurl`, and `git remote get-url -- <remote>`
   equals `git remote get-url --push -- <remote>` (no `insteadOf` / `pushInsteadOf` making
-  them differ). With several URLs, git pushes to each and reports the last, so a commit
-  can land on one server while the outcome says it was stale; with a separate push URL,
+  them differ). With several URLs, git pushes to each and reports each, so a commit can
+  land on one server and be refused by another; with a separate push URL,
   `ls-remote` would check a different server from the one pushed to.
 
 Either of the last two checks failing is `StoreError(NOT_A_CLONE)`.
@@ -262,10 +262,11 @@ Either of the last two checks failing is `StoreError(NOT_A_CLONE)`.
 
 A failed git command becomes a `StoreError`. For the commands that talk to the remote
 (`fetch`, `push`, `ls-remote`), the category comes from git's own wording; anything
-unrecognised is `UNRECOGNISED`. A server can imitate git's wording, so it chooses at
-most the category, never the text. Local commands have their own, shorter list, ending
-in `LOCAL`, so a local "Permission denied" is never mistaken for a remote refusing
-access. The wordings are in `state_store/runner.py`.
+unrecognised is `UNRECOGNISED`. Their list starts with the wording of local failures
+they can hit (a ref they cannot lock), which are `LOCAL`, so a "Permission denied" on
+the clone is never mistaken for a remote refusing access. A server can imitate git's
+wording, so it chooses at most the category, never the text. Local commands have their
+own, shorter list, ending in `LOCAL`. The wordings are in `state_store/runner.py`.
 
 The README's rule on what an error's message holds applies to everything the store
 raises, even in a printed traceback. git's text goes to
@@ -277,8 +278,8 @@ README's requirements on credentials). Logging never fails an operation.
 
 ## 9. Concurrency within one clone
 
-Two processes fetching in one clone at once can fail to lock the private ref, a
-`StoreError`; nothing is corrupted, and no wrong state is ever reported,
+Two processes fetching in one clone at once can fail to lock the private ref
+(`StoreError(LOCAL)`); nothing is corrupted, and no wrong state is ever reported,
 because every commit is still a compare-and-swap on the remote. Within one process,
 snapshots and stores are not thread-safe.
 

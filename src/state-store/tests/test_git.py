@@ -289,7 +289,9 @@ def test_reads_that_do_not_touch_the_bad_entry_succeed(make_clone: MakeClone, ki
 
 
 @pytest.mark.parametrize("kind", BAD_KINDS)
-def test_a_commit_never_carries_a_bad_entry_forward(make_clone: MakeClone, kind: str) -> None:
+def test_a_commit_never_rebuilds_a_namespace_with_a_bad_entry(
+    make_clone: MakeClone, kind: str
+) -> None:
     store, snap = corrupt_snapshot(make_clone, kind)
     with pytest.raises(StoreError) as caught:
         store.commit(snap.with_value("bad/new", b""), "next to a bad entry")

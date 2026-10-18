@@ -111,8 +111,8 @@ The errors named here are described under [Errors](#errors).
    never reads that history to answer a read: a read always sees the revision itself.
 6. **It fails loudly.** An operation that depends on something the store would never
    have written fails with `StoreError` (category `CORRUPT`) instead of skipping it;
-   operations that do not depend on it are unaffected, and a commit never carries it
-   forward. Repairing it is described in
+   operations that do not depend on it are unaffected, and a commit never rebuilds a
+   namespace that holds it. Repairing it is described in
    [the design](design.md#4-corrupt-entries-in-git).
 
 For the git store these hold under the preconditions in *Git store*.
@@ -167,11 +167,15 @@ What applies to `GitStateStore` only.
 
 **Preconditions** for the guarantees:
 
+- **The remote applies pushes and reports their outcome truthfully**
+  ([0003](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)). Guarantees 2 to 4 depend on it: nothing can detect a remote that
+  does not.
 - **The remote refuses force pushes and deletion of the branch** (a ruleset on GitHub;
   `receive.denyNonFastForwards` and `receive.denyDeletes` on a bare repository).
   Guarantee 1 depends on it for old snapshots, which stay readable only while history
   is never rewritten (why: [the design](design.md#3-taking-a-snapshot-and-reading)).
-  The store never does either, and compare-and-swap does not depend on it.
+  The store never does either, and compare-and-swap does not depend on it
+  ([the design](design.md#5-committing)).
 - **Every writer goes through state-store.** Guarantee 3 depends on it: a commit made
   with plain git can land without having been decided on the revision before it, and
   nothing can tell.
@@ -186,7 +190,7 @@ What applies to `GitStateStore` only.
   one URL, used for both fetching and pushing (no `pushurl`, no rewriting that makes
   them differ).
 - `branch` is a plain branch name (`state`) that git accepts as `refs/heads/<branch>`:
-  it does not start with `refs/` or `-`, is not `@` or `HEAD`, and holds no `@{`.
+  it does not start with `refs/` or `-`, and is not `@` or `HEAD`.
 - Nobody runs git against the clone or the branch by hand while writers are active.
 - Credentials are kept out of the remote's URL (use a credential helper): the operator
   log (below) can quote the URL, and anything that can read the clone can read it.

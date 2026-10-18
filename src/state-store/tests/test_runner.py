@@ -30,6 +30,11 @@ pytestmark = pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="
         ("fatal: unable to connect to 127.0.0.1: Connection refused", Category.UNREACHABLE),
         ("fatal: the remote end hung up unexpectedly", Category.UNREACHABLE),
         ("remote: Repository not found.", Category.NOT_FOUND),
+        (
+            "error: cannot lock ref 'refs/state-store/state': Unable to create"
+            " '/c/.git/refs/state-store/state.lock': Permission denied",
+            Category.LOCAL,
+        ),
         ("something nobody has seen before", Category.UNRECOGNISED),
         ("error: cannot run ssh: No such file or directory", Category.UNRECOGNISED),
         ("git: 'remote-https' is not a git command. ... command not found", Category.UNRECOGNISED),

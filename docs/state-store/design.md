@@ -24,8 +24,10 @@ changes: added keys appear, removed ones disappear, nested keys do not count.
 
 **Collisions** are checked when a change is made, against the merged view:
 `with_value(k)` raises `KeyCollision` if any proper prefix of `k` is a value, or if `k`
-is a namespace that still holds a value. This reads the committed state, so it can
-raise `StoreError`. `without(k)` reads nothing and never fails on a valid key.
+is a namespace that still holds a value. Telling whether `k` still holds a value, once
+the changes are applied, can mean listing `k` and the namespaces inside it. This reads
+the committed state, so it can raise `StoreError`. `without(k)` reads nothing and never
+fails on a valid key.
 
 **Checks on what is read.** An entry of a listed namespace is valid when:
 
@@ -35,18 +37,18 @@ raise `StoreError`. `without(k)` reads nothing and never fails on a valid key.
 - no other entry in the same namespace has the same name;
 - it is not an empty namespace (the store never writes one).
 
-Anything else is `StoreError(CORRUPT)` for any operation that touches it:
+Anything else is `CorruptState` for any operation that touches it:
 
-- `get` and `with_value` check the entries on their key's path only, so a bad entry
-  elsewhere does not stop them;
+- `get` and `with_value` check the entries on their key's path, so a bad entry
+  elsewhere does not stop them; a collision check also checks in full every namespace
+  it lists inside the key;
 - `keys` checks every entry of the namespace it lists, since its answer depends on all
   of them;
 - `commit` checks every entry of every namespace it rebuilds, so a bad entry next to a
   changed key is never carried into a new commit.
 
 The error names the check that failed ([README](README.md#errors)). The store does
-not check values: they are bytes, and what they mean
-is the caller's.
+not check values: they are bytes, and what they mean is the caller's.
 
 **A commit** first checks its arguments, then works out whether the snapshot changes
 anything (a change can set a value a key already has); only then does it publish, by
@@ -56,9 +58,8 @@ given, so it can hold changes that change nothing.
 **`MemoryStateStore`** keeps its committed states as a list of mappings from key to
 value, each with an opaque revision. Its listings are built from the mapping, so they
 are always valid. Its commit follows the same steps as the git store's, in the same
-order: emptying the store makes a new revision, not `None`. It never raises
-`StoreError` or `UnknownOutcome` by itself. The same contract tests run against both
-stores.
+order: emptying the store makes a new revision, not `None`. The same contract tests
+run against both stores.
 
 ## 2. Layout on the branch
 
@@ -98,8 +99,8 @@ name, so `refs/heads/x` also matches `refs/foo/refs/heads/x`):
 
 - the remote lists no such branch: the snapshot is of a store never committed to;
 - it lists the branch (created since the fetch looked): fetch once more; a second
-  failure is a `StoreError` with the fetch's category;
-- `ls-remote` fails too: a `StoreError` with its category.
+  failure is `RemoteFailed`;
+- `ls-remote` fails too: `RemoteFailed`.
 
 The snapshot holds the commit id, and all of its reads go to that commit, whose objects
 never change: that is guarantee 1. Taking a snapshot transfers objects but reads none.
@@ -136,7 +137,7 @@ listing it.
 
 **Repairing a corrupt branch takes plain git.** Since a commit refuses to rebuild a tree
 holding a bad entry, even a commit that only removes it (`without("bad/link")`) is
-`StoreError(CORRUPT)`. With writers stopped, an operator repairs the branch with an
+`CorruptState`. With writers stopped, an operator repairs the branch with an
 ordinary git commit and a fast-forward push, after which the store reads it normally.
 
 ## 5. Committing
@@ -152,12 +153,13 @@ ordinary git commit and a fast-forward push, after which the store reads it norm
 3. **Stop if nothing changed.** If the new root tree is the commit's tree (the empty
    tree for a store never committed to), the snapshot it derives from is returned, as
    the README describes.
-4. **Make the new commit, `<new>`.**
+4. **Make the new commit, `<new>`.** First
+   `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT` and `… var GIT_COMMITTER_IDENT`
+   check that git has an identity: if either fails, `NoIdentity`. Then
    `git -c user.useConfigOnly=true commit-tree <tree> [-p <revision>] -F -` with the
    message on stdin. git takes the author from its configuration; with
-   `user.useConfigOnly` it never invents one from the account and host name, and a
-   missing identity is `StoreError(NO_IDENTITY)`. `commit-tree` signs nothing
-   (`commit.gpgSign` does not apply to it).
+   `user.useConfigOnly` it never invents one from the account and host name.
+   `commit-tree` signs nothing (`commit.gpgSign` does not apply to it).
 5. **Publish it by compare-and-swap.**
    ```
    git push --porcelain --no-follow-tags --force-with-lease=refs/heads/<branch>:<revision> -- <remote> <new>:refs/heads/<branch>
@@ -184,10 +186,9 @@ from that line, never from the remote's text; there must be exactly one, for
 | Already there (defensive: the remote already holds the new commit) | flag `=` | success |
 | Our lease failed | flag `!`, `[rejected] (stale info)` | `StaleSnapshot` |
 | Not a fast-forward (defensive: the lease forces the push, so git should report the lease instead) | flag `!`, `[rejected] (non-fast-forward)` or `(fetch first)` | `StaleSnapshot` |
-| Any other `[rejected]` | flag `!` | `StoreError(REFUSED)` |
-| Refused by the remote | flag `!`, `[remote rejected] (…)`; then `ls-remote` (as in §3) | the branch is the new commit: success; the branch moved to anything else: `StaleSnapshot`; the branch is still `revision`, or is gone: `StoreError(REFUSED)`; `ls-remote` fails: `StoreError` with its category |
-| No usable status (no line, several lines, or one for another ref) after a failure that sends nothing (`AUTH`, `NOT_FOUND`) | the push's category (§8) | `StoreError` with that category |
-| No usable status after any other failure (the connection broke, a timeout, an unrecognised error) | | `UnknownOutcome` |
+| Any other `[rejected]` | flag `!` | `CommitRefused` |
+| Refused by the remote | flag `!`, `[remote rejected] (…)`; then `ls-remote` (as in §3) | the branch is the new commit: success; the branch moved to anything else: `StaleSnapshot`; the branch is still `revision`, or is gone: `CommitRefused`; `ls-remote` fails: `UnknownOutcome` |
+| No usable status (no line, several lines, or one for another ref), whatever the failure | | `UnknownOutcome`: if nothing was sent (bad credentials, no such repository), the caller's next snapshot fails with `RemoteFailed` |
 
 The remote's reason inside `[remote rejected] (…)` is never parsed: a server can write
 anything there. Only whether the branch moved decides: a server's `update` hook runs
@@ -213,7 +214,7 @@ caller's, except that:
   injects credentials through them); the store's own `-c` settings come after them and
   win;
 - git never prompts, local commands never fetch missing objects, replace objects are
-  ignored, and messages are untranslated (to categorise failures, §8).
+  ignored, and messages are untranslated (for the operator log, §8).
 
 The exact lists are in `state_store/runner.py`.
 
@@ -222,7 +223,7 @@ starts), `update-ref` and `push` can run hooks, and the other commands run none;
 turning hooks off once is simpler than reasoning per command.
 
 **Housekeeping is git's.** Each commit writes a few loose objects, and lost races leave
-unreachable ones. `fetch` already runs git's automatic maintenance afterwards, which
+unreachable ones. A successful `fetch` runs git's automatic maintenance afterwards, which
 packs objects and prunes unreachable ones older than two weeks once enough have built
 up. Every snapshot fetches, so the store runs no `gc` of its own. The two `autoDetach`
 settings keep that maintenance in the foreground (git reads `maintenance.autoDetach`
@@ -256,17 +257,16 @@ runs a recent git.
   land on one server and be refused by another; with a separate push URL,
   `ls-remote` would check a different server from the one pushed to.
 
-Either of the last two checks failing is `StoreError(NOT_A_CLONE)`.
+Either of the last two checks failing is `NotAClone`.
 
 ## 8. Errors and the operator log
 
-A failed git command becomes a `StoreError`. For the commands that talk to the remote
-(`fetch`, `push`, `ls-remote`), the category comes from git's own wording; anything
-unrecognised is `UNRECOGNISED`. Only ssh's own "Permission denied" counts as `AUTH`,
-so a local permission problem during a remote command (the clone's own files) is
-`UNRECOGNISED`, never mistaken for a remote refusing access. A server can imitate git's
-wording, so it chooses at most the category, never the text. Local commands have their
-own, shorter list, ending in `LOCAL`. The wordings are in `state_store/runner.py`.
+The kind of error never depends on git's text, which varies between versions and
+transports, can describe a local or a remote problem in the same words, and can come
+from the server. It depends only on what the store can tell for certain: its own
+checks (`CorruptState`, `NotAClone`, `NoIdentity`), the push's status flag and where
+the branch is (`StaleSnapshot`, `CommitRefused`, `UnknownOutcome`), and which command
+failed (`RemoteFailed` for `fetch` and `ls-remote`, `GitFailed` for any other).
 
 The README's rule on what an error's message holds applies to everything the store
 raises, even in a printed traceback. git's text goes to
@@ -278,9 +278,9 @@ README's requirements on credentials). Logging never fails an operation.
 
 ## 9. Concurrency within one clone
 
-Two processes fetching in one clone at once can fail to lock the private ref, a
-`StoreError`; nothing is corrupted, and no wrong state is ever reported,
-because every commit is still a compare-and-swap on the remote. Within one process,
+Two processes fetching in one clone at once can fail to lock the private ref
+(`RemoteFailed`, since it happens in `fetch`); nothing is corrupted, and no wrong state
+is ever reported, because every commit is still a compare-and-swap on the remote. Within one process,
 snapshots and stores are not thread-safe.
 
 ## 10. Open questions

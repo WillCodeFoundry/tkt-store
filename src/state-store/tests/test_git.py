@@ -10,8 +10,12 @@ import pytest
 
 from state_store import (
     MAX_VALUE_SIZE,
-    Category,
+    CommitRefused,
+    CorruptState,
     GitStateStore,
+    NoIdentity,
+    NotAClone,
+    RemoteFailed,
     StaleSnapshot,
     StateSnapshot,
     StoreError,
@@ -95,9 +99,8 @@ def test_the_clone_is_never_checked_out_and_has_no_local_branch(make_clone: Make
 
 def test_without_an_identity_nothing_is_committed(make_clone: MakeClone) -> None:
     store = open_store(make_clone(identity=False))
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NoIdentity):
         store.commit(store.snapshot().with_value("a", b""), "no author")
-    assert caught.value.category is Category.NO_IDENTITY
 
 
 # --- Opening a store (§7) ---------------------------------------------------------------
@@ -110,43 +113,38 @@ def seed_remote(make_clone: MakeClone) -> None:
 
 @pytest.mark.parametrize("name", ["", "missing"], ids=["not a repository", "no such path"])
 def test_a_path_that_is_not_a_repository_is_refused(tmp_path: Path, name: str) -> None:
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(tmp_path / name)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 def test_a_subdirectory_of_a_clone_is_refused(make_clone: MakeClone) -> None:
     inner = make_clone() / "inner"
     inner.mkdir()
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(inner)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 def test_a_shallow_clone_is_refused(make_clone: MakeClone, bare_remote: Path) -> None:
     seed_remote(make_clone)
     clone = make_clone("--depth=1", f"--branch={BRANCH}", url=bare_remote.as_uri())
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(clone)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 def test_a_partial_clone_is_refused(make_clone: MakeClone, bare_remote: Path) -> None:
     seed_remote(make_clone)
     run_git(bare_remote, "config", "uploadpack.allowFilter", "true")
     clone = make_clone("--filter=blob:none", url=bare_remote.as_uri())
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(clone)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 def test_a_promisor_on_any_remote_is_refused(make_clone: MakeClone, bare_remote: Path) -> None:
     clone = make_clone()
     run_git(clone, "remote", "add", "other", str(bare_remote))
     run_git(clone, "config", "remote.other.promisor", "true")
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(clone)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 def test_a_remote_that_is_explicitly_not_a_promisor_is_accepted(make_clone: MakeClone) -> None:
@@ -170,16 +168,14 @@ def test_a_remote_that_pushes_elsewhere_is_refused(
 ) -> None:
     clone = make_clone()
     run_git(clone, "config", *config)
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(clone)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 @pytest.mark.parametrize("remote", ["upstream", "-origin", "--push", "http://x"])
 def test_a_remote_that_is_not_configured_is_refused(make_clone: MakeClone, remote: str) -> None:
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(make_clone(), remote=remote)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 @pytest.mark.parametrize(
@@ -196,9 +192,8 @@ def test_an_empty_remote_name_is_refused(make_clone: MakeClone) -> None:
 
 
 def test_a_bare_repository_is_refused(bare_remote: Path) -> None:
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(NotAClone):
         open_store(bare_remote)
-    assert caught.value.category is Category.NOT_A_CLONE
 
 
 def test_a_clone_reached_through_a_symlink_is_accepted(
@@ -258,7 +253,7 @@ def corrupt_snapshot(make_clone: MakeClone, kind: str) -> tuple[GitStateStore, S
 
 
 def assert_corrupt(caught: pytest.ExceptionInfo[StoreError]) -> None:
-    assert caught.value.category is Category.CORRUPT
+    assert isinstance(caught.value, CorruptState)
 
 
 @pytest.mark.parametrize("kind", BAD_KINDS)
@@ -298,6 +293,15 @@ def test_a_commit_never_rebuilds_a_namespace_with_a_bad_entry(
         store.commit(next_to_it, "next to a bad entry")
     assert_corrupt(caught)
     store.commit(snap.with_value("good/b", b""), "elsewhere")
+
+
+def test_a_collision_check_that_reads_a_bad_entry_fails(make_clone: MakeClone) -> None:
+    """Whether `bad` still holds a value, once `bad/ok` is removed, is read from the
+    namespace itself, which holds a bad entry."""
+    _, snap = corrupt_snapshot(make_clone, "symlink")
+    emptied = snap.without("bad/ok")
+    with pytest.raises(CorruptState):
+        emptied.with_value("bad", b"now a value")
 
 
 def test_a_bad_entry_cannot_be_removed_through_the_store(make_clone: MakeClone) -> None:
@@ -379,7 +383,8 @@ def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
 
 def test_automatic_maintenance_runs_in_the_foreground(make_clone: MakeClone) -> None:
     """gc has finished by the time a snapshot returns, even where the clone's
-    configuration says to detach it."""
+    configuration says to detach it. (Only a fetch that succeeds runs maintenance.)"""
+    seed_remote(make_clone)
     clone = make_clone()
     run_git(clone, "config", "maintenance.autoDetach", "true")
     run_git(clone, "config", "gc.autoDetach", "true")
@@ -476,9 +481,8 @@ def test_a_refused_first_push_is_refused_without_the_servers_text(
     clone = make_clone()
     store = open_store(clone)
     install_server_hook(bare_remote, "pre-receive", REFUSING_HOOK)
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(CommitRefused) as caught:
         store.commit(store.snapshot().with_value("a", b""), "refused")
-    assert caught.value.category is Category.REFUSED
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
     assert "SERVER-SAYS-RUN-THIS" in (clone / ".git" / LOG_NAME).read_text()
 
@@ -489,9 +493,8 @@ def test_a_push_refused_while_the_branch_is_unchanged_is_refused(
     store = open_store(make_clone())
     snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
     install_server_hook(bare_remote, "pre-receive", REFUSING_HOOK)
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(CommitRefused) as caught:
         store.commit(snap.with_value("a", b"2"), "refused")
-    assert caught.value.category is Category.REFUSED
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
 
 
@@ -528,6 +531,21 @@ def test_a_push_refused_after_the_remote_applied_it_is_a_success(
     assert open_store(make_clone()).snapshot().get("a") == b"2"
 
 
+def test_a_refused_push_whose_branch_cannot_be_read_has_an_unknown_outcome(
+    make_clone: MakeClone, bare_remote: Path
+) -> None:
+    """A refused push may still have landed, so if the branch cannot be read afterwards,
+    the outcome is unknown."""
+    store = open_store(make_clone())
+    snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
+    # refuse, and leave the remote unreadable for the `ls-remote` that follows
+    install_server_hook(
+        bare_remote, "pre-receive", "git config core.repositoryformatversion 99\nexit 1\n"
+    )
+    with pytest.raises(UnknownOutcome):
+        store.commit(snap.with_value("a", b"2"), "refused, then unreadable")
+
+
 def test_a_push_whose_status_is_lost_has_an_unknown_outcome(
     make_clone: MakeClone, bare_remote: Path
 ) -> None:
@@ -546,33 +564,35 @@ def test_a_push_whose_status_is_lost_has_an_unknown_outcome(
     assert open_store(make_clone()).snapshot().get("a") == b"2"
 
 
-def test_a_missing_remote_repository_is_not_found(make_clone: MakeClone, tmp_path: Path) -> None:
+def test_a_missing_remote_repository_is_a_remote_failure(
+    make_clone: MakeClone, tmp_path: Path
+) -> None:
     clone = make_clone()
     run_git(clone, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(RemoteFailed) as caught:
         open_store(clone).snapshot()
-    assert caught.value.category is Category.NOT_FOUND
     assert "missing.git" not in shown(caught.value)
 
 
-def test_a_push_that_sends_nothing_is_a_store_error_not_an_unknown_outcome(
+def test_a_push_without_a_status_has_an_unknown_outcome(
     make_clone: MakeClone, tmp_path: Path
 ) -> None:
+    """Even when nothing was sent: the next snapshot reports what is wrong."""
     clone = make_clone()
     store = open_store(clone)
     snap = store.snapshot().with_value("a", b"1")
     run_git(clone, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(UnknownOutcome):
         store.commit(snap, "to nowhere")
-    assert caught.value.category is Category.NOT_FOUND
+    with pytest.raises(RemoteFailed):
+        store.snapshot()
 
 
-def test_an_unreachable_remote_is_unreachable(make_clone: MakeClone) -> None:
+def test_an_unreachable_remote_is_a_remote_failure(make_clone: MakeClone) -> None:
     clone = make_clone()
     run_git(clone, "remote", "set-url", "origin", "git://127.0.0.1:9/nothing.git")
-    with pytest.raises(StoreError) as caught:
+    with pytest.raises(RemoteFailed):
         open_store(clone).snapshot()
-    assert caught.value.category is Category.UNREACHABLE
 
 
 def test_a_branch_created_by_someone_else_is_read(make_clone: MakeClone) -> None:

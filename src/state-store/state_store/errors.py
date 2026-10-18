@@ -1,13 +1,11 @@
 """What can go wrong, as the caller needs to tell it apart (state-store README, *Errors*).
 
 A caller either starts again from a new snapshot (`StaleSnapshot`, including
-`UnknownOutcome`) or stops (`StoreError`, `ValueError`, including `KeyCollision`). What
-a message may hold: state-store README, *Errors*.
+`UnknownOutcome`) or stops (`StoreError` and its kinds, `ValueError`, including
+`KeyCollision`). What a message may hold: state-store README, *Errors*.
 """
 
 from __future__ import annotations
-
-from enum import Enum
 
 
 class StaleSnapshot(Exception):
@@ -30,25 +28,29 @@ class KeyCollision(ValueError):
     It can come from data another writer stored, not only from this caller's code."""
 
 
-class Category(Enum):
-    """What kind of `StoreError` it is (state-store README, *Git store*)."""
-
-    CORRUPT = "the branch holds something the store would never write"
-    REFUSED = "the remote refused the commit"
-    AUTH = "the remote refused access"
-    NOT_FOUND = "the remote repository was not found"
-    UNREACHABLE = "the remote could not be reached"
-    UNRECOGNISED = "a remote command failed in an unrecognised way"
-    NO_IDENTITY = "git has no identity to author commits with"
-    NOT_A_CLONE = "the path is not a usable clone"
-    LOCAL = "a local git command failed"
-
-
 class StoreError(Exception):
-    """A failure the store cannot recover from; an operator acts. Never retried.
+    """A failure the store cannot recover from; an operator acts. Never retried."""
 
-    `detail` is what the README's *Errors* allows a message to hold."""
 
-    def __init__(self, category: Category, detail: str = "") -> None:
-        self.category = category
-        super().__init__(f"{category.value}: {detail}" if detail else category.value)
+class CorruptState(StoreError):
+    """The branch holds something the store would never write."""
+
+
+class CommitRefused(StoreError):
+    """The remote refused the commit, and the branch did not move."""
+
+
+class NotAClone(StoreError):
+    """The path is not a usable clone, or its remote is not configured as required."""
+
+
+class NoIdentity(StoreError):
+    """git has no author identity to commit with."""
+
+
+class GitFailed(StoreError):
+    """A git command failed."""
+
+
+class RemoteFailed(GitFailed):
+    """A git command that talks to the remote failed."""

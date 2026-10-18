@@ -13,11 +13,10 @@ A ticket store for coordinating AI agents, kept on a git branch.
 
 ## Prerequisites
 
-- [git](https://git-scm.com/) 2.31 or later, for the tests (state-store's own minimum is
+- [git](https://git-scm.com/) 2.32 or later, for the tests (state-store's own minimum is
   in [its requirements](docs/state-store/README.md#git-store)).
-- [uv](https://docs.astral.sh/uv/), which manages the environment, the dependencies and
-  the tools. It fetches the Python version in `.python-version` (3.11) if you have none.
-  Do not use `pip`.
+- [uv](https://docs.astral.sh/uv/), which manages the environment, the dependencies, the
+  tools and the Python version ([how](docs/CONTRIBUTING.md#tooling)).
 
 ## Getting started
 
@@ -54,4 +53,4 @@ which document specifies each kind of change, and the rules every change follows
 | `docs/` | All documentation ([map](docs/README.md)) |
 | `src/tkt-store/` | tkt-store: no code yet (TBD) |
 | `src/state-store/` | state-store: the `state_store` package and its tests in `tests/` |
-| `pyproject.toml` | The uv workspace: its members (the packages under `src/`), the dev tools and their settings |
+| `pyproject.toml` | The uv workspace ([how it is organised](docs/CONTRIBUTING.md#tooling)) |

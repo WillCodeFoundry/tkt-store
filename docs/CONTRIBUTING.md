@@ -10,6 +10,23 @@ Read the document for your change before making it: [`README.md`](README.md) in 
 directory maps them. If code and its document disagree, one of them is wrong: fix it, or
 amend the document in the same change, never silently.
 
+## Writing documentation
+
+- **One home per fact.** State each fact once, in the document that owns it, and link
+  to it from anywhere else. Repeated facts drift apart.
+- **Stay in scope.** A document describes its own component only. state-store's
+  documents, code and tests never mention tkt-store or any program or kind of user that
+  relies on it: state-store is general-purpose, and its documents stay true whoever uses
+  it. tkt-store's documents may refer to state-store.
+- **Introduce a term before using it.**
+- **Say what is, plainly.** Short sentences, concrete words, the fact first. No emphasis
+  words ("crucially", "robust", "seamless"), no dramatic framing ("not X, but Y"), no
+  closing summaries that repeat what was just said.
+- **Decision records** follow the template below. They give the forces behind a
+  decision as they stand, never the history of earlier designs, and record decisions
+  about the system, not about naming or wording. Each rejected choice and each
+  consequence appears in one record only.
+
 ## Decision records
 
 A decision record says what was decided, why, and what was rejected; the specification
@@ -55,8 +72,9 @@ of the dev tools, so the hooks would fail.
 
 ## Tooling
 
-This project uses [uv](https://docs.astral.sh/uv/) for environments, dependencies and
-running tools. Do not use `pip`.
+This project uses [uv](https://docs.astral.sh/uv/) for environments, dependencies,
+running tools and the Python version (`.python-version`, which uv fetches if it is
+missing). Do not use `pip`.
 
 - `uv sync --group dev` sets up (dev tools are an opt-in group), `uv add` /
   `uv add --dev` change dependencies, `uv run <tool>` runs a tool.
@@ -91,7 +109,9 @@ first: that only runs them twice.
 
 To change a check, change it in both `.pre-commit-config.yaml` and `ci.yml`. Every hook
 checks the whole repository and runs whatever changed (`pass_filenames: false`,
-`always_run: true`), and names its stage. Local runs and CI use the same Python
+`always_run: true`: ruff also formats Python inside Markdown, and `pyproject.toml`
+configures every tool), and names its stage. CI's actions are pinned to commit SHAs,
+kept current by Dependabot. Local runs and CI use the same Python
 (`.python-version`, the requires-python floor).
 
 pytest is quiet and strict about markers by default (`addopts = "-q --strict-markers"`

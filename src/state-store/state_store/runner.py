@@ -3,20 +3,18 @@
 Every command is an argument list, never a shell, run in the clone with hooks off,
 git's automatic maintenance in the foreground, prompts off, lazy fetches off, replace
 objects off, untranslated messages, and the inherited variables that would point git at
-other repository data removed. A failure becomes a `GitFailure` that carries git's exit
-code, output and the category of its message; git's text itself goes only to the
-operator log, never into an exception's message, arguments or repr, and the store raises
-its own errors `from None`.
+other repository data removed. A failure becomes a `GitFailure` that carries the
+command, git's exit code and its output; git's text itself goes only to the operator
+log, never into an exception's message, arguments or repr, and the store raises its own
+errors `from None`. git's text never decides anything.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from state_store.errors import Category
-
 REMOTE_COMMANDS = frozenset({"fetch", "push", "ls-remote"})
-"""The only commands that talk to the remote; only their failures can be remote ones."""
+"""The only commands that talk to the remote: their failures are `RemoteFailed`."""
 
 DROPPED_VARIABLES = frozenset(
     {
@@ -48,62 +46,8 @@ FIXED_VARIABLES = {
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_NO_LAZY_FETCH": "1",  # git 2.44+; ignoring it is harmless: partial clones are refused
     "GIT_NO_REPLACE_OBJECTS": "1",
-    "LC_ALL": "C",
+    "LC_ALL": "C",  # the operator log in one language
 }
-
-NOT_A_CLONE_WORDING = ("not a git repository (or any of the parent", "cannot change to")
-
-REMOTE_WORDING: tuple[tuple[Category, tuple[str, ...]], ...] = (
-    (Category.NOT_A_CLONE, NOT_A_CLONE_WORDING),
-    (
-        Category.AUTH,
-        (
-            "Authentication failed",
-            # ssh's wording only: a bare "Permission denied" can be the clone's own files
-            "Permission denied (",
-            "Permission denied, please try again",
-            "could not read Username",
-            "could not read Password",
-            "terminal prompts disabled",
-            "returned error: 401",
-            "returned error: 403",
-            "Host key verification failed",
-        ),
-    ),
-    (
-        Category.NOT_FOUND,
-        (
-            # never a bare "not found" or "No such file or directory": those also say
-            # that a program (ssh, a remote helper) is missing, which is not this
-            "Repository not found",
-            "does not appear to be a git repository",
-            "returned error: 404",
-        ),
-    ),
-    (
-        Category.UNREACHABLE,
-        (
-            "Could not resolve host",
-            "Couldn't resolve host",
-            "Connection refused",
-            "timed out",
-            "Network is unreachable",
-            "No route to host",
-            "Connection reset",
-            "the remote end hung up",
-            "early EOF",
-            "unable to access",
-        ),
-    ),
-)
-"""How a failed remote command's category is read from git's wording; first match wins,
-otherwise `UNRECOGNISED`. A server can imitate a wording: it picks a category at most."""
-
-LOCAL_WORDING: tuple[tuple[Category, tuple[str, ...]], ...] = (
-    (Category.NOT_A_CLONE, NOT_A_CLONE_WORDING),
-    (Category.NO_IDENTITY, ("Please tell me who you are", "empty ident name")),
-)
-"""The same for local commands; otherwise `LOCAL`."""
 
 LOG_NAME = "state-store/git-errors.log"
 """The operator log, relative to the clone's git directory."""
@@ -117,21 +61,15 @@ class GitFailure(Exception):
     one of its own outcomes (state-store design §5, §8); any error it raises is raised
     `from None`.
 
-    Its message and `args` are only the command and the category; `stdout` (which can
+    Its message and `args` are only the command and the exit code; `stdout` (which can
     quote the server, e.g. a push's `[remote rejected] (<reason>)`) is an attribute,
     never part of `args` or the repr, so a traceback cannot show it."""
 
-    def __init__(self, command: str, returncode: int, stdout: bytes, category: Category) -> None:
-        super().__init__(f"git {command} failed: {category.value}")
+    def __init__(self, command: str, returncode: int, stdout: bytes) -> None:
+        super().__init__(f"git {command} failed ({returncode})")
         self.command = command
         self.returncode = returncode
         self.stdout = stdout
-        self.category = category
-
-
-def category(command: str, stderr: str) -> Category:
-    """The category of a failure of `command` (a git subcommand) from its message."""
-    raise NotImplementedError
 
 
 def append_log(log: Path, header: str, text: str) -> bool:

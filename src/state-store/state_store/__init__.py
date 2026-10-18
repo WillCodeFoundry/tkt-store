@@ -2,8 +2,13 @@
 only if nothing changed since the snapshot (state-store README)."""
 
 from state_store.errors import (
-    Category,
+    CommitRefused,
+    CorruptState,
+    GitFailed,
     KeyCollision,
+    NoIdentity,
+    NotAClone,
+    RemoteFailed,
     StaleSnapshot,
     StoreError,
     UnknownOutcome,
@@ -15,10 +20,15 @@ from state_store.snapshot import StateSnapshot, StateStore
 
 __all__ = [
     "MAX_VALUE_SIZE",
-    "Category",
+    "CommitRefused",
+    "CorruptState",
+    "GitFailed",
     "GitStateStore",
     "KeyCollision",
     "MemoryStateStore",
+    "NoIdentity",
+    "NotAClone",
+    "RemoteFailed",
     "StaleSnapshot",
     "StateSnapshot",
     "StateStore",

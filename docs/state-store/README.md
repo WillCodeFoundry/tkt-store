@@ -89,7 +89,8 @@ class StateSnapshot:                       # immutable
 - `GitStateStore(repo, *, remote="origin", branch)`: the store on `branch` of `remote`,
   through the clone at `repo`. Its requirements are under *Git store*.
 - `MemoryStateStore()`: the same semantics in memory, for testing code that uses
-  state-store. One instance stands for one store that many writers share.
+  state-store. One instance stands for one store that many writers share. It never
+  raises `StoreError` or `UnknownOutcome` by itself.
 
 ## Guarantees
 
@@ -103,13 +104,10 @@ The errors named here are described under [Errors](#errors).
    on the revision just before it: two writers that read the same keys and write
    different ones cannot both land.
 4. **Durable when `commit` returns.** When the outcome cannot be known (for example, the
-   connection failed during the commit), `commit` says so (`UnknownOutcome`) instead of guessing.
-5. **An audit trail.** Every commit is recorded with its message and its author, as the
-   writer's git identity gives it; nothing verifies that identity
-   ([0003](decisions/0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md)). The store
-   never reads that history to answer a read: a read always sees the revision itself.
-6. **It fails loudly.** An operation that depends on something the store would never
-   have written fails with `StoreError` (category `CORRUPT`) instead of skipping it;
+   connection failed during the commit), `commit` says so (`UnknownOutcome`) instead of
+   guessing.
+5. **It fails loudly.** An operation that depends on something the store would never
+   have written fails with `CorruptState` instead of skipping it;
    operations that do not depend on it are unaffected, and a commit never rebuilds a
    namespace that holds it. Repairing it is described in
    [the design](design.md#4-corrupt-entries-in-git).
@@ -131,16 +129,27 @@ For the git store these hold under the preconditions in *Git store*.
 |---|---|---|
 | `StaleSnapshot` | The store changed since the snapshot was taken. Nothing was published. | Takes a new snapshot and decides again. |
 | `UnknownOutcome` (a `StaleSnapshot`) | The commit's outcome could not be read (for example, the connection failed during the commit): it may or may not have landed. | The same; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
-| `StoreError` | Anything else; `.category` says what. | Stops; an operator acts. |
+| `StoreError` | Anything else; its kinds are below. | Stops; an operator acts. |
 | `KeyCollision` (a `ValueError`) | A write would make a key both a value and a namespace. It can come from data another writer stored, not only from this caller's code. | Treats it as a conflict between writers: stops. |
 | `ValueError` | A caller bug: an invalid key, namespace or branch name, an empty remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
 
-In the git store, every operation but `without` can raise `StoreError`: when git fails,
-or, for `get`, `keys`, `with_value` (which checks collisions against the stored state)
-and `commit`, when what it reads is corrupt.
+The kinds of `StoreError` (each a subclass), raised by the git store only:
 
-An error's message holds only state-store's own text: the operation, the category, and
-the check that failed. It never holds a key (the caller knows which key it passed), a
+| Error | Meaning |
+|---|---|
+| `CorruptState` | The branch holds something the store would never write (guarantee 5). |
+| `CommitRefused` | The remote refused the commit, and the branch did not move (a hook, a protection rule). |
+| `NotAClone` | The path is not a usable clone, or its remote is not configured as required. |
+| `NoIdentity` | git has no author identity to commit with. |
+| `GitFailed` | A git command failed. |
+| `RemoteFailed` (a `GitFailed`) | A git command that talks to the remote failed: fetching or checking the branch. |
+
+Every operation but `without` can raise `StoreError`: when git fails, or, for `get`,
+`keys`, `with_value` (which checks collisions against the stored state) and `commit`,
+when what it reads is corrupt.
+
+An error's message holds only state-store's own text: the operation, the git command,
+and the check that failed. It never holds a key (the caller knows which key it passed), a
 value, or text from outside state-store, such as git's output.
 
 ## Keys
@@ -197,23 +206,8 @@ What applies to `GitStateStore` only.
 - Credentials are kept out of the remote's URL (use a credential helper): the operator
   log (below) can quote the URL, and anything that can read the clone can read it.
 
-**Error categories** (`StoreError.category`):
-
-| Category | Meaning |
-|---|---|
-| `CORRUPT` | The branch holds something the store would never write (guarantee 6). |
-| `REFUSED` | The remote refused a commit for a reason other than a lost race (a hook, a protection rule). |
-| `AUTH` | The remote refused access. |
-| `NOT_FOUND` | The remote's repository does not exist. |
-| `UNREACHABLE` | The remote could not be reached. |
-| `UNRECOGNISED` | A command that talks to the remote failed in a way the store does not recognise. |
-| `NO_IDENTITY` | git has no `user.name` / `user.email` to author commits with. |
-| `NOT_A_CLONE` | The path is not a usable clone, or its remote is not configured as required. |
-| `LOCAL` | A local git command failed for another reason. |
+Each commit is a git commit with the caller's message and the writer's git identity as
+its author, so the branch's history can be read with git; state-store never reads it.
 
 git's own output, which errors never carry, goes to a log in the clone's git directory,
 for an operator ([the design](design.md#8-errors-and-the-operator-log)).
-
-## Testing
-
-Test code that uses state-store against `MemoryStateStore`.

@@ -1,8 +1,5 @@
-# One job per check, running each tool directly. The same commands are the hooks in
-# .pre-commit-config.yaml (what runs locally); keep the two in step when changing a
-# check. Python comes from .python-version (the requires-python floor), as it does
-# locally; newer Pythons run weekly (latest-deps.yml). Actions are pinned to commit
-# SHAs, kept current by Dependabot (.github/dependabot.yml).
+# One job per check, running each tool directly. How the checks run, and how to change
+# one: docs/CONTRIBUTING.md (*Checks*).
 name: ci
 
 on:

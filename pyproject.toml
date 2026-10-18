@@ -1,5 +1,4 @@
-# The repository root is a uv workspace with no package of its own: each package is a
-# member under src/, and this file holds what they share (dev tools, tool settings).
+# The uv workspace: docs/CONTRIBUTING.md (*Tooling*).
 
 [dependency-groups]
 dev = [

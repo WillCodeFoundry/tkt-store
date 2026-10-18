@@ -20,10 +20,9 @@ class GitStateStore:
     """The store on `branch` of `remote`, read and written through the clone at `repo`.
 
     Opening checks the names and the clone without contacting the remote (state-store design §7):
-    `ValueError` for an invalid branch name or an empty remote name,
-    `StoreError(NOT_A_CLONE)` for a path that is not the top level of a full, non-bare
-    clone, or a remote that is not configured with exactly one URL for both fetching and
-    pushing.
+    `ValueError` for an invalid branch name or an empty remote name, `NotAClone` for a
+    path that is not the top level of a full, non-bare clone, or a remote that is not
+    configured with exactly one URL for both fetching and pushing.
 
     Every git failure becomes one of the store's outcomes, and errors are raised
     `from None`, so the README's rule on messages holds in tracebacks too (state-store

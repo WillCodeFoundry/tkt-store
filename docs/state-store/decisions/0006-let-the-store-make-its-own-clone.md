@@ -9,8 +9,8 @@ into, to write new objects, and to push from. It never uses a working tree, the 
 local branches, tags or other branches of the remote.
 
 A clone that a user makes holds much more than that, and can be set up in ways the
-store must refuse or advise against: shallow or partial, bare, with a separate push
-URL or several URLs, with a checkout, or with every branch of the remote. Each needs a
+store must refuse or advise against: shallow or partial, bare, with several URLs,
+with a checkout, or with every branch of the remote. Each needs a
 requirement in the README, and most a check when the store is opened
 ([design](../design.md#7-cloning-and-opening)).
 
@@ -19,8 +19,9 @@ requirement in the README, and most a check when the store is opened
 The store makes the clone it works in, and opens only clones it made.
 
 - **Cloning:** `GitStateStore.clone(path, *, url, branch)` clones the branch `branch`
-  of the remote at `url` to `path`, which must not exist, and returns the store opened
-  on it. It is the only operation that makes a clone. The clone is not bare, has no
+  of the remote at `url` (a URL string, or a path, made absolute) to `path`, which
+  must not exist, and returns the store opened on it. It is the only operation that
+  makes a clone. The clone is not bare, has no
   checkout, and holds only that branch and no tags (`git clone --no-checkout
   --single-branch --branch <branch> --no-tags`); the store records the branch in it.
   It is made in a temporary directory next to `path` and renamed to `path` when
@@ -33,10 +34,10 @@ The store makes the clone it works in, and opens only clones it made.
   empty state with a revision of its own.
 - **Opening:** `GitStateStore(path)` opens a clone that `clone` made, without
   contacting the remote. The URL and branch are read from the clone. A path that is not
-  such a clone, or a clone changed by hand since, is refused with `UnusableRepository`.
-- **Unchanged:** fetching only the branch, committing and pushing as now; credentials
-  still come from the user's git configuration (credential helpers, ssh keys,
-  configuration injected by CI), and the URL must not hold them.
+  such a clone, or a clone whose configuration no longer passes the checks made when
+  opening, is refused with `UnusableRepository`.
+- **Credentials** come from the user's git configuration (credential helpers, ssh
+  keys, configuration injected by CI), and the URL must not hold them.
 
 ## Alternatives rejected
 
@@ -58,19 +59,13 @@ The store makes the clone it works in, and opens only clones it made.
 
 ## Consequences
 
-- These requirements and checks go: a clone the user makes, given as its top-level
-  directory, preferably without a checkout; not shallow, not partial; a configured
-  remote name.
+- How a clone is made is no longer the user's concern: there are no requirements on
+  shallow, partial or bare clones, checkouts or remote names, and opening checks only
+  what the store wrote.
 - Opening needs no network; cloning does, and so can fail with `RemoteFailed`.
-- Before the first clone, the branch is created on the remote.
-- The store has no state without a revision: everything that handled a branch that
-  does not exist (`None` revisions, a first push that creates the branch) goes, and a
-  branch missing from the remote is `NoSuchBranch`.
-- These requirements stay: one process at a time per clone, nobody runs git in it by
-  hand while writers are active, no credentials in the URL, and the branch name rules.
-- The minimum git version is set again from the options the store then relies on.
-- To implement it, change every mention of a user's clone, of `GitStateStore`'s
-  arguments, of `None` revisions and of `NotAClone` in the README, the design, the
-  code and the tests (including the test fixture that makes clones), and add tests for
-  cloning, opening, a missing branch, and refusing a path that is not a clone the store
-  made, or a clone changed by hand.
+- The branch is created on the remote, by whoever sets it up, before the first clone.
+- The store has no state without a revision, and a branch missing from the remote is
+  `NoSuchBranch` wherever the store finds it missing.
+- A clone is still used by one process at a time, nobody runs git in it by hand while
+  writers are active, the URL holds no credentials, and the branch name rules apply.
+- The minimum git version follows from the options cloning needs.

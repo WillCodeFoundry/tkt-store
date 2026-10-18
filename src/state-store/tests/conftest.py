@@ -66,10 +66,10 @@ def clone_store(bare_remote: Path, new_path: NewPath) -> CloneStore:
     """Clones `bare_remote`'s `BRANCH` with the store, to a new path unless one is given."""
 
     def clone(
-        path: Path | None = None, *, url: str | None = None, branch: str = BRANCH
+        path: Path | None = None, *, url: str | os.PathLike[str] | None = None, branch: str = BRANCH
     ) -> GitStateStore:
         return GitStateStore.clone(
-            path or new_path(), url=str(bare_remote) if url is None else url, branch=branch
+            path or new_path(), url=bare_remote if url is None else url, branch=branch
         )
 
     return clone

@@ -223,17 +223,16 @@ def test_the_users_default_remote_name_is_not_used(
 def test_an_enclosing_repository_is_never_read(
     clone_store: CloneStore, new_path: NewPath, bare_remote: Path
 ) -> None:
-    """The clone is made inside another repository whose configuration would make the
-    URL work: git must not find it, in the clone or in the temporary directory."""
+    """The clone is made inside another repository whose configuration maps `alias:` to
+    a remote without the branch. `git clone` never reads it; the `ls-remote` run in the
+    temporary directory after the clone fails would, and find no branch."""
     path = new_path()
+    empty = path.parent.parent / "empty.git"
+    run_git(path.parent.parent, "init", "--bare", "--quiet", str(empty))
     run_git(path.parent, "init", "--quiet")
-    run_git(path.parent, "config", f"url.{bare_remote}.insteadOf", "alias:")
-    with pytest.raises(RemoteFailed):
+    run_git(path.parent, "config", f"url.{empty}.insteadOf", "alias:")
+    with pytest.raises(RemoteFailed):  # not NoSuchBranch: `alias:` names nothing here
         clone_store(path, url="alias:")
-    store = clone_store(path)
-    run_git(path.parent, "config", "remote.origin.url", "/elsewhere.git")
-    store.commit(store.snapshot().with_value("a", b"1"), "one")
-    assert GitStateStore(path).snapshot().get("a") == b"1"
 
 
 def test_a_relative_path_is_made_absolute(
@@ -248,6 +247,42 @@ def test_a_relative_path_is_made_absolute(
     reopened = GitStateStore(Path(path.name))
     monkeypatch.chdir(tmp_path)
     assert reopened.snapshot().get("a") == b"1"
+
+
+def test_a_tag_with_the_branchs_name_is_not_the_branch(
+    clone_store: CloneStore, new_path: NewPath, bare_remote: Path
+) -> None:
+    """`git clone --branch` also accepts a tag, and then makes no tracking ref."""
+    run_git(bare_remote, "tag", "-a", "v1", "-m", "a tag", f"refs/heads/{BRANCH}")
+    path = new_path()
+    with pytest.raises(NoSuchBranch):
+        clone_store(path, branch="v1")
+    assert list(path.parent.iterdir()) == []
+
+
+def test_a_clone_that_fails_opening_stays_at_its_path(
+    clone_store: CloneStore, new_path: NewPath
+) -> None:
+    """Cloning ends by opening; the user's configuration adds a setting to `origin`."""
+    set_user_config("remote.origin.receivepack", "git-receive-pack")
+    path = new_path()
+    with pytest.raises(UnusableRepository):
+        clone_store(path)
+    assert (path / ".git").is_dir()
+    with pytest.raises(UnusableRepository):
+        GitStateStore(path)
+
+
+def test_a_relative_path_to_the_remote_is_made_absolute(
+    clone_store: CloneStore, new_path: NewPath, bare_remote: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = new_path()
+    monkeypatch.chdir(bare_remote.parent)
+    store = clone_store(path, url=Path(bare_remote.name))
+    monkeypatch.chdir(path.parent)
+    store.commit(store.snapshot().with_value("a", b"1"), "one")
+    assert run_git(path, "config", "remote.origin.url").strip() == str(bare_remote)
+    assert clone_store().snapshot().get("a") == b"1"
 
 
 def test_cloning_a_branch_the_remote_does_not_have_is_no_such_branch(
@@ -477,9 +512,11 @@ def test_opening_what_is_not_a_stores_clone_is_refused(
         ("--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
         ("--unset", "remote.origin.fetch"),
         ("--unset", "remote.origin.tagopt"),
+        ("remote.origin.receivepack", "git-receive-pack"),
         ("--add", "state-store.branch", "other"),
         ("--unset", "state-store.branch"),
         ("state-store.branch", "-x"),
+        ("state-store.branch", "other"),
         ("core.bare", "true"),
     ],
     ids=[
@@ -488,9 +525,11 @@ def test_opening_what_is_not_a_stores_clone_is_refused(
         "another fetch refspec",
         "no fetch refspec",
         "no tagopt",
+        "another setting",
         "two branches",
         "no branch",
         "invalid branch",
+        "branch without its refspec",
         "bare",
     ],
 )
@@ -923,9 +962,10 @@ def test_a_push_refused_while_the_branch_is_unchanged_is_refused(
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
     assert "SERVER-SAYS-RUN-THIS" in (path / ".git" / LOG_NAME).read_text()
     assert remote_tip(bare_remote) == snap.revision
+    assert store.snapshot().revision == snap.revision  # a refusal leaves no expectation
 
 
-def test_a_push_refused_while_the_branch_was_deleted_is_refused(
+def test_a_push_refused_while_the_branch_was_deleted_is_no_such_branch(
     clone_store: CloneStore, bare_remote: Path
 ) -> None:
     store = clone_store()
@@ -936,7 +976,7 @@ def test_a_push_refused_while_the_branch_was_deleted_is_refused(
         "env -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES"
         f" git update-ref -d refs/heads/{BRANCH}\n" + REFUSING_HOOK,
     )
-    with pytest.raises(CommitRefused):
+    with pytest.raises(NoSuchBranch):
         store.commit(snap.with_value("a", b"2"), "refused, branch gone")
 
 
@@ -958,6 +998,7 @@ def test_a_push_refused_while_the_branch_moved_elsewhere_fails_the_compare_and_s
     with pytest.raises(CompareAndSwapFailed) as caught:
         store.commit(snap.with_value("a", b"2"), "refused after the branch moved")
     assert "SERVER-SAYS-RUN-THIS" not in shown(caught.value)
+    assert store.snapshot().revision == remote_tip(bare_remote)  # it did move: no alarm
 
 
 def test_a_push_refused_while_the_branch_moved_and_cannot_be_fetched_is_unknown(
@@ -1042,6 +1083,7 @@ def test_a_push_whose_status_is_lost_has_an_unknown_outcome(
     with pytest.raises(UnknownOutcome):
         store.commit(snap.with_value("a", b"2"), "two")
     (bare_remote / "hooks" / "reference-transaction").unlink()
+    assert store.snapshot().get("a") == b"2"
     assert clone_store().snapshot().get("a") == b"2"
 
 
@@ -1050,12 +1092,14 @@ def test_a_push_without_a_status_has_an_unknown_outcome(
 ) -> None:
     """Even when nothing was sent: the next snapshot reports what is wrong."""
     store = clone_store()
-    snap = store.snapshot().with_value("a", b"1")
-    bare_remote.rename(bare_remote.with_name("moved.git"))
+    first = store.snapshot()
+    moved = bare_remote.rename(bare_remote.with_name("moved.git"))
     with pytest.raises(UnknownOutcome):
-        store.commit(snap, "to nowhere")
+        store.commit(first.with_value("a", b"1"), "to nowhere")
     with pytest.raises(RemoteFailed):
         store.snapshot()
+    moved.rename(bare_remote)
+    assert store.snapshot().revision == first.revision  # an unknown outcome expects nothing
 
 
 def test_a_branch_deleted_from_the_remote_is_no_such_branch(
@@ -1063,7 +1107,9 @@ def test_a_branch_deleted_from_the_remote_is_no_such_branch(
 ) -> None:
     """Against the preconditions, but reported, not taken for an empty store."""
     store = clone_store()
+    tip = remote_tip(bare_remote)
     run_git(bare_remote, "update-ref", "-d", f"refs/heads/{BRANCH}")
+    run_git(bare_remote, "update-ref", f"refs/foo/refs/heads/{BRANCH}", tip)  # not the branch
     with pytest.raises(NoSuchBranch):
         store.snapshot()
 

@@ -37,18 +37,22 @@ class GitStateStore:
         raise NotImplementedError
 
     @classmethod
-    def clone(cls, path: str | os.PathLike[str], *, url: str, branch: str) -> GitStateStore:
+    def clone(
+        cls, path: str | os.PathLike[str], *, url: str | os.PathLike[str], branch: str
+    ) -> GitStateStore:
         """Clone `branch` of the remote at `url` to `path`, then open it (state-store
-        design §7).
+        design §7). A `url` that is a path is made absolute; a string is given to git
+        as it is.
 
         `ValueError` for an invalid branch name or an empty URL; `UnusableRepository`
         if anything exists at `path`, or the clone cannot be put there; `NoSuchBranch`
-        if the remote has no such branch; `RemoteFailed` if cloning fails otherwise."""
+        if the remote has no such branch (only a tag of that name counts as none);
+        `RemoteFailed` if cloning fails otherwise."""
         raise NotImplementedError
 
     def snapshot(self) -> StateSnapshot:
-        """The branch's current state on the remote (state-store design §3); first
-        checks it against this object's last commit, else `PushElsewhere`."""
+        """The branch's current state on the remote (state-store design §3), checked
+        against the expectation this object's last commit left, else `PushElsewhere`."""
         raise NotImplementedError
 
     def commit(self, snapshot: StateSnapshot, message: str) -> StateSnapshot:

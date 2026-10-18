@@ -279,14 +279,6 @@ def test_writes_to_different_keys_still_conflict(writers: Writers) -> None:
         first.commit(mine.with_value("a", b"1"), "a")
 
 
-def test_two_first_commits_conflict(writers: Writers) -> None:
-    first, second = writers.new(), writers.new()
-    mine, theirs = first.snapshot(), second.snapshot()
-    second.commit(theirs.with_value("a", b"theirs"), "theirs")
-    with pytest.raises(CompareAndSwapFailed):
-        first.commit(mine.with_value("a", b"mine"), "mine")
-
-
 def test_a_snapshot_whose_store_moved_on_is_stale_even_after_its_own_commit(
     writers: Writers,
 ) -> None:

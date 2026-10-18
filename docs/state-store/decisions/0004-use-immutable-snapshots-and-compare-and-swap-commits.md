@@ -37,4 +37,6 @@ The interface ([README](../README.md#interface)) is built on these choices:
 ## Consequences
 
 - Every caller writes the same small loop: take a snapshot, decide, commit, and start
-  again on `CompareAndSwapFailed`.
+  again on `CompareAndSwapFailed` or `UnknownOutcome`. They are separate errors, so a
+  caller that catches only the first never repeats, unawares, a commit that may have
+  landed.

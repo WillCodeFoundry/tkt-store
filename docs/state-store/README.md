@@ -87,7 +87,8 @@ class StateSnapshot:                       # immutable
 ## Store objects
 
 - `GitStateStore.clone(path, *, url, branch)`: clones `branch` of the remote at `url`
-  to `path`, which must not exist, and returns the store on it. Run once per clone;
+  (a URL string, or the path of a repository on this machine) to `path`, which must
+  not exist, and returns the store on it. Run once per clone;
   the branch must already exist on the remote.
 - `GitStateStore(path)`: the store through the clone at `path`, which `clone` made.
   Opening never contacts the remote. Its requirements are under *Git store*.
@@ -142,8 +143,8 @@ The kinds of `StoreError` (each a subclass), raised by the git store only:
 |---|---|
 | `CorruptState` | The branch holds something the store would never write (guarantee 5). |
 | `CommitRefused` | The remote refused the commit, and the branch did not move (a hook, a protection rule). |
-| `UnusableRepository` | `path` is not a clone the store made, or it was changed by hand since, or the user's git configuration changes its remote; or, when cloning, `path` already exists or the clone could not be put there. |
-| `NoSuchBranch` | The branch does not exist on the remote: when cloning, or when taking a snapshot. |
+| `UnusableRepository` | `path` is not a clone the store made, or its configuration (the clone's, or the user's) no longer passes the checks made when opening; or, when cloning, `path` already exists or the clone could not be put there. |
+| `NoSuchBranch` | The branch does not exist on the remote: when cloning, taking a snapshot, or reading the outcome of a refused commit. |
 | `PushElsewhere` | A snapshot found that this store object's last commit does not match the branch (a published commit missing from its history, or a failed compare-and-swap while the branch had not moved): pushes reach a different repository from fetches. |
 | `NoIdentity` | git has no author identity to commit with. |
 | `GitFailed` | A git command failed. |
@@ -199,8 +200,7 @@ What applies to `GitStateStore` only.
 
 - git 2.14 or later (why: [the design](design.md#6-running-git)).
 - The branch exists on the remote before the first clone. To create it, push one
-  commit of the empty tree, from any repository with the remote's object format (any
-  new one, for the usual SHA-1):
+  commit of the empty tree, from any repository with the remote's object format:
   ```
   tree=$(git hash-object -t tree /dev/null)
   git push <url> "$(git commit-tree -m 'Create the store' "$tree")":refs/heads/<branch>
@@ -211,9 +211,13 @@ What applies to `GitStateStore` only.
   configuration may rewrite it (`insteadOf`, `pushInsteadOf`), or give the remote
   named `origin` one push URL (`pushurl`), but fetches and pushes must reach the same
   repository; a store that finds otherwise at its next snapshot raises
-  `PushElsewhere`. The configuration must not configure `origin` otherwise. A local
-  path given as `url` is absolute: git would resolve a relative one from the caller's
-  working directory.
+  `PushElsewhere`. The configuration must not configure `origin` otherwise. A
+  repository on this machine is best given as a path (`pathlib.Path`), which the store
+  makes absolute; a relative path in a string would be resolved from the temporary
+  directory the clone is made in, and break once it is renamed.
+- Changing the clone's URL or branch by hand (after the repository moved, say) is the
+  operator's responsibility: opening cannot tell whether they still name the same
+  repository and branch.
 - `branch` is a plain branch name (`state`) that git accepts as `refs/heads/<branch>`:
   it does not start with `refs/` or `-`, and is not `@` or `HEAD`.
 - Nobody runs git in the clone by hand while writers are active.

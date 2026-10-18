@@ -27,7 +27,8 @@ NewPath = Callable[[], Path]
 
 CloneStore = Callable[..., GitStateStore]
 """`clone_store(path=None, *, url=None, branch=BRANCH)`: `GitStateStore.clone` of the
-test remote (or of `url`), to `path`, or to a new path if none is given."""
+test remote, given as a path (or of `url`), to `path`, or to a new path if none is
+given."""
 
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 """The empty tree's id in a SHA-1 repository, such as the test remote."""

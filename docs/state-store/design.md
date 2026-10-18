@@ -83,7 +83,7 @@ git fetch --no-tags -- origin +refs/heads/<branch>:refs/remotes/origin/<branch>
 git rev-parse --verify --quiet refs/remotes/origin/<branch>^{commit}
 ```
 
-`origin` is the clone's one remote (§7). The branch is fetched into the **tracking
+`origin` is the remote `git clone` made (§7). The branch is fetched into the **tracking
 ref**, `refs/remotes/origin/<branch>`, the ref `git clone` made for it; the refspec is
 given in full, and is the one the clone's configuration holds (§7), so the fetch writes
 no other ref. The tracking ref names the commit just fetched, keeps that commit's
@@ -98,30 +98,38 @@ name, so `refs/heads/x` also matches `refs/foo/refs/heads/x`):
 
 - the remote lists no such branch: `NoSuchBranch` (the branch existed when the clone
   was made, so it has been deleted, against the preconditions);
-- it lists the branch (created since the fetch looked): fetch once more; a second
-  failure is `RemoteFailed`;
+- it lists the branch: the fetch failed for another reason, which may not last: fetch
+  once more; a second failure is `RemoteFailed`;
 - `ls-remote` fails too: `RemoteFailed`.
 
 The snapshot holds the commit id, and all of its reads go to that commit, whose objects
 never change: that is guarantee 1. Taking a snapshot transfers objects but reads none.
 
-**The last commit is checked.** The store object remembers the outcome of its last
-commit (§5), and the next snapshot it takes checks it against the fetched tip, then
-forgets it. Under the preconditions the branch only moves forward, so:
+**The last commit is checked**
+([0007](decisions/0007-check-each-commit-against-the-branch-at-the-next-snapshot.md)).
+A store object keeps at most one **expectation** about the branch, set by its last
+commit that pushed (§5, step 5). Under the preconditions the branch only moves
+forward, so each holds on any later fetch:
 
-- a published commit stays in the branch's history: it must be the tip or one of its
-  ancestors (`git merge-base --is-ancestor <last> <tip>`);
-- a failed compare-and-swap means the branch had already moved from the revision the
-  lease expected: the tip must not be that revision.
+| The push's outcome | Expectation |
+|---|---|
+| success | the branch's history holds `<new>`: the tip is `<new>` or a descendant of it |
+| `CompareAndSwapFailed` | the branch has moved from `revision`: the tip is not `revision` |
+| `UnknownOutcome`, `CommitRefused`, `NoSuchBranch`, or a git failure | none: the earlier one is dropped too |
 
-Either check failing means pushes reach a repository the store does not fetch from,
-such as another repository a push URL rewrite points to, and the snapshot fails with
-`PushElsewhere`. Without the second check, a store pushing to a repository that is not
-at the snapshot's revision would see every compare-and-swap fail, and its callers
-would start again forever. The checks cost nothing on the network, but only cover
-commits the same store object takes a snapshot after: the last commit before a process
-exits is never checked. A caller always takes a snapshot after `CompareAndSwapFailed`,
-so a failed compare-and-swap is always checked.
+A commit that stops before pushing (invalid arguments, nothing changed, corrupt state,
+no identity) leaves the expectation as it was. The next snapshot whose fetch succeeds
+checks it against the fetched tip, then drops it, whether it held or not; a snapshot
+whose fetch fails keeps it. Ancestry is asked of `git merge-base --is-ancestor <new>
+<tip>`: exit 0 is yes, 1 is no, anything else is `GitFailed`. An expectation that does
+not hold means pushes reach a repository the store does not fetch from (a push URL or
+rewrite that points elsewhere): the snapshot fails with `PushElsewhere`.
+
+The check costs nothing on the network, but covers only commits the same store object
+takes a snapshot after: the last commit before a process exits is never checked. A
+caller that starts again after `CompareAndSwapFailed` takes a snapshot first, so a
+store pushing to the wrong repository is found the first time a caller starts again,
+instead of every commit failing its compare-and-swap forever.
 
 Reading walks trees by id from the root, never addressing `<commit>:<path>` (which fails
 for a missing path, and would mean telling that failure apart from others):
@@ -186,10 +194,8 @@ ordinary git commit and a fast-forward push, after which the store reads it norm
    `revision`; the new commit's parent is `revision`, so a push that passes the
    lease is also a fast-forward, and compare-and-swap holds even on a remote that allows
    forced pushes. `--no-follow-tags` keeps `push.followTags` from adding tags.
-6. **Read the outcome** (below). For the next snapshot's check (§3), remember `<new>`
-   on success, and `revision` on a `CompareAndSwapFailed`; an `UnknownOutcome`
-   remembers nothing, since the commit may or may not have landed.
-7. **Afterwards, best effort:** move the tracking ref to `<new>`
+6. **Read the outcome** (below), and set the expectation it gives (§3).
+7. **Afterwards, on success, best effort:** move the tracking ref to `<new>`
    (`git update-ref refs/remotes/origin/<branch> <new>`). A failure here is ignored:
    the commit is published, and the next snapshot corrects the tracking ref.
 
@@ -207,7 +213,7 @@ like), never from the remote's reason; there must be exactly one line, for
 | Our lease failed | flag `!`, `[rejected] (stale info)` | `CompareAndSwapFailed` |
 | Not a fast-forward (defensive: the lease forces the push, so git should report the lease instead) | flag `!`, `[rejected] (non-fast-forward)` or `(fetch first)` | `CompareAndSwapFailed` |
 | Any other `[rejected]` | flag `!` | `CommitRefused` |
-| Refused by the remote | flag `!`, `[remote rejected] (…)`; then `ls-remote` (as in §3) | the branch is the new commit: success; the branch is still `revision`, or is gone: `CommitRefused`; the branch moved to anything else: fetch it into the tracking ref, then success if the new commit is an ancestor of its tip (`git merge-base --is-ancestor`), else `CompareAndSwapFailed`; `ls-remote` or that fetch fails: `UnknownOutcome` |
+| Refused by the remote | flag `!`, `[remote rejected] (…)`; then `ls-remote` (as in §3) | the branch is the new commit: success; the branch is still `revision`: `CommitRefused`; the branch is gone: `NoSuchBranch`; the branch moved to anything else: fetch it into the tracking ref, then success if the new commit is an ancestor of its tip (`git merge-base --is-ancestor`), else `CompareAndSwapFailed`; `ls-remote` or that fetch fails: `UnknownOutcome` |
 | The remote did not report a status | flag `!`, `[remote failure]` | `UnknownOutcome` |
 | No usable status (no line, several lines, or one for another ref), whatever the failure | | `UnknownOutcome`: if nothing was sent (bad credentials, no such repository), the caller's next snapshot fails with `RemoteFailed` |
 
@@ -245,14 +251,17 @@ environment is the caller's, except that:
 
 The exact lists are in `state_store/runner.py`.
 
-`core.hooksPath=/dev/null` turns every hook off. `fetch` (with the maintenance it
-starts), `update-ref` and `push` can run hooks, and the other commands run none;
+`core.hooksPath=/dev/null` turns every hook off. `clone`, `fetch` (with the maintenance
+it starts), `update-ref` and `push` can run hooks, and the other commands run none;
 turning hooks off once is simpler than reasoning per command.
 
 **Housekeeping is git's.** Each commit writes a few loose objects, and lost races leave
 unreachable ones. A successful `fetch` runs git's automatic maintenance afterwards, which
 packs objects and prunes unreachable ones older than two weeks once enough have built
-up. Every snapshot fetches, so the store runs no `gc` of its own. The two `autoDetach`
+up. Commits the tracking ref no longer names stay in its reflog (`git clone` sets
+`core.logAllRefUpdates`) until git expires the entries, 30 days by default, and can
+be pruned only after that. Every snapshot fetches, so the store runs no `gc` of its
+own. The two `autoDetach`
 settings keep that maintenance in the foreground (git reads `maintenance.autoDetach`
 first, and older versions only `gc.autoDetach`), so no git process outlives the command
 that started it, and nothing runs in the clone between the store's commands.
@@ -268,10 +277,11 @@ The store makes the clone it works in, and opens only clones it made
 ([0006](decisions/0006-let-the-store-make-its-own-clone.md)).
 
 **Cloning**, `GitStateStore.clone(path, url=…, branch=…)`, first checks its arguments:
-`branch` follows the README's rules and `url` is not empty, else `ValueError`. Whether
-git accepts the branch is asked of `git check-ref-format refs/heads/<branch>`, which
-alone would accept the `refs/…`, `-…`, `@` and `HEAD` forms, hence the README's other
-rules. It makes `path` absolute, so later commands do not depend on the working
+`branch` follows the README's rules and `url` is not empty, else `ValueError`. A
+`url` that is a path (`os.PathLike`) is made absolute; a string is given to git as it
+is. Whether git accepts the branch is asked of `git check-ref-format
+refs/heads/<branch>`, which alone would accept the `refs/…`, `-…`, `@` and `HEAD`
+forms, hence the README's other rules. It makes `path` absolute, so later commands do not depend on the working
 directory, and refuses a `path` where anything exists, even a broken symlink, with
 `UnusableRepository`. Then:
 
@@ -285,26 +295,28 @@ directory, and refuses a `path` where anything exists, even a broken symlink, wi
    With no template, nothing from the user's template directory (hooks, or a `config`
    file, which git copies) gets in; `--origin` keeps the user's
    `clone.defaultRemoteName` from naming the remote otherwise. The clone takes the
-   remote's object format. It
-   holds the tracking ref `refs/remotes/origin/<branch>` (§3), a local branch, and, as
-   `origin`'s settings, the URL, the fetch refspec
+   remote's object format. It holds the tracking ref `refs/remotes/origin/<branch>`
+   (§3), a local branch, and, as `origin`'s settings, the URL, the fetch refspec
    `+refs/heads/<branch>:refs/remotes/origin/<branch>` and `tagopt = --no-tags`;
 3. if the clone fails, one `git ls-remote -- <url> refs/heads/<branch>` decides, its
    output compared with the exact ref name, as in §3: the remote lists no such branch:
    `NoSuchBranch`; it lists it, or `ls-remote` fails too: `RemoteFailed`;
-4. delete the local branch (`git update-ref -d refs/heads/<branch>`), so the tracking
+4. check that the tracking ref exists (`git rev-parse --verify --quiet
+   refs/remotes/origin/<branch>^{commit}`), else `NoSuchBranch`: when the remote has
+   only a tag of that name, `--branch` clones the tag and makes no tracking ref;
+5. delete the local branch (`git update-ref -d refs/heads/<branch>`), so the tracking
    ref is the only copy of the branch in the clone (HEAD then names a branch that does
    not exist, and `branch.<branch>.*` settings stay; nothing reads either), and set
    `state-store.branch` to `branch` (`git config -- state-store.branch <branch>`);
-5. rename the directory to `path`;
-6. open it, as below, and return the store.
+6. rename the directory to `path`;
+7. open it, as below, and return the store.
 
-Any other failure in steps 1 to 5 is `UnusableRepository`. On a failure in steps 2 to
-5 the store removes the temporary directory; a crash leaves it, for an operator to
+Any other failure in steps 1 to 6 is `UnusableRepository`. On a failure in steps 2 to
+6 the store removes the temporary directory; a crash leaves it, for an operator to
 remove. Commands run while cloning log nothing (§8): the log would be inside the
 temporary directory, and writing it there could make the directory look like a
 repository to the next command. Either way there is never a half-made clone at `path`.
-A clone that fails step 6 stays at `path` and is refused like any other. Another
+A clone that fails step 7 stays at `path` and is refused like any other. Another
 process cloning to `path` at the same time breaks the one-process requirement: the
 rename then fails, or, if `path` is an empty directory, replaces it.
 
@@ -324,6 +336,10 @@ contacting the remote:
   commit can land on one server and be refused by another; another fetch refspec would
   make fetches write other refs (§3). The one `url` is the store's URL.
 
+Opening cannot tell whether that URL still names the repository the clone was made
+from, nor whether `state-store.branch` and its fetch refspec were changed together:
+changing them (say, after the repository moved) is the operator's responsibility.
+
 A `pushurl`, and the user's URL rewriting (`insteadOf`, `pushInsteadOf`), are not
 checked further: they may fetch and push the same repository by different URLs
 (HTTPS to fetch, SSH to push). One that sends pushes to another repository shows at
@@ -339,10 +355,10 @@ from the server. It depends only on what the store can tell for certain: its own
 checks (`CorruptState`, `UnusableRepository`, `NoIdentity`, `PushElsewhere`), the
 push's status line and where the branch is (`CompareAndSwapFailed`, `CommitRefused`,
 `UnknownOutcome`), and which command failed: `RemoteFailed` for cloning, fetching, or
-checking whether the branch exists (§3, §7), `NoSuchBranch` when that check finds no
-branch, and `GitFailed` for any other command, except one run to make the clone or as
-one of the store's checks, whose failure is that step's outcome (§7:
-`UnusableRepository`; §5, step 4: `NoIdentity`).
+checking whether the branch exists (§3, §7), `NoSuchBranch` when the store finds the
+branch missing (§3, §5, §7), and `GitFailed` for any other command, except one run
+to make the clone or as one of the store's checks, whose failure is that step's
+outcome (§7: `UnusableRepository`; §5, step 4: `NoIdentity`).
 
 The README's rule on what an error's message holds applies to everything the store
 raises, even in a printed traceback. git's text goes to
@@ -362,9 +378,9 @@ Within one process, snapshots and stores are not thread-safe.
 
 ## 10. Open questions
 
-- **A failed clone's log.** The temporary directory, with git's text, is removed when
-  cloning fails, so an operator learns only the error's kind. Keep the text somewhere
-  if operators need it.
+- **A failed clone's log.** Nothing is logged while cloning, and the temporary
+  directory is removed when cloning fails, so an operator learns only the error's
+  kind. Keep the text somewhere if operators need it.
 - **Hooks defined elsewhere.** The store assumes git finds hooks only through
   `core.hooksPath` (§6). Recheck if git adds another way to define them.
 - **`keys` and nested namespaces.** `keys` lists values only. No caller needs to list

@@ -4,9 +4,9 @@
 
 ## Context
 
-The agents sharing a store may be confused or compromised, and anyone with push access
-can write anything to the branch. A broken or forged entry must never lead a caller to
-a wrong decision. The previous implementation set invalid files aside and carried on
+The writers sharing a store may be buggy, confused or compromised, and anyone with
+push access can write anything to the branch. A broken or forged entry must never lead
+a caller to a wrong decision. An earlier design set invalid files aside and carried on
 without them, which took a lot of machinery and could decide on a view that was missing
 exactly the file that mattered.
 
@@ -16,7 +16,7 @@ exactly the file that mattered.
   for the operation that reads it: never skipped, never partly used.
 - Operations that do not read it are unaffected.
 - The error never quotes what was read, since a forged value or name could carry
-  instructions aimed at an agent.
+  instructions, and a caller may pass an error on to an AI agent.
 - An operator repairs the branch with plain git.
 
 ## Alternatives rejected

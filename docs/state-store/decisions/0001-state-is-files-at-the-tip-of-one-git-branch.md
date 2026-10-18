@@ -4,13 +4,12 @@
 
 ## Context
 
-tkt-store coordinates about ten AI agents working in parallel. They need shared state
-that is durable and auditable, where a change can span several records and must land
-whole or not at all, and they should not need a server to get it. The previous
-implementation (0.1.0) kept its state on a git branch too, but in two forms at once
-(files in the tree, and the same facts in commit messages), with a per-clone cache and
-claim state encoded in file names, and much of its complexity came from keeping those
-consistent.
+state-store's callers are many writers sharing state concurrently. They need it
+durable and auditable, a change can span several keys and must land whole or not at
+all, and they should not need a server to get it. An earlier design on a git branch
+kept the same facts in two forms at once (files in the tree, and again in commit
+messages), with a per-clone cache and state encoded in file names, and much of its
+complexity came from keeping those consistent.
 
 ## Decision
 
@@ -30,8 +29,8 @@ consistent.
   spanning several keys cannot land whole.
 - **Events in commit messages, with the state rebuilt by replaying them:** reads grow
   with all of history, which then needs checkpoints and their own failure modes.
-- **Several branches** (for example one for live records, one for finished ones): a
-  change spanning both cannot be atomic, and a decision reading both races.
+- **Several branches** (for example one per kind of data): a change spanning two
+  cannot be atomic, and a decision reading two races.
 - **A per-clone cache of decoded state:** unnecessary when every read is a direct, keyed
   lookup, and it brings invalidation.
 

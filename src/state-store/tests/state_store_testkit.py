@@ -66,7 +66,7 @@ def publish(repo: Path, root: str, message: str = "forged") -> str:
 
 @dataclass(frozen=True)
 class Writers:
-    """Writers of one shared store, as the agents sharing it would have them."""
+    """Writers of one shared store, as the processes sharing it would have them."""
 
     new: Callable[[], StateStore]
     """Another writer of the shared store (for git, a store on a new clone)."""

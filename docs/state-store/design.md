@@ -313,7 +313,7 @@ running `src/state-store/tests/test_contract.py` against both stores, keeps the 
 
 ## 13. Open questions
 
-- **`keys` and nested namespaces.** `keys` lists values only. Whether tkt-store needs to
-  list namespaces is TBD; add it if a caller does.
+- **`keys` and nested namespaces.** `keys` lists values only. No caller needs to list
+  namespaces yet; add it if one does.
 - **The size limits.** `MAX_VALUE_SIZE` (1 MiB) and the key limits are fixed constants;
   callers keep their own, smaller limits.

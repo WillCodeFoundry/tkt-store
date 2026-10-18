@@ -8,26 +8,25 @@ you started from, otherwise it is rejected and you start again from a new snapsh
 > implementation does not yet (only the error types do). Every test of unimplemented
 > behaviour is a strict expected failure until the code it covers lands.
 
-It is the component of tkt-store that keeps all of tkt-store's state, and knows nothing
-about tickets: keys are strings, values are bytes. How it maps onto git is in
-[`design.md`](design.md).
+It is general-purpose: keys are strings, values are bytes, and it interprets neither.
+How it maps onto git is in [`design.md`](design.md).
 
 ## Why
 
-tkt-store needs shared state that many agents change concurrently, with changes that
-span several keys and must land together or not at all, without running a server. A git
-branch on a remote that every agent can push to gives durability, an audit trail and,
+Some programs need state that many writers change concurrently, where a change can span
+several keys and must land together or not at all, without running a server. A git
+branch on a remote that every writer can push to gives durability, an audit trail and,
 through compare-and-swap pushes, a single order of changes. This package turns that
-into a small key/value interface, so the rest of tkt-store never needs to know git.
+into a small key/value interface, so its callers never need to know git.
 
 ## Model
 
 | Term | Meaning |
 |---|---|
 | **store** | One branch of one remote, read and written through a local clone. |
-| **key** | A path-like string, e.g. `tickets/tkt-1234` (grammar below). |
+| **key** | A path-like string, e.g. `inbox/item-1` (grammar below). |
 | **value** | Bytes, at most `MAX_VALUE_SIZE` (1 MiB). Never interpreted. |
-| **namespace** | A key prefix: `tickets` holds `tickets/tkt-1234`. `""` is the root. |
+| **namespace** | A key prefix: `inbox` holds `inbox/item-1`. `""` is the root. |
 | **snapshot** | An immutable view of every key at one moment (one commit of the branch), plus any changes derived from it. |
 | **commit** | Publishing a snapshot's changes as the store's new state. |
 
@@ -36,15 +35,15 @@ into a small key/value interface, so the rest of tkt-store never needs to know g
 ```python
 from state_store import GitStateStore, StaleSnapshot
 
-store = GitStateStore("/work/tasks", remote="origin", branch="tkt-store")
+store = GitStateStore("/work/store", remote="origin", branch="state")
 
 while True:
     snap = store.snapshot()
-    if snap.get("tickets/tkt-0") is None:
+    if snap.get("inbox/item-0") is None:
         break  # nothing to do
-    next_snap = snap.without("tickets/tkt-0").with_value("archive/tkt-0", b'{"resolution": "done"}')
+    next_snap = snap.without("inbox/item-0").with_value("archive/item-0", b"processed")
     try:
-        store.commit(next_snap, "done tkt-0")
+        store.commit(next_snap, "archive item-0")
         break
     except StaleSnapshot:
         continue  # someone committed first: decide again on the new state
@@ -73,13 +72,13 @@ class StateSnapshot:                       # immutable
 - `snap.get(key)` returns the value, or `None` if there is none (including when `key`
   is a namespace, or a path through a value).
 - `snap.keys(namespace)` returns the full keys of the values directly in that namespace,
-  sorted. Values in nested namespaces are not included: `keys("tickets")` lists
-  `tickets/tkt-1`, not `tickets/old/tkt-2`. A namespace that does not exist, or that is
+  sorted. Values in nested namespaces are not included: `keys("inbox")` lists
+  `inbox/item-1`, not `inbox/old/item-2`. A namespace that does not exist, or that is
   a value, lists nothing.
 - `snap.with_value(key, value)` and `snap.without(key)` return a **new** snapshot with
   the change; `snap` is unchanged. They chain, and reads from the new snapshot see the
   changes (`next_snap.get(key)` returns the new value before anything is committed).
-  `without` removes one value: `without("tickets")` removes nothing if `tickets` is a
+  `without` removes one value: `without("inbox")` removes nothing if `inbox` is a
   namespace.
 - `store.commit(snap, message)` publishes `snap`'s changes as one commit and returns the
   committed state as a new snapshot (no changes, a new `revision`). The message is any
@@ -178,8 +177,8 @@ is 1 to 128 characters from `A-Z a-z 0-9 . _ -`, and starts with a letter, digit
 `_` (so never `.`, `..`, `.git`, or something that looks like an option). Keys are
 case-sensitive. A namespace argument is `""` or a valid key.
 
-A key cannot be both a value and a namespace: with `tickets/tkt-1` stored,
-`with_value("tickets", …)` is a `KeyCollision`, and so is `with_value("tickets/tkt-1/x",
+A key cannot be both a value and a namespace: with `inbox/item-1` stored,
+`with_value("inbox", …)` is a `KeyCollision`, and so is `with_value("inbox/item-1/x",
 …)`. A namespace exists while it holds at least one value; removing its last value
 removes it. Removing every value leaves an empty store whose `revision` is a commit, not
 `None`: `revision` is `None` only before the first commit.
@@ -201,7 +200,7 @@ everything ever stored.
 - `remote` is the name of a remote configured in the clone, not a URL, with exactly
   one URL, used for both fetching and pushing (no `pushurl`, no rewriting that makes
   them differ). Otherwise a push could reach a different server from the one checked.
-- `branch` is a plain branch name (`tkt-store`): not `refs/heads/…`, `@` or `HEAD`, and
+- `branch` is a plain branch name (`state`): not `refs/heads/…`, `@` or `HEAD`, and
   not starting with `-`.
 - Nobody runs git against the clone or the branch by hand while writers are active.
 - Keep credentials out of the remote's URL: the operator log (see [the design](design.md)) may quote

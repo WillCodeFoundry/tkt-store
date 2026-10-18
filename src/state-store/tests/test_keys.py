@@ -20,9 +20,9 @@ LONGEST_KEY = "/".join(["a" * 100] * 10) + "/" + "a" * 14
 
 VALID_KEYS = [
     "a",
-    "tickets/tkt-1234",
-    "tkt-store.json",
-    "archive/2026/tkt-0001.json",
+    "inbox/item-1234",
+    "store.json",
+    "archive/2026/item-0001.json",
     "_private",
     "A/B_c.d-e",
     "x" * MAX_SEGMENT_LENGTH,
@@ -79,18 +79,18 @@ def test_the_root_namespace_has_no_segments() -> None:
     assert check_namespace("") == ()
 
 
-@pytest.mark.parametrize("namespace", ["tickets", "archive/2026"])
+@pytest.mark.parametrize("namespace", ["inbox", "archive/2026"])
 def test_a_namespace_is_a_key(namespace: str) -> None:
     assert check_namespace(namespace) == tuple(namespace.split("/"))
 
 
-@pytest.mark.parametrize("namespace", ["/", "tickets/", "/tickets", ".git", "a//b"])
+@pytest.mark.parametrize("namespace", ["/", "inbox/", "/inbox", ".git", "a//b"])
 def test_invalid_namespaces(namespace: str) -> None:
     with pytest.raises(ValueError):
         check_namespace(namespace)
 
 
-@pytest.mark.parametrize("name", ["a", "tkt-1.json", "_x", "9"])
+@pytest.mark.parametrize("name", ["a", "item-1.json", "_x", "9"])
 def test_segments(name: str) -> None:
     assert is_segment(name)
 

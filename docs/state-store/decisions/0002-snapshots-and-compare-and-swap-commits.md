@@ -4,9 +4,9 @@
 
 ## Context
 
-tkt-store needs to read several records as they were at one moment, and to change
-several records together, all or nothing, while other agents change the same store
-concurrently. The interface should hide git entirely, and be as small as that allows.
+A caller needs to read several keys as they were at one moment, and to change several
+keys together, all or nothing, while other writers change the same store concurrently.
+The interface should hide git entirely, and be as small as that allows.
 
 ## Decision
 

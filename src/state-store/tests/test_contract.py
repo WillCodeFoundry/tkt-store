@@ -29,7 +29,7 @@ def test_a_new_store_is_empty(writers: Writers) -> None:
     assert snap.changes == {}
     assert snap.get("a") is None
     assert snap.keys() == []
-    assert snap.keys("tickets") == []
+    assert snap.keys("inbox") == []
 
 
 def test_the_first_commit_makes_the_first_revision(writers: Writers) -> None:
@@ -45,10 +45,10 @@ def test_the_first_commit_makes_the_first_revision(writers: Writers) -> None:
 
 def test_a_derived_snapshot_reads_its_own_changes(writers: Writers) -> None:
     snap = writers.new().snapshot()
-    derived = snap.with_value("tickets/t1", b"x")
-    assert derived.get("tickets/t1") == b"x"
-    assert derived.keys("tickets") == ["tickets/t1"]
-    assert derived.changes == {"tickets/t1": b"x"}
+    derived = snap.with_value("inbox/i1", b"x")
+    assert derived.get("inbox/i1") == b"x"
+    assert derived.keys("inbox") == ["inbox/i1"]
+    assert derived.changes == {"inbox/i1": b"x"}
 
 
 def test_deriving_leaves_the_original_unchanged(writers: Writers) -> None:

@@ -1,9 +1,8 @@
-# One job per hook in .pre-commit-config.yaml, the only place checks are defined. The
-# `hooks` job reads the hooks (and their stages) from that file, so adding or removing a
-# hook there adds or removes its job here; nothing in this file names a hook or a tool.
-# Each job runs its hook as git's own hook would (`pre-commit run <id> --hook-stage
-# <stage>`, no file arguments). Python comes from .python-version (the requires-python
-# floor), as it does locally; newer Pythons run weekly (latest-deps.yml).
+# One job per check, running each tool directly. The same commands are the hooks in
+# .pre-commit-config.yaml (what runs locally); keep the two in step when changing a
+# check. Python comes from .python-version (the requires-python floor), as it does
+# locally; newer Pythons run weekly (latest-deps.yml). Actions are pinned to commit
+# SHAs, kept current by Dependabot (.github/dependabot.yml).
 name: ci
 
 on:
@@ -19,48 +18,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  hooks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      matrix: ${{ steps.list.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - id: list
-        run: |
-          matrix=$(uv run --no-project --with pyyaml python - <<'EOF'
-          import json
-          import yaml
-
-          config = yaml.safe_load(open(".pre-commit-config.yaml"))
-          default = config.get("default_stages", ["pre-commit"])
-          print(json.dumps([
-              {"id": hook["id"], "name": hook.get("name", hook["id"]), "stage": stage}
-              for repo in config["repos"]
-              for hook in repo["hooks"]
-              for stage in hook.get("stages", default)
-          ]))
-          EOF
-          )
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-
-  hook:
-    needs: hooks
-    name: ${{ matrix.name }}
+  ruff:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.hooks.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
       - run: uv sync --locked --group dev
-      - run: uv run pre-commit run "$HOOK" --hook-stage "$STAGE"
-        env:
-          HOOK: ${{ matrix.id }}
-          STAGE: ${{ matrix.stage }}
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+
+  mypy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev
+      - run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev
+      - run: uv run pytest

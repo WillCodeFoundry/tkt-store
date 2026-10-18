@@ -1,19 +1,22 @@
-# The one definition of the repository's checks. Everything runs these hooks the way
-# git's own hooks do (`pre-commit run [--hook-stage pre-push]`, no file arguments) and
-# never repeats their commands:
-#   - git hooks (once per clone: `uv run pre-commit install --hook-type pre-commit
-#     --hook-type pre-push`): the pre-commit stage on commit, the pre-push stage on push;
+# The checks that run locally, through git's hooks:
+#   - git, once per clone `uv run pre-commit install` has installed both hook types
+#     (`default_install_hook_types`): the pre-commit stage on commit, the pre-push stage
+#     on push;
 #   - the Claude Code hook (.claude/hooks/pre-commit-checks.sh) runs none: it blocks a
 #     commit or push until these git hooks are installed, so git always runs them;
-#   - CI (.github/workflows/ci.yml): one job per hook, read from this file;
 #   - by hand: `uv run pre-commit run` (the commit checks), and
 #     `uv run pre-commit run --hook-stage pre-push` (the whole suite).
+# CI (.github/workflows/ci.yml) runs the same commands directly, one job per tool; keep
+# the two in step when changing a check.
+#
+# The rule every hook follows: it checks the whole repository, never only the files a
+# commit touches (`pass_filenames: false`, the command decides what to check), and it
+# runs whatever changed (`always_run: true`), since ruff also formats Python inside
+# Markdown and pyproject.toml configures every tool. Every hook also names its stage.
 #
 # All hooks are `repo: local` and run via `uv run`, so the only place any tool's version
-# is pinned is the `dev` group in pyproject.toml. Each checks the whole repository, not
-# the files a commit touches (`pass_filenames: false`), and runs whatever changed
-# (`always_run`): ruff also formats Python inside Markdown, and pyproject.toml configures
-# every tool, so no file type is safe to skip. Every hook names its stage.
+# is pinned is the `dev` group in pyproject.toml.
+default_install_hook_types: [pre-commit, pre-push]
 repos:
   - repo: local
     hooks:

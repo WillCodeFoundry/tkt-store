@@ -170,7 +170,7 @@ you have none.
 git clone https://github.com/WillCodeFoundry/tkt-store.git
 cd tkt-store
 uv sync --group dev    # .venv from uv.lock, with the dev tools (they are opt-in)
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+uv run pre-commit install
 ```
 
 The last command installs both git hooks; check with `ls .git/hooks/pre-commit
@@ -181,8 +181,8 @@ dev tools, so the hooks would fail.
 **Checks run themselves:** just commit and push. On `git commit` the hooks run ruff,
 mypy and the tests that need no git (about 8 s); on `git push`, the whole suite (about a
 minute). A failing check stops the commit or push and says why. There is no need to run
-them first: that only runs them twice. The checks are defined once, in
-`.pre-commit-config.yaml`; CI runs the same hooks, one job each.
+them first: that only runs them twice. The hooks are defined in
+`.pre-commit-config.yaml`; CI runs the same commands.
 
 To check work without committing (what is staged, as a commit would):
 

@@ -59,25 +59,22 @@ supported Python against the newest allowed versions, ignoring the lockfile.
 
 ## Checks
 
-The checks are defined once, as hooks in `.pre-commit-config.yaml`, in two stages:
+Locally, the checks are the hooks in `.pre-commit-config.yaml`, in two stages:
 
 - **pre-commit**: ruff format, ruff check, mypy, and the tests that need no git;
 - **pre-push**: the whole test suite.
 
-Everything runs those hooks the way git's own hooks do (`pre-commit run`, plus
-`--hook-stage pre-push` for that stage, and no file arguments, so what is checked is
-what is staged) rather than its own copy of the commands:
-
 | Who | Runs |
 |---|---|
-| git, once hooks are installed (`uv run pre-commit install --hook-type pre-commit --hook-type pre-push`) | each stage on commit and on push |
+| git, once hooks are installed (`uv run pre-commit install`) | each stage on commit and on push |
 | the Claude Code hook (`.claude/hooks/pre-commit-checks.sh`) | nothing: it blocks a `git commit` or `git push` unless git's hook for that stage is pre-commit's, so the checks always run through git, once |
-| CI (`.github/workflows/ci.yml`) | one job per hook, listed from `.pre-commit-config.yaml` when CI runs |
+| CI (`.github/workflows/ci.yml`) | the same commands, directly with `uv run`: one job per tool (`ruff`, `mypy`, `test`) |
 | you, to check work without committing | `uv run pre-commit run`, and `uv run pre-commit run --hook-stage pre-push` for the whole suite |
 
-To add or change a check, change `.pre-commit-config.yaml` and nothing else: CI gives a
-new hook its own job by itself. Give every hook a `stages` entry. Local runs and CI use
-the same Python (`.python-version`, the requires-python floor).
+To change a check, change it in both `.pre-commit-config.yaml` and `ci.yml`. Every hook
+checks the whole repository and runs whatever changed (`pass_filenames: false`,
+`always_run: true`), and names its stage. Local runs and CI use the same Python
+(`.python-version`, the requires-python floor).
 
 pytest is quiet and strict about markers by default (`addopts = "-q --strict-markers"`
 in `pyproject.toml`); to see individual tests, run pytest itself with `-vv`.

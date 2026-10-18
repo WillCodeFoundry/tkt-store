@@ -71,7 +71,7 @@ what is staged) rather than its own copy of the commands:
 | Who | Runs |
 |---|---|
 | git, once hooks are installed (`uv run pre-commit install --hook-type pre-commit --hook-type pre-push`) | each stage on commit and on push |
-| the Claude Code hook (`.claude/hooks/pre-commit-checks.sh`) | the same stage before a `git commit` or `git push`, unless git's own hook for it is pre-commit's (then git runs it, so it never runs twice) |
+| the Claude Code hook (`.claude/hooks/pre-commit-checks.sh`) | nothing: it blocks a `git commit` or `git push` unless git's hook for that stage is pre-commit's, so the checks always run through git, once |
 | CI (`.github/workflows/ci.yml`) | one job per hook, listed from `.pre-commit-config.yaml` when CI runs |
 | you, to check work without committing | `uv run pre-commit run`, and `uv run pre-commit run --hook-stage pre-push` for the whole suite |
 
@@ -82,9 +82,10 @@ the same Python (`.python-version`, the requires-python floor).
 pytest is quiet and strict about markers by default (`addopts = "-q --strict-markers"`
 in `pyproject.toml`); to see individual tests, run pytest itself with `-vv`.
 
-The Claude Code hook also enforces the commit policy: it blocks a commit that carries a
-`Co-Authored-By` trailer, uses `--no-gpg-sign` or would be unsigned, and any commit or
-push with `--no-verify`.
+For Claude Code, installing the git hooks is required, not optional: the hook refuses
+every commit and push until they are. It also enforces the commit policy: it blocks a
+commit that carries a `Co-Authored-By` trailer, uses `--no-gpg-sign` or would be
+unsigned, and any commit or push with `--no-verify`.
 
 Commits are signed and carry no co-author trailers. Never use `--no-verify`.
 Every tool's version is pinned once, in the `dev` group of `pyproject.toml`.

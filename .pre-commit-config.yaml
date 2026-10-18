@@ -3,8 +3,8 @@
 # never repeats their commands:
 #   - git hooks (once per clone: `uv run pre-commit install --hook-type pre-commit
 #     --hook-type pre-push`): the pre-commit stage on commit, the pre-push stage on push;
-#   - the Claude Code hook (.claude/hooks/pre-commit-checks.sh): the same stages, when
-#     git's own hooks are not installed;
+#   - the Claude Code hook (.claude/hooks/pre-commit-checks.sh) runs none: it blocks a
+#     commit or push until these git hooks are installed, so git always runs them;
 #   - CI (.github/workflows/ci.yml): one job per hook, read from this file;
 #   - by hand: `uv run pre-commit run` (the commit checks), and
 #     `uv run pre-commit run --hook-stage pre-push` (the whole suite).

@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# PreToolUse hook (see ../settings.json): runs before any Bash call containing
-# "git commit", checks it, and blocks it (exit 2) with a specific reason if
-# something is wrong - never fixes anything silently, so the failure message
-# is always the thing that tells Claude what to do next.
+# PreToolUse hook (see ../settings.json, which starts it only for git commands): runs
+# before a Bash call that runs `git commit` or `git push`, checks it, and blocks it
+# (exit 2) with a specific reason if something is wrong - never fixes anything silently,
+# so the failure message is always the thing that tells Claude what to do next.
+#
+# Policy (commits): no Co-Authored-By trailer, no --no-verify, no unsigned commit.
+# Checks: this hook runs none. In a repository with a .pre-commit-config.yaml it makes
+# sure git will run them: it blocks the commit or push unless git's own hook for that
+# stage (pre-commit, or pre-push) is the one pre-commit installed. pre-commit, run by
+# git, is then the only thing that ever runs the checks.
 #
 # Kept identical across repos; change it everywhere at once.
 set -u
@@ -13,10 +19,27 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 cmd=$(jq -r '.tool_input.command // empty')
-case "$cmd" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
+
+# Flags and subcommands are read from the command without its message: drop any heredoc
+# body and quoted strings, so a message (or a script) that merely mentions a command or
+# flag is not mistaken for it.
+bare=${cmd%%<<*}
+bare=$(printf '%s' "$bare" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
+
+# `git [-C dir | -c key=value]... <subcommand>` at the start of a command or after
+# ;, &&, || or |. `git commit-tree`, `git -C . log --grep=commit` and the like never match.
+runs() {
+  printf '%s' "$bare" |
+    grep -qE "(^|[;&|])[[:space:]]*git([[:space:]]+-[cC][[:space:]]+[^[:space:]]+)*[[:space:]]+$1([[:space:]]|$)"
+}
+
+if runs commit; then
+  stage=pre-commit
+elif runs push; then
+  stage=pre-push
+else
+  exit 0
+fi
 
 cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
 
@@ -27,55 +50,52 @@ block() {
   exit 2
 }
 
-shopt -s nocasematch
-case "$cmd" in
-  *"Co-Authored-By"*)
-    block "the commit command contains a Co-Authored-By trailer." \
-      "Remove the Co-Authored-By line from the commit message, then retry the commit."
-    ;;
-esac
-shopt -u nocasematch
+if [ "$stage" = pre-commit ]; then
+  shopt -s nocasematch
+  case "$cmd" in
+    *"Co-Authored-By"*)
+      block "the commit command contains a Co-Authored-By trailer." \
+        "Remove the Co-Authored-By line from the commit message, then retry the commit."
+      ;;
+  esac
+  shopt -u nocasematch
 
-# Flags are checked on the command without its message: drop any heredoc body and
-# quoted strings, so a message that merely mentions a flag is not mistaken for it.
-flags=${cmd%%<<*}
-flags=$(printf '%s' "$flags" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
+  case "$bare" in
+    *"--no-gpg-sign"*)
+      block "the commit command disables signing (--no-gpg-sign)." \
+        "Commits must be signed. Remove --no-gpg-sign and retry."
+      ;;
+  esac
 
-case "$flags" in
+  case "$bare" in
+    *" -S"* | *"--gpg-sign"*) ;;
+    *)
+      if [ "$(git config --get commit.gpgsign)" != "true" ]; then
+        block "the commit would not be signed." \
+          "Add -S to the git commit command (commit.gpgsign is not enabled), then retry."
+      fi
+      ;;
+  esac
+fi
+
+case "$bare" in
   *"--no-verify"*)
-    block "the commit command uses --no-verify." \
+    block "the command uses --no-verify." \
       "Never skip hooks. Fix whatever the hooks report, then retry without --no-verify."
     ;;
-  *"--no-gpg-sign"*)
-    block "the commit command disables signing (--no-gpg-sign)." \
-      "Commits must be signed. Remove --no-gpg-sign and retry."
-    ;;
 esac
 
-case "$flags" in
-  *" -S"* | *"--gpg-sign"*) ;;
-  *)
-    if [ "$(git config --get commit.gpgsign)" != "true" ]; then
-      block "the commit would not be signed." \
-        "Add -S to the git commit command (commit.gpgsign is not enabled), then retry."
-    fi
-    ;;
-esac
+[ -f .pre-commit-config.yaml ] || exit 0
 
-run_check() {
-  local label="$1"
-  shift
-  echo "pre-commit-checks.sh: running $label" >&2
-  if ! out=$("$@" 2>&1); then
-    block "$label failed." "$out"
-  fi
-}
-
-# Cheapest/fastest checks first, so a trivial style or type issue fails fast
-# instead of waiting on the full test run.
-run_check "ruff format --check" uv run ruff format --check .
-run_check "ruff check" uv run ruff check .
-run_check "mypy" uv run mypy
-run_check "pytest" uv run pytest
+# git runs pre-commit's checks only through the hook pre-commit installs; anything else
+# there (nothing, or another tool's hook) means they would not run at all.
+# (`--git-path` follows core.hooksPath.)
+git_hook=$(git rev-parse --git-path "hooks/$stage" 2>/dev/null)
+if ! { [ -x "$git_hook" ] && grep -q "File generated by pre-commit" "$git_hook" 2>/dev/null; }; then
+  block "git's $stage hook is not pre-commit's, so the checks would not run." \
+    "Install pre-commit's git hooks (once per clone), then retry:
+  uv sync --group dev
+  uv run pre-commit install"
+fi
 
 exit 0

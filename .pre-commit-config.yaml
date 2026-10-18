@@ -1,10 +1,22 @@
-# All hooks are `repo: local` and run via `uv run`, so the only place any tool's
-# version is pinned is the `dev` group in pyproject.toml - never a second pin here.
+# The checks that run locally, through git's hooks:
+#   - git, once per clone `uv run pre-commit install` has installed both hook types
+#     (`default_install_hook_types`): the pre-commit stage on commit, the pre-push stage
+#     on push;
+#   - the Claude Code hook (.claude/hooks/pre-commit-checks.sh) runs none: it blocks a
+#     commit or push until these git hooks are installed, so git always runs them;
+#   - by hand: `uv run pre-commit run` (the commit checks), and
+#     `uv run pre-commit run --hook-stage pre-push` (the whole suite).
+# CI (.github/workflows/ci.yml) runs the same commands directly, one job per tool; keep
+# the two in step when changing a check.
 #
-# Install both hook types once per clone: `uv run pre-commit install --hook-type
-# pre-commit --hook-type pre-push`. The pre-commit stage runs the cheap checks and the
-# tests that need no git (about 8 s); the tests that run real git take about a minute,
-# so the whole suite runs pre-push, exactly as CI's test job runs it.
+# The rule every hook follows: it checks the whole repository, never only the files a
+# commit touches (`pass_filenames: false`, the command decides what to check), and it
+# runs whatever changed (`always_run: true`), since ruff also formats Python inside
+# Markdown and pyproject.toml configures every tool. Every hook also names its stage.
+#
+# All hooks are `repo: local` and run via `uv run`, so the only place any tool's version
+# is pinned is the `dev` group in pyproject.toml.
+default_install_hook_types: [pre-commit, pre-push]
 repos:
   - repo: local
     hooks:
@@ -13,21 +25,21 @@ repos:
         entry: uv run ruff format --check .
         language: system
         pass_filenames: false
-        types: [python]
+        always_run: true
         stages: [pre-commit]
       - id: ruff-check
         name: ruff check
         entry: uv run ruff check .
         language: system
         pass_filenames: false
-        types: [python]
+        always_run: true
         stages: [pre-commit]
       - id: mypy
         name: mypy
         entry: uv run mypy
         language: system
         pass_filenames: false
-        types: [python]
+        always_run: true
         stages: [pre-commit]
       - id: pytest-fast
         name: pytest (tests that need no git)
@@ -37,7 +49,7 @@ repos:
         always_run: true
         stages: [pre-commit]
       - id: pytest
-        name: pytest (the whole suite, as CI runs it)
+        name: pytest (the whole suite)
         entry: uv run pytest
         language: system
         pass_filenames: false

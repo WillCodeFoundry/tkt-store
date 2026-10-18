@@ -4,7 +4,14 @@ Protocol 2 (0.2.0) is the format of ADR 0005 and ADR 0007: claims are files of t
 own whose names hold their state, claim ids are stored only as their SHA-256 hash, and
 everything read is checked; anything that fails a check is set aside, never fatal.
 Protocol 1 stores are not read and not migrated. Pre-1.0, while no store is deployed,
-format changes keep protocol 2 when documented here (AGENTS.md).
+format changes keep protocol 2 when documented here (see *Changing the format*).
+
+## Changing the format
+
+Any change to the on-branch format bumps `PROTOCOL_VERSION` in
+`infrastructure/git/wire.py` and updates this document in the same change. Exception:
+before 1.0, any format change made while no store is deployed may keep
+`PROTOCOL_VERSION` when documented here.
 
 ## Branch layout
 

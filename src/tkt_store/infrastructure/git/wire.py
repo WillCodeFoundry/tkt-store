@@ -3,7 +3,7 @@ hold their state, op records as commit trailers (docs/format.md, ADR 0007).
 
 No git here — bytes and strings in, domain objects out (and back). Used by the git
 store and by history. Any change to this format bumps PROTOCOL_VERSION and updates
-docs/format.md in the same change (pre-1.0 exception: see AGENTS.md).
+docs/format.md in the same change (pre-1.0 exception: docs/format.md, *Changing the format*).
 
 Everything decoded here is treated as hostile (ADR 0005): decoding is strict, and an
 error never carries a value it read, only which check failed.

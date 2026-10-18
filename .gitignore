@@ -16,7 +16,6 @@ wheels/
 
 # Test, coverage and type-check caches
 .pytest_cache/
-.hypothesis/
 .coverage
 .coverage.*
 htmlcov/

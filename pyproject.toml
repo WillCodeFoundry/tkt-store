@@ -1,57 +1,36 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[project]
-name = "tkt-store"
-version = "0.1.0"
-description = "A git-backed ticket store for coordinating AI agents: atomic claims, leases, audit log."
-readme = "README.md"
-requires-python = ">=3.11"
-license = { text = "MIT" }
-dependencies = []  # stdlib only; requires the `git` binary at runtime
+# The repository root is a uv workspace with no package of its own: each package is a
+# member under src/, and this file holds what they share (dev tools, tool settings).
 
 [dependency-groups]
-dev = ["pytest>=8", "hypothesis>=6", "ruff==0.17.0", "mypy>=1.10", "pre-commit>=3"]
+dev = [
+  "pytest>=8", "ruff==0.17.0", "mypy>=1.10", "pre-commit>=3",
+  "state-store",  # installs the member under src/state-store, for its tests
+]
 
 [tool.uv]
 default-groups = []  # dev tools are opt-in: `uv sync --group dev`
 
-[project.scripts]
-tkt = "tkt_store.cli:main"
+[tool.uv.workspace]
+members = ["src/state-store"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/tkt_store"]
+[tool.uv.sources]
+state-store = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["src/state-store/tests"]
 addopts = "-q --strict-markers"
-markers = [
-  "git: needs a real git binary (integration, contract against GitStore)",
-  "slow: property tests and race tests",
-]
+markers = ["git: needs a real git binary"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+src = ["src/state-store", "src/state-store/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
-python_version = "3.11"  # the requires-python floor, whatever Python runs mypy
-mypy_path = "src"
-files = ["src", "tests", "scripts"]
-
-[[tool.mypy.overrides]]
-# Test functions take fixtures as parameters; their bodies are still checked.
-module = ["tests.*"]
-disallow_untyped_defs = false
-disallow_untyped_calls = false
-check_untyped_defs = true
-
-[[tool.mypy.overrides]]
-# The shared fixtures stay fully typed.
-module = ["tests.conftest"]
-disallow_untyped_defs = true
+python_version = "3.11"  # the members' requires-python floor, whatever Python runs mypy
+mypy_path = "src/state-store"
+files = ["src"]

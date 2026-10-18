@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "state-store"
+version = "0.0.0"
+description = "A key/value store on a git branch: snapshot reads, all-or-nothing commits by compare-and-swap."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []  # stdlib only; requires the `git` binary (2.29 or later) at runtime
+
+[tool.hatch.build.targets.wheel]
+packages = ["state_store"]

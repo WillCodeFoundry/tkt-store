@@ -5,8 +5,8 @@
 ## Context
 
 The threat model
-([0002](0002-trust-only-the-callers-machine-and-branch-protection.md)) treats every
-entry on the branch as untrusted. A broken or forged entry must not lead to a wrong
+([0003](0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md))
+treats every entry on the branch as untrusted. A broken or forged entry must not lead to a wrong
 result, and skipping it would mean deciding without the entry that mattered.
 
 ## Decision

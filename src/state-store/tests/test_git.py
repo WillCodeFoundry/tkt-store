@@ -88,7 +88,7 @@ def test_the_clone_is_never_checked_out_and_has_no_local_branch(make_clone: Make
     assert sorted(p.name for p in clone.iterdir()) == [".git"]
     assert run_git(clone, "for-each-ref", "refs/heads/").strip() == ""
     assert run_git(clone, "for-each-ref", "--format=%(refname)", "refs/state-store/").split() == [
-        f"refs/state-store/origin/{BRANCH}"
+        f"refs/state-store/{BRANCH}"
     ]
 
 
@@ -174,9 +174,10 @@ def test_a_remote_that_pushes_elsewhere_is_refused(
     assert caught.value.category is Category.NOT_A_CLONE
 
 
-def test_a_remote_that_is_not_configured_is_refused(make_clone: MakeClone) -> None:
+@pytest.mark.parametrize("remote", ["upstream", "-origin", "--push", "http://x"])
+def test_a_remote_that_is_not_configured_is_refused(make_clone: MakeClone, remote: str) -> None:
     with pytest.raises(StoreError) as caught:
-        open_store(make_clone(), remote="upstream")
+        open_store(make_clone(), remote=remote)
     assert caught.value.category is Category.NOT_A_CLONE
 
 
@@ -188,10 +189,9 @@ def test_invalid_branch_names_are_refused(make_clone: MakeClone, branch: str) ->
         open_store(make_clone(), branch=branch)
 
 
-@pytest.mark.parametrize("remote", ["", "-origin", "a/b", "a b", "http://x"])
-def test_invalid_remote_names_are_refused(make_clone: MakeClone, remote: str) -> None:
+def test_an_empty_remote_name_is_refused(make_clone: MakeClone) -> None:
     with pytest.raises(ValueError):
-        open_store(make_clone(), remote=remote)
+        open_store(make_clone(), remote="")
 
 
 def test_a_bare_repository_is_refused(bare_remote: Path) -> None:
@@ -349,6 +349,7 @@ def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
             hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
             hook.chmod(0o755)
     run_git(clone, "config", "core.hooksPath", str(tmp_path / "hooks"))
+    run_git(clone, "config", "gc.auto", "1")  # so the maintenance after each fetch runs gc
     store = open_store(clone)
     snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
     store.commit(snap.with_value("a", b"2"), "two")

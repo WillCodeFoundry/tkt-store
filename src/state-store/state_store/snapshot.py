@@ -104,7 +104,7 @@ class StateStore(Protocol):
         Arguments are checked first: `ValueError` for a snapshot from another store
         object or a message holding NUL, even when nothing changes. Then a snapshot
         that changes nothing is returned as the snapshot it derives from, without
-        contacting the remote. Otherwise `StaleSnapshot` (or `UnknownOutcome`) or
+        contacting anything. Otherwise `StaleSnapshot` (or `UnknownOutcome`) or
         `StoreError`."""
         ...
 

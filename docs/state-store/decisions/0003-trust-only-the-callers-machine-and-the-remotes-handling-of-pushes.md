@@ -1,12 +1,14 @@
-# 0002: Trust only the caller's machine and branch protection
+# 0003: Trust only the caller's machine and the remote's handling of pushes
 
 **Status:** accepted
 
 ## Context
 
-This is state-store's threat model. Writers on different machines share one store.
-Anyone with push access to the remote can write anything to the branch, with plain git
-or a buggy or compromised program.
+This is state-store's threat model. Writers on different machines share one store, kept
+on a branch of a git remote
+([0002](0002-store-keys-as-paths-in-the-tree-of-one-git-branch.md)). Anyone with push
+access to the remote can write anything to the branch, with plain git or a buggy or
+compromised program.
 Callers may be automated, and may pass an error from state-store on to an AI agent.
 state-store does not control the remote: it may be a hosting service, a server over
 SSH, or a bare repository.
@@ -65,8 +67,8 @@ Impersonation, denial of service and disclosure are not defended.
 
 - Someone with push access can commit anything that passes the checks, under any
   name: state-store checks what it reads, not who wrote it.
-- A writer can keep other commits failing by committing constantly, or block
-  operations with a bad entry, until an operator steps in.
+- A writer can keep other commits failing by committing constantly, until an operator
+  steps in.
 - Anyone who can read the remote can read every value, so the store must not hold
   secrets.
 - A deployment must meet the git store's preconditions and requirements

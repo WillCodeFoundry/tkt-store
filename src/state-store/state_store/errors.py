@@ -17,7 +17,7 @@ class StaleSnapshot(Exception):
 
 
 class UnknownOutcome(StaleSnapshot):
-    """The connection failed during the push: the commit may or may not have landed.
+    """The connection failed during the commit: the commit may or may not have landed.
 
     Take a new snapshot and decide again; it shows whether the commit landed. A caller
     whose changes are not safe to repeat checks for them first."""
@@ -30,7 +30,7 @@ class KeyCollision(ValueError):
 
 
 class Category(Enum):
-    """What kind of `StoreError` it is (state-store README, *Errors*)."""
+    """What kind of `StoreError` it is (state-store README, *Git store*)."""
 
     CORRUPT = "the branch holds something the store would never write"
     REFUSED = "the remote refused the commit"
@@ -46,7 +46,8 @@ class Category(Enum):
 class StoreError(Exception):
     """A failure the store cannot recover from; an operator acts. Never retried.
 
-    `detail` names the operation, key or check, never text read from git or the store."""
+    `detail` names the operation or the check that failed: never a key, a value, nor text
+    from git or the remote (state-store README, *Errors*)."""
 
     def __init__(self, category: Category, detail: str = "") -> None:
         self.category = category

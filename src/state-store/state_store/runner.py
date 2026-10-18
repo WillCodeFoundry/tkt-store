@@ -1,8 +1,9 @@
 """Running git: the one place this package starts a process (state-store design §6, §8).
 
 Every command is an argument list, never a shell, run in the clone with hooks off,
-prompts off, lazy fetches off, replace objects off, untranslated messages, and the
-inherited variables that would point git at other repository data removed. A failure
+git's automatic maintenance in the foreground, prompts off, lazy fetches off, replace
+objects off, untranslated messages, and the inherited variables that would point git at
+other repository data removed. A failure
 becomes a `GitFailure` that carries git's exit code, output and the category of its
 message; git's text itself goes only to the operator log, never into an exception's
 message, arguments or repr, and the store raises its own errors `from None`.
@@ -146,7 +147,8 @@ class Runner:
         raise NotImplementedError
 
     def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
-        """`git -C <repo> -c core.hooksPath=/dev/null <args>`'s stdout; `GitFailure` on a
-        non-zero exit, after logging git's text for an operator. git 2.53 has no hooks
-        configured outside `core.hooksPath`; check again when the minimum git moves."""
+        """The stdout of `git -C <repo> -c core.hooksPath=/dev/null -c gc.autoDetach=false
+        <args>`; `GitFailure` on a non-zero exit, after logging git's text for an operator.
+        git 2.53 has no hooks configured outside `core.hooksPath`; check again when the
+        minimum git moves."""
         raise NotImplementedError

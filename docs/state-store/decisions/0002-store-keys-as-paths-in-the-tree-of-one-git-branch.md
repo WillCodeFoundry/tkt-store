@@ -1,4 +1,4 @@
-# 0003: Store keys as paths in the tree of one git branch
+# 0002: Store keys as paths in the tree of one git branch
 
 **Status:** accepted
 

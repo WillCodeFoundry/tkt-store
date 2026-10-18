@@ -131,12 +131,15 @@ For the git store these hold under the preconditions in *Git store*.
 | `UnknownOutcome` (a `StaleSnapshot`) | The connection failed during the commit: it may or may not have landed. | The same; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
 | `StoreError` | Anything else; `.category` says what. | Stops; an operator acts. |
 | `KeyCollision` (a `ValueError`) | A write would make a key both a value and a namespace. It can come from data another writer stored, not only from this caller's code. | Treats it as a conflict between writers: stops. |
-| `ValueError` | A caller bug: an invalid key, namespace, branch or remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
+| `ValueError` | A caller bug: an invalid key, namespace or branch name, an empty remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
 
-In the git store, any operation that reads stored state can raise `StoreError`: `get`,
-`keys` and `with_value` (which checks collisions against the stored state) as well as
-`snapshot` and `commit`. No error message contains a stored value or name, nor text from outside
-state-store.
+In the git store, any operation can raise `StoreError`: `snapshot` and `commit` when
+git fails, and `get`, `keys`, `with_value` (which checks collisions against the stored
+state) and `commit` also when what they read is corrupt.
+
+An error's message holds only state-store's own text: the operation, the category, and
+the check that failed. It never holds a key (the caller knows which key it passed), a
+value, or text from outside state-store, such as git's output.
 
 ## Keys
 
@@ -166,8 +169,9 @@ What applies to `GitStateStore` only.
   on GitHub; `receive.denyNonFastForwards` and `receive.denyDeletes` on a bare
   repository). The store never does either, and compare-and-swap does not depend on
   it, but it stops other writers rewriting history.
-- **Every writer goes through state-store.** Anyone with push access and plain git can
-  write anything well-formed; the store checks what it reads, not who wrote it.
+- **Every writer goes through state-store.** Guarantee 3 depends on it: a commit made
+  with plain git can land without having been decided on the revision before it, and
+  nothing can tell.
 
 **Requirements:**
 
@@ -178,14 +182,11 @@ What applies to `GitStateStore` only.
 - `remote` is the name of a remote configured in the clone, not a URL, with exactly
   one URL, used for both fetching and pushing (no `pushurl`, no rewriting that makes
   them differ).
-- `remote` holds only `A-Z a-z 0-9 . _ -` and does not start with `-`.
 - `branch` is a plain branch name (`state`) that git accepts as `refs/heads/<branch>`:
   it does not start with `refs/` or `-`, is not `@` or `HEAD`, and holds no `@{`.
 - Nobody runs git against the clone or the branch by hand while writers are active.
 - Credentials are kept out of the remote's URL (use a credential helper): the operator
   log can quote the URL, and anything that can read the clone can read the log.
-
-The store never writes a working tree: values exist only in git's object store.
 
 **Error categories** (`StoreError.category`):
 

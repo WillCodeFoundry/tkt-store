@@ -7,7 +7,8 @@ both stores; the rest is about the git store.
 
 Each store supplies a read-only view of one committed state: it lists a namespace's
 entries (each one's name, whether it is a value or a namespace, a value's size, and
-whether a namespace is empty) and reads a value. Everything else is common to both stores, in one implementation
+whether a namespace is empty) and reads a value. Everything else is common to both
+stores, in one implementation
 ([0004](decisions/0004-use-immutable-snapshots-and-compare-and-swap-commits.md)): the
 checks on what is read, the merging of changes, and remembering what was read.
 
@@ -43,8 +44,8 @@ Anything else is `StoreError(CORRUPT)` for any operation that touches it:
 - `commit` checks every entry of every namespace it rebuilds, so a bad entry next to a
   changed key is never carried into a new commit.
 
-The error names the key or namespace and the check that failed, never the offending
-name or content. The store does not check values: they are bytes, and what they mean
+The error names the check that failed ([README](README.md#errors)). The store does
+not check values: they are bytes, and what they mean
 is the caller's.
 
 **A commit** first checks its arguments, then works out whether the snapshot changes
@@ -78,15 +79,18 @@ the root is the only tree that can be empty.
 ## 3. Taking a snapshot and reading
 
 ```
-git fetch --no-tags -- <remote> +refs/heads/<branch>:refs/state-store/<remote>/<branch>
-git rev-parse --verify --quiet refs/state-store/<remote>/<branch>^{commit}
+git fetch --no-tags -- <remote> +refs/heads/<branch>:refs/state-store/<branch>
+git rev-parse --verify --quiet refs/state-store/<branch>^{commit}
 ```
 
-The branch is fetched into a **private ref** that only state-store writes. There is no
-local branch: the remote is the truth, and the private ref is only where the last fetch
-landed. The forced refspec (`+`) is safe because nothing else writes the private ref.
-Private refs follow git's ref naming, so one clone cannot hold refs for both a branch
-`x` and a branch `x/y`, which is one reason for one store per clone.
+The branch is fetched into a **private ref**, `refs/state-store/<branch>`. It names the
+commit just fetched, keeps that commit's objects from being pruned, and tells the next
+fetch what the clone already has, so only new objects are transferred. Only state-store
+writes it: a local branch could be checked out or pushed, and `refs/remotes/…` is moved
+or pruned by any ordinary fetch. So the forced refspec (`+`) is safe. The private ref is
+not the truth, the remote is: the next fetch corrects a stale or missing private ref.
+git's ref naming means one clone cannot hold private refs for both a branch `x` and a
+branch `x/y`, one reason for one store per clone.
 
 If the fetch fails, one `git ls-remote -- <remote> refs/heads/<branch>` decides, its
 output compared with the exact ref name (`ls-remote` matches patterns on the end of a
@@ -117,7 +121,9 @@ it, and checks every entry in it.
 
 **Old snapshots stay readable.** Under the preconditions the branch only moves
 forward, so every revision a snapshot was taken at stays reachable from the private
-ref, and git never prunes its objects.
+ref, and git never prunes its objects. The one exception is brief: a commit whose
+private ref update failed (§5, step 7) is unreachable until the next fetch, and git
+prunes only while fetching, after it has moved the private ref (§6).
 
 ## 4. Corrupt entries in git
 
@@ -146,7 +152,7 @@ fast-forward push, after which the store reads it normally.
 3. **Stop if nothing changed.** If the new root tree is the commit's tree (the empty
    tree for a store never committed to), the snapshot it derives from is returned, as
    the README describes.
-4. **Make the commit.**
+4. **Make the new commit, `<new>`.**
    `git -c user.useConfigOnly=true commit-tree <tree> [-p <revision>] -F -` with the
    message on stdin. git takes the author from its configuration; with
    `user.useConfigOnly` it never invents one from the account and host name, and a
@@ -154,7 +160,7 @@ fast-forward push, after which the store reads it normally.
    (`commit.gpgSign` does not apply to it).
 5. **Publish it by compare-and-swap.**
    ```
-   git push --porcelain --no-verify --no-follow-tags --force-with-lease=refs/heads/<branch>:<revision> -- <remote> <new>:refs/heads/<branch>
+   git push --porcelain --no-follow-tags --force-with-lease=refs/heads/<branch>:<revision> -- <remote> <new>:refs/heads/<branch>
    ```
    For a store never committed to, the lease is `refs/heads/<branch>:` (the branch must
    not exist). The lease makes git refuse the push unless the remote's branch is
@@ -162,15 +168,15 @@ fast-forward push, after which the store reads it normally.
    lease is also a fast-forward, and compare-and-swap holds even on a remote that allows
    forced pushes. `--no-follow-tags` keeps `push.followTags` from adding tags.
 6. **Read the outcome** (below).
-7. **Afterwards, best effort:** move the private ref to the new commit
-   (`git update-ref <private ref> <new>`), and run `git gc --auto --quiet`. Failures
-   here are ignored: the commit is published, and the next snapshot repairs the private
-   ref.
+7. **Afterwards, best effort:** move the private ref to `<new>`
+   (`git update-ref refs/state-store/<branch> <new>`). A failure here is ignored: the
+   commit is published, and the next snapshot corrects the private ref.
 
 ### Push outcomes
 
-`--porcelain` prints a status line per ref. The outcome is read from that line, never
-from git's wording; there must be exactly one, for `refs/heads/<branch>`.
+`--porcelain` makes the local git print a status line per ref. The outcome is read
+from that line, never from the remote's text; there must be exactly one, for
+`refs/heads/<branch>`.
 
 | What happened | Evidence | Result |
 |---|---|---|
@@ -194,7 +200,8 @@ store says it does not know.
 ## 6. Running git
 
 Every command is run as an argument list, never through a shell, as
-`git -C <repo> -c core.hooksPath=/dev/null <command> …`, with remote names after `--`.
+`git -C <repo> -c core.hooksPath=/dev/null -c gc.autoDetach=false <command> …`, with
+remote names after `--`.
 No command reads or writes a working tree or the index. The environment is the
 caller's, except that:
 
@@ -209,8 +216,15 @@ caller's, except that:
 The exact lists are in `state_store/runner.py`.
 
 `core.hooksPath=/dev/null` turns every hook off. Plumbing commands run none, but
-`fetch`, `update-ref`, `push` and `gc --auto` can run hooks; turning hooks off once is
-simpler than reasoning per command (`--no-verify` on `push` is redundant).
+`fetch` (with the maintenance it starts), `update-ref` and `push` can run hooks;
+turning hooks off once is simpler than reasoning per command.
+
+**Housekeeping is git's.** Each commit writes a few loose objects, and lost races leave
+unreachable ones. `fetch` already runs git's automatic maintenance afterwards, which
+packs objects and prunes unreachable ones older than two weeks once enough have built
+up. Every snapshot fetches, so the store runs no `gc` of its own. `gc.autoDetach=false`
+keeps that maintenance in the foreground, so no git process outlives the command that
+started it, and nothing runs in the clone between the store's commands.
 
 **The minimum git version is 2.15**, set by the newest option the store relies on:
 `rev-parse --is-shallow-repository`. Below that, `core.hooksPath` (2.9) is a security
@@ -221,9 +235,10 @@ CI runs a recent git.
 
 `GitStateStore(repo, remote=…, branch=…)` checks, without contacting the remote:
 
-- `branch` and `remote` follow the README's rules, else `ValueError`. Whether git
-  accepts the branch is asked of `git check-ref-format refs/heads/<branch>`, which
-  alone would accept `-x` and `HEAD`, hence the README's other rules.
+- `branch` follows the README's rules and `remote` is not empty, else `ValueError`.
+  Whether git accepts the branch is asked of `git check-ref-format
+  refs/heads/<branch>`, which alone would accept `-x` and `HEAD`, hence the README's
+  other rules.
 - `repo` is the top level of a non-bare repository (`git rev-parse
   --is-bare-repository` is `false`, and `git rev-parse --show-toplevel` is `repo`,
   both compared after resolving symlinks, so `-C` never walks up into an enclosing
@@ -231,9 +246,9 @@ CI runs a recent git.
   no remote has `promisor` set to true (`git config --bool --get-regexp
   '^remote\..*\.promisor$'`, each value checked, since an explicit `false` is listed
   too) and there is no `extensions.partialClone` (which older versions of git wrote).
-- `remote` is configured with exactly one URL (`git config --get-all
-  remote.<remote>.url`), no `remote.<remote>.pushurl`, and `git remote get-url <remote>`
-  equals `git remote get-url --push <remote>` (no `insteadOf` / `pushInsteadOf` making
+- `remote` is configured, with exactly one URL (`git config --get-all
+  remote.<remote>.url`), no `remote.<remote>.pushurl`, and `git remote get-url -- <remote>`
+  equals `git remote get-url --push -- <remote>` (no `insteadOf` / `pushInsteadOf` making
   them differ). With several URLs, git pushes to each and reports the last, so a commit
   can land on one server while the outcome says it was stale; with a separate push URL,
   `ls-remote` would check a different server from the one pushed to.
@@ -249,18 +264,18 @@ most the category, never the text. Local commands have their own, shorter list, 
 in `LOCAL`, so a local "Permission denied" is never mistaken for a remote refusing
 access. The wordings are in `state_store/runner.py`.
 
-An error's message names the operation and the category only, and the README's rule
-that errors carry no outside text holds even for a printed traceback. git's text goes
-to `<git dir>/state-store/git-errors.log` instead: appended under a
-header line, with every non-printable character but tab escaped and each line prefixed
-with `| ` so no line can pass for a header. A log that would pass 1 MiB is first moved
-to `git-errors.log.1`. The log may quote the server or the remote's URL (see the
+The README's rule on what an error's message holds applies to everything the store
+raises, even in a printed traceback. git's text goes to
+`<git dir>/state-store/git-errors.log` instead: appended under a header line, with
+every non-printable character but tab escaped and each line prefixed with `| ` so no
+line can pass for a header. A log that would pass 1 MiB is first moved to
+`git-errors.log.1`. The log may quote the server or the remote's URL (see the
 README's requirements on credentials). Logging never fails an operation.
 
 ## 9. Concurrency within one clone
 
-Two processes fetching in one clone at once can fail to lock the private ref
-(`StoreError(LOCAL)`); nothing is corrupted, and no wrong state is ever reported,
+Two processes fetching in one clone at once can fail to lock the private ref, a
+`StoreError`; nothing is corrupted, and no wrong state is ever reported,
 because every commit is still a compare-and-swap on the remote. Within one process,
 snapshots and stores are not thread-safe.
 

@@ -5,8 +5,7 @@ keeps all of its state in [state-store](../state-store/README.md), its storage
 component.
 
 > **Status: TBD.** tkt-store is designed as the rebuild reaches it. Each section below
-> is a placeholder for what this document will specify; the decisions already made are
-> in [`decisions/`](decisions/README.md).
+> is a placeholder for what this document will specify.
 
 ## Model
 

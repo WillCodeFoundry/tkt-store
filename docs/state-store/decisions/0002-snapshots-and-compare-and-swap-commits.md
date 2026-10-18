@@ -1,4 +1,4 @@
-# 0001: A key/value interface of immutable snapshots and compare-and-swap commits
+# 0002: A key/value interface of immutable snapshots and compare-and-swap commits
 
 **Status:** accepted (2026-10-18)
 

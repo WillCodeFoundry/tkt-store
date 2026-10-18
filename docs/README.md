@@ -10,7 +10,7 @@ why it is the way it is (`decisions/`).
 | **tkt-store** | |
 | [`tkt-store/README.md`](tkt-store/README.md) | What it promises: TBD |
 | [`tkt-store/design.md`](tkt-store/design.md) | How it keeps those promises using state-store: TBD |
-| [`tkt-store/decisions/`](tkt-store/decisions/README.md) | Its decisions, which bind all of tkt-store |
+| [`tkt-store/decisions/`](tkt-store/decisions/README.md) | Its decisions: none yet |
 | **state-store**, the component that keeps tkt-store's state | |
 | [`state-store/README.md`](state-store/README.md) | What it promises: interface, guarantees, errors, keys |
 | [`state-store/design.md`](state-store/design.md) | How it keeps those promises on git |

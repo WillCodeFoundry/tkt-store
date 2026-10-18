@@ -14,13 +14,13 @@ one of them is wrong: fix it, or amend the document in the same change, never si
 | What tkt-store promises, and how it keeps that using state-store | [`tkt-store/README.md`](tkt-store/README.md), [`tkt-store/design.md`](tkt-store/design.md) (both TBD) |
 | What state-store promises: its interface, guarantees, errors, keys | [`state-store/README.md`](state-store/README.md) |
 | How state-store keeps those promises on git | [`state-store/design.md`](state-store/design.md) |
-| A decision: why something is the way it is | [`tkt-store/decisions/`](tkt-store/decisions/README.md) (binding on all of tkt-store) or [`state-store/decisions/`](state-store/decisions/README.md); see *Decision records* below |
+| A decision: why something is the way it is | [`state-store/decisions/`](state-store/decisions/README.md), or [`tkt-store/decisions/`](tkt-store/decisions/README.md) (none yet); see *Decision records* below |
 
 ## Decision records
 
 A decision record says what was decided, why, and what was rejected; the specification
-and design documents say what is. Each component keeps its own in its `decisions/`
-directory; tkt-store's bind all of tkt-store, state-store included.
+and design documents say what is. tkt-store and state-store each keep their own, in
+their `decisions/` directory.
 
 - Name it `NNNN-short-title.md`, numbered in sequence within its directory, and add it
   to that directory's index.

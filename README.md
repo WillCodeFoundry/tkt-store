@@ -10,7 +10,7 @@ A ticket store for coordinating AI agents, kept on a git branch.
 
 | Part | What it is | Status |
 |---|---|---|
-| **tkt-store** | Tickets and claims for coordinating agents, and the interface agents use | TBD; the decisions made so far are in [`docs/tkt-store/decisions/`](docs/tkt-store/decisions/README.md) |
+| **tkt-store** | Tickets and claims for coordinating agents, and the interface agents use | TBD |
 | **state-store**, a component of tkt-store | Where tkt-store keeps all of its state: a key/value store on a git branch, with snapshot reads and all-or-nothing commits that land only if nothing changed since the snapshot. It knows nothing about tickets. | Specified; a skeleton (interface and tests), not yet implemented |
 
 ## Prerequisites

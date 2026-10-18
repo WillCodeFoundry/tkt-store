@@ -54,12 +54,16 @@ INVALID_KEYS = [
 ]
 
 
-@pytest.mark.parametrize("key", VALID_KEYS)
+def short(key: str) -> str:
+    return key if len(key) <= 40 else f"{len(key)} characters"
+
+
+@pytest.mark.parametrize("key", VALID_KEYS, ids=short)
 def test_valid_keys(key: str) -> None:
     assert check_key(key) == tuple(key.split("/"))
 
 
-@pytest.mark.parametrize("key", INVALID_KEYS)
+@pytest.mark.parametrize("key", INVALID_KEYS, ids=short)
 def test_invalid_keys(key: str) -> None:
     with pytest.raises(ValueError):
         check_key(key)
@@ -105,7 +109,11 @@ def test_values_up_to_the_limit() -> None:
     assert check_value(b"x" * MAX_VALUE_SIZE) == b"x" * MAX_VALUE_SIZE
 
 
-@pytest.mark.parametrize("value", [b"x" * (MAX_VALUE_SIZE + 1), "text", bytearray(b"x"), None])
+@pytest.mark.parametrize(
+    "value",
+    [b"x" * (MAX_VALUE_SIZE + 1), "text", bytearray(b"x"), None],
+    ids=["too large", "str", "bytearray", "None"],
+)
 def test_values_refused(value: object) -> None:
     with pytest.raises(ValueError):
         check_value(value)  # type: ignore[arg-type]

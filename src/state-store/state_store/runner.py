@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REMOTE_COMMANDS = frozenset({"fetch", "push", "ls-remote"})
-"""The only commands that talk to the remote: their failures are `RemoteFailed`."""
+SNAPSHOT_REMOTE_COMMANDS = frozenset({"fetch", "ls-remote"})
+"""What a snapshot runs against the remote: their failures there are `RemoteFailed`."""
 
 DROPPED_VARIABLES = frozenset(
     {

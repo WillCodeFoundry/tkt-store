@@ -97,10 +97,11 @@ def test_the_clone_is_never_checked_out_and_has_no_local_branch(make_clone: Make
     ]
 
 
-def test_without_an_identity_nothing_is_committed(make_clone: MakeClone) -> None:
+def test_without_an_identity_nothing_is_committed(make_clone: MakeClone, bare_remote: Path) -> None:
     store = open_store(make_clone(identity=False))
     with pytest.raises(NoIdentity):
         store.commit(store.snapshot().with_value("a", b""), "no author")
+    assert run_git(bare_remote, "for-each-ref").strip() == ""
 
 
 # --- Opening a store (§7) ---------------------------------------------------------------
@@ -302,6 +303,14 @@ def test_a_collision_check_that_reads_a_bad_entry_fails(make_clone: MakeClone) -
     emptied = snap.without("bad/ok")
     with pytest.raises(CorruptState):
         emptied.with_value("bad", b"now a value")
+
+
+def test_a_collision_check_reads_the_whole_namespace(make_clone: MakeClone) -> None:
+    """`bad` holds `ok` (a value) and `run` (an executable, listed after it): finding a
+    value is not enough, every entry listed is checked."""
+    _, snap = corrupt_snapshot(make_clone, "executable")
+    with pytest.raises(CorruptState):
+        snap.with_value("bad", b"now a value")
 
 
 def test_a_bad_entry_cannot_be_removed_through_the_store(make_clone: MakeClone) -> None:

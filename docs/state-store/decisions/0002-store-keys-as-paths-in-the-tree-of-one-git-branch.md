@@ -31,4 +31,4 @@ commit messages) would mean keeping them consistent.
 
 ## Consequences
 
-- git's history is the audit trail.
+- The branch's history can be read with plain git; state-store never reads it.

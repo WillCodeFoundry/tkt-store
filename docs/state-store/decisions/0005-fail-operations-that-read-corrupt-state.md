@@ -11,8 +11,8 @@ result, and skipping it would mean deciding without the entry that mattered.
 
 ## Decision
 
-- Anything on the branch that state-store would never have written is a `StoreError`
-  for the operation that reads it: never skipped, never partly used.
+- Anything on the branch that state-store would never have written is `CorruptState`
+  (a `StoreError`) for the operation that reads it: never skipped, never partly used.
 - Operations that do not read it are unaffected.
 
 ## Alternatives rejected

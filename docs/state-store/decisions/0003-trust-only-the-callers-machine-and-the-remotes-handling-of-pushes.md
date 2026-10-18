@@ -36,8 +36,8 @@ The kinds of threat this leaves:
   git's configuration and credentials): anyone who can change these can already run
   code there.
 - **The remote is trusted only to apply pushes and report their outcome truthfully**,
-  to refuse force pushes and deletion of the branch, and to be the same server for
-  fetching and pushing. Nothing could detect a remote that lies about outcomes.
+  to refuse force pushes and deletion of the branch, and to show fetching, `ls-remote`
+  and pushing the same state. Nothing could detect a remote that does not.
 - **Nothing else is trusted:** not the entries on the branch, whoever wrote them, nor
   any text the remote sends back (its hooks can write anything there).
 

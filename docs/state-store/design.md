@@ -266,7 +266,10 @@ transports, can describe a local or a remote problem in the same words, and can 
 from the server. It depends only on what the store can tell for certain: its own
 checks (`CorruptState`, `NotAClone`, `NoIdentity`), the push's status flag and where
 the branch is (`StaleSnapshot`, `CommitRefused`, `UnknownOutcome`), and which command
-failed (`RemoteFailed` for `fetch` and `ls-remote`, `GitFailed` for any other).
+failed: `RemoteFailed` for fetching, or checking whether the branch exists, while taking
+a snapshot (§3), and `GitFailed` for any other command, except one run as one of the
+store's checks, whose failure is that check's outcome (§7: `NotAClone`; §5, step 4:
+`NoIdentity`).
 
 The README's rule on what an error's message holds applies to everything the store
 raises, even in a printed traceback. git's text goes to

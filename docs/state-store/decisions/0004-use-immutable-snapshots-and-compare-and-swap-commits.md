@@ -20,7 +20,8 @@ The interface ([README](../README.md#interface)) is built on these choices:
 - **Commits are compare-and-swap on the whole store:** a commit lands only if the store
   has not changed at all since its snapshot was taken.
 - **The caller only has to tell two outcomes apart:** start again from a new snapshot,
-  or stop. A caller's own bug is a `ValueError`.
+  or stop. A caller's own bug is a `ValueError`. The kinds of error that mean stop tell
+  an operator what went wrong; the caller handles them all alike.
 - **One snapshot implementation for every store,** so the stores' semantics cannot
   drift.
 
@@ -30,7 +31,8 @@ The interface ([README](../README.md#interface)) is built on these choices:
   would see it change underneath; an immutable snapshot can be passed around and kept
   safely.
 - **Retrying inside the store:** it cannot redo the caller's decision.
-- **More error types:** a caller only ever needs to know whether to start again or stop.
+- **Error types a caller must handle differently:** a caller only ever needs to know
+  whether to start again or stop.
 
 ## Consequences
 

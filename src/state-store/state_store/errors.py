@@ -53,4 +53,4 @@ class GitFailed(StoreError):
 
 
 class RemoteFailed(GitFailed):
-    """A git command that talks to the remote failed."""
+    """Fetching, or checking whether the branch exists, failed while taking a snapshot."""

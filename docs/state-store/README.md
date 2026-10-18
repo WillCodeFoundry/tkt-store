@@ -142,7 +142,7 @@ The kinds of `StoreError` (each a subclass), raised by the git store only:
 | `NotAClone` | The path is not a usable clone, or its remote is not configured as required. |
 | `NoIdentity` | git has no author identity to commit with. |
 | `GitFailed` | A git command failed. |
-| `RemoteFailed` (a `GitFailed`) | A git command that talks to the remote failed: fetching or checking the branch. |
+| `RemoteFailed` (a `GitFailed`) | Fetching, or checking whether the branch exists, failed while taking a snapshot. |
 
 Every operation but `without` can raise `StoreError`: when git fails, or, for `get`,
 `keys`, `with_value` (which checks collisions against the stored state) and `commit`,
@@ -207,7 +207,7 @@ What applies to `GitStateStore` only.
   log (below) can quote the URL, and anything that can read the clone can read it.
 
 Each commit is a git commit with the caller's message and the writer's git identity as
-its author, so the branch's history can be read with git; state-store never reads it.
+its author.
 
 git's own output, which errors never carry, goes to a log in the clone's git directory,
 for an operator ([the design](design.md#8-errors-and-the-operator-log)).

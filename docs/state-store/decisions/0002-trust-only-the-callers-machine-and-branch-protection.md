@@ -1,11 +1,12 @@
-# 0002: Threat model: trust the caller's machine and the remote's branch protection
+# 0002: Trust only the caller's machine and branch protection
 
 **Status:** accepted
 
 ## Context
 
-Writers on different machines share one store. Anyone with push access to the remote
-can write anything to the branch, with plain git or a buggy or compromised program.
+This is state-store's threat model. Writers on different machines share one store.
+Anyone with push access to the remote can write anything to the branch, with plain git
+or a buggy or compromised program.
 Callers may be automated, and may pass an error from state-store on to an AI agent.
 state-store does not control the remote: it may be a hosting service, a server over
 SSH, or a bare repository.
@@ -42,9 +43,9 @@ state-store:
 - never runs hooks, checks out files, uses a shell or lets the environment point git at
   another repository, and always puts remote names after `--`;
 - checks everything it reads, and stops the operation that reads a bad entry
-  ([0005](0005-corrupt-state-stops-the-operation-that-reads-it.md));
+  ([0005](0005-fail-operations-that-read-corrupt-state.md));
 - never rewrites or deletes the branch, and commits only by compare-and-swap
-  ([0004](0004-snapshots-and-compare-and-swap-commits.md));
+  ([0004](0004-use-immutable-snapshots-and-compare-and-swap-commits.md));
 - puts only a category in its errors, never stored values or names, nor anything git or
   the remote printed; git's own output goes to a log in the clone, for an operator.
 

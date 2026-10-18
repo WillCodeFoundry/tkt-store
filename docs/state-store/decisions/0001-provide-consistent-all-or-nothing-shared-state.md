@@ -1,4 +1,4 @@
-# 0001: state-store provides consistent, all-or-nothing shared state without a server
+# 0001: Provide consistent, all-or-nothing shared state
 
 **Status:** accepted
 
@@ -12,7 +12,7 @@ hold the state.
 
 ## Decision
 
-state-store provides its callers with shared state that:
+state-store provides its callers, without a server, with shared state that:
 
 - is read **consistently**: every read through one snapshot sees the same moment;
 - changes **all or nothing**, across any number of keys;
@@ -20,7 +20,7 @@ state-store provides its callers with shared state that:
   anything older is refused, and the caller decides again;
 - is **durable and auditable**: a commit that returns is kept, and every change can be
   traced;
-- needs **no server** beyond a git remote the writers can already reach.
+- needs nothing beyond a git remote the writers can already reach.
 
 It deliberately does not provide per-key conflict detection, queries, locks, expiry or
 retries. The exact contract is in the [README](../README.md#guarantees).

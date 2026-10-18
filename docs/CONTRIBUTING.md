@@ -22,8 +22,10 @@ A decision record says what was decided, why, and what was rejected; the specifi
 and design documents say what is. tkt-store and state-store each keep their own, in
 their `decisions/` directory.
 
-- Name it `NNNN-short-title.md`, numbered in sequence within its directory, and add it
-  to that directory's index.
+- Its title is the decision as a short instruction ("Use …", "Store …"), and its file
+  name is the number and the title, in lowercase with hyphens:
+  `0003-store-values-as-files-on-one-git-branch.md`. Number it in sequence within its
+  directory, and add it to that directory's index.
 - A decision is never edited to say something else: a later one supersedes it, and both
   say so in their status.
 - Update the specification or design the decision changes in the same change.
@@ -31,7 +33,7 @@ their `decisions/` directory.
 Every record has this shape:
 
 ```markdown
-# NNNN: Title, stated as the decision
+# NNNN: The decision, as a short instruction
 
 **Status:** proposed | accepted | superseded by NNNN
 

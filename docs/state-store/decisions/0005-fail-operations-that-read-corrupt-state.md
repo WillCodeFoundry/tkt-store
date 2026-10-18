@@ -1,12 +1,13 @@
-# 0005: Corrupt state stops the operation that reads it
+# 0005: Fail operations that read corrupt state
 
 **Status:** accepted
 
 ## Context
 
-The threat model ([0002](0002-threat-model.md)) treats every entry on the branch as
-untrusted. A broken or forged entry must not lead to a wrong result, and skipping it
-would mean deciding without the entry that mattered.
+The threat model
+([0002](0002-trust-only-the-callers-machine-and-branch-protection.md)) treats every
+entry on the branch as untrusted. A broken or forged entry must not lead to a wrong
+result, and skipping it would mean deciding without the entry that mattered.
 
 ## Decision
 
@@ -19,8 +20,8 @@ would mean deciding without the entry that mattered.
 
 - **Set the bad entry aside and carry on:** decisions made on an incomplete view, and
   machinery to track what was set aside.
-- **Stop the whole store on any corruption:** a larger blast radius than needed when
-  every read is a direct, keyed lookup.
+- **Stop the whole store on any corruption:** it stops more than needed, since every
+  read is a direct, keyed lookup.
 
 ## Consequences
 

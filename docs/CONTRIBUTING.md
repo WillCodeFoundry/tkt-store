@@ -81,8 +81,8 @@ missing). Do not use `pip`.
 - The repository root is a uv workspace with no package of its own: each package under
   `src/` is a member with its own `pyproject.toml`, and the root `pyproject.toml` holds
   the dev tools and tool settings they share.
-- Every tool's version is pinned once, in the `dev` group of the root `pyproject.toml`;
-  the hooks and CI run it with `uv run`.
+- Every tool has a minimum version in the `dev` group of the root `pyproject.toml`, and
+  an exact version in `uv.lock`; the hooks and CI run it with `uv run`.
 - `uv.lock` is tracked and CI installs from it exactly (`uv sync --locked`). Commit it
   whenever dependencies change; refresh versions deliberately with `uv lock --upgrade`.
 - A weekly CI job (`latest-deps`) runs the whole suite on every supported Python

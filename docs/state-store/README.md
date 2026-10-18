@@ -108,8 +108,8 @@ The errors named here are described under [Errors](#errors).
    guessing.
 5. **It fails loudly.** An operation that depends on something the store would never
    have written fails with `CorruptState` instead of skipping it;
-   operations that do not depend on it are unaffected, and a commit never rebuilds a
-   namespace that holds it. Repairing it is described in
+   operations that do not depend on it are unaffected, and a commit that changes a key
+   in a namespace holding it fails too. Repairing it is described in
    [the design](design.md#4-corrupt-entries-in-git).
 
 For the git store these hold under the preconditions in *Git store*.
@@ -194,8 +194,10 @@ What applies to `GitStateStore` only.
 **Requirements:**
 
 - git 2.15 or later (why: [the design](design.md#6-running-git)).
-- A full, non-bare clone, made without a checkout (`git clone --no-checkout`), given as
-  its top-level directory. Shallow, partial and bare clones are refused.
+- A full, non-bare clone, given as its top-level directory. Shallow, partial and bare
+  clones are refused. The store never uses a working tree, so make the clone with
+  `git clone --no-checkout`: a checkout only takes space, and leaves files that could be
+  taken for the store's.
 - One store (one branch) per clone, and one process at a time per clone.
 - `remote` is the name of a remote configured in the clone, not a URL, with exactly
   one URL, used for both fetching and pushing (no `pushurl`, no rewriting that makes

@@ -177,7 +177,8 @@ ordinary git commit and a fast-forward push, after which the store reads it norm
 ### Push outcomes
 
 `--porcelain` makes the local git print a status line per ref. The outcome is read
-from that line, never from the remote's text; there must be exactly one, for
+from that line's flag and git's own fixed summary (`[rejected] (stale info)` and the
+like), never from the remote's reason; there must be exactly one line, for
 `refs/heads/<branch>`.
 
 | What happened | Evidence | Result |
@@ -187,13 +188,16 @@ from that line, never from the remote's text; there must be exactly one, for
 | Our lease failed | flag `!`, `[rejected] (stale info)` | `StaleSnapshot` |
 | Not a fast-forward (defensive: the lease forces the push, so git should report the lease instead) | flag `!`, `[rejected] (non-fast-forward)` or `(fetch first)` | `StaleSnapshot` |
 | Any other `[rejected]` | flag `!` | `CommitRefused` |
-| Refused by the remote | flag `!`, `[remote rejected] (…)`; then `ls-remote` (as in §3) | the branch is the new commit: success; the branch moved to anything else: `StaleSnapshot`; the branch is still `revision`, or is gone: `CommitRefused`; `ls-remote` fails: `UnknownOutcome` |
+| Refused by the remote | flag `!`, `[remote rejected] (…)`; then `ls-remote` (as in §3) | the branch is the new commit: success; the branch is still `revision`, or is gone: `CommitRefused`; the branch moved to anything else: fetch it into the private ref, then success if the new commit is an ancestor of its tip (`git merge-base --is-ancestor`), else `StaleSnapshot`; `ls-remote` or that fetch fails: `UnknownOutcome` |
+| The remote did not report a status | flag `!`, `[remote failure]` | `UnknownOutcome` |
 | No usable status (no line, several lines, or one for another ref), whatever the failure | | `UnknownOutcome`: if nothing was sent (bad credentials, no such repository), the caller's next snapshot fails with `RemoteFailed` |
 
 The remote's reason inside `[remote rejected] (…)` is never parsed: a server can write
-anything there. Only whether the branch moved decides: a server's `update` hook runs
-after the pushed objects are stored, so it can apply the update and still report a
-refusal, which is why a refused push can end in success.
+anything there. Only where the branch is decides: a server's `update` hook runs after
+the pushed objects are stored, so it can apply the update and still report a refusal,
+and another writer can then commit on top before the store looks. Checking ancestry
+tells that apart from a lost race, so `StaleSnapshot` always means nothing was
+published.
 
 Why no `ls-remote` after a broken connection: the server applies an update once it has
 the pack and the commands, even if the client is gone, so a commit can land *after* an
@@ -264,7 +268,7 @@ Either of the last two checks failing is `NotAClone`.
 The kind of error never depends on git's text, which varies between versions and
 transports, can describe a local or a remote problem in the same words, and can come
 from the server. It depends only on what the store can tell for certain: its own
-checks (`CorruptState`, `NotAClone`, `NoIdentity`), the push's status flag and where
+checks (`CorruptState`, `NotAClone`, `NoIdentity`), the push's status line and where
 the branch is (`StaleSnapshot`, `CommitRefused`, `UnknownOutcome`), and which command
 failed: `RemoteFailed` for fetching, or checking whether the branch exists, while taking
 a snapshot (§3), and `GitFailed` for any other command, except one run as one of the

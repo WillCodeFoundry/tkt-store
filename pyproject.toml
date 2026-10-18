@@ -2,7 +2,7 @@
 
 [dependency-groups]
 dev = [
-  "pytest>=8", "ruff==0.17.0", "mypy>=1.10", "pre-commit>=3",
+  "pytest>=8", "ruff>=0.17.0", "mypy>=1.10", "pre-commit>=3",
   "state-store",  # installs the member under src/state-store, for its tests
 ]
 

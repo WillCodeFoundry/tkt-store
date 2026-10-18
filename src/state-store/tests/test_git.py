@@ -390,7 +390,9 @@ def test_no_hook_ever_runs(make_clone: MakeClone, tmp_path: Path) -> None:
     assert not marker.exists()
 
 
-def test_automatic_maintenance_runs_in_the_foreground(make_clone: MakeClone) -> None:
+def test_automatic_maintenance_runs_in_the_foreground(
+    make_clone: MakeClone, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """gc has finished by the time a snapshot returns, even where the clone's
     configuration says to detach it. (Only a fetch that succeeds runs maintenance.)"""
     seed_remote(make_clone)
@@ -399,8 +401,14 @@ def test_automatic_maintenance_runs_in_the_foreground(make_clone: MakeClone) -> 
     run_git(clone, "config", "gc.autoDetach", "true")
     make_gc_due(clone)
     packs = pack_count(clone)
+    trace = tmp_path / "trace"
+    monkeypatch.setenv("GIT_TRACE", str(trace))
     open_store(clone).snapshot()
+    monkeypatch.delenv("GIT_TRACE")
     assert pack_count(clone) < packs
+    gc_runs = [line for line in trace.read_text().splitlines() if "git gc --auto" in line]
+    assert gc_runs
+    assert all("--no-detach" in line for line in gc_runs)
 
 
 def test_tags_are_never_pushed(make_clone: MakeClone, bare_remote: Path) -> None:
@@ -538,6 +546,24 @@ def test_a_push_refused_after_the_remote_applied_it_is_a_success(
     landed = store.commit(snap.with_value("a", b"2"), "applied, then refused")
     assert landed.revision == run_git(bare_remote, "rev-parse", f"refs/heads/{BRANCH}").strip()
     assert open_store(make_clone()).snapshot().get("a") == b"2"
+
+
+def test_a_push_refused_after_it_landed_and_was_built_on_is_a_success(
+    make_clone: MakeClone, bare_remote: Path
+) -> None:
+    """The hook applies our commit, commits on top of it, then refuses: the branch is
+    elsewhere, but our commit is in its history."""
+    store = open_store(make_clone())
+    snap = store.commit(store.snapshot().with_value("a", b"1"), "one")
+    install_server_hook(
+        bare_remote,
+        "update",
+        'top=$(git -c user.name=s -c user.email=s@x commit-tree "$3^{tree}" -p "$3" -m on-top)'
+        ' || exit 1\ngit update-ref "$1" "$top"\n' + REFUSING_HOOK,
+    )
+    landed = store.commit(snap.with_value("a", b"2"), "applied, built on, then refused")
+    tip = run_git(bare_remote, "rev-parse", f"refs/heads/{BRANCH}").strip()
+    assert landed.revision == run_git(bare_remote, "rev-parse", f"{tip}^").strip()
 
 
 def test_a_refused_push_whose_branch_cannot_be_read_has_an_unknown_outcome(

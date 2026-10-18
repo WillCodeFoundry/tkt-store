@@ -16,7 +16,7 @@ dev = [
     { name = "mypy", specifier = ">=1.10" },
     { name = "pre-commit", specifier = ">=3" },
     { name = "pytest", specifier = ">=8" },
-    { name = "ruff", specifier = "==0.17.0" },
+    { name = "ruff", specifier = ">=0.17.0" },
     { name = "state-store", editable = "src/state-store" },
 ]
 

@@ -141,6 +141,7 @@ uv run python scripts/check_remote.py --repo /work/tasks --remote origin
 | `docs/design.md` | Concepts, module boundaries, invariants, failure model |
 | `docs/format.md` | On-branch layout, ticket schema, commit trailers |
 | `docs/cli.md` | Commands, exit codes, JSON output |
+| `docs/development.md` | Setup, checks, testing, commit rules |
 | `docs/decisions/` | Architecture decision records |
 | `src/tkt_store/` | The package (layered; see below) |
 | `tests/` | Unit, contract, integration and property tests |
@@ -159,40 +160,5 @@ The package is organised in layers, with dependencies pointing inward only
 
 ## Development
 
-This project uses [uv](https://docs.astral.sh/uv/) for environments,
-dependencies and running tools. Do not use `pip`.
-
-**Set up a clone for development** (once per clone). You need uv and git 2.29 or later;
-uv fetches the Python in `.python-version` (3.11, the oldest supported, as CI uses) if
-you have none.
-
-```sh
-git clone https://github.com/WillCodeFoundry/tkt-store.git
-cd tkt-store
-uv sync --group dev    # .venv from uv.lock, with the dev tools (they are opt-in)
-uv run pre-commit install
-```
-
-The last command installs both git hooks; check with `ls .git/hooks/pre-commit
-.git/hooks/pre-push`. It refuses to install if git's `core.hooksPath` is set: unset it,
-or point it at a directory that runs these hooks. A plain `uv sync` installs none of the
-dev tools, so the hooks would fail.
-
-**Checks run themselves:** just commit and push. On `git commit` the hooks run ruff,
-mypy and the tests that need no git (about 8 s); on `git push`, the whole suite (about a
-minute). A failing check stops the commit or push and says why. There is no need to run
-them first: that only runs them twice. The hooks are defined in
-`.pre-commit-config.yaml`; CI runs the same commands.
-
-To check work without committing (what is staged, as a commit would):
-
-```sh
-uv run pre-commit run                        # what a commit checks
-uv run pre-commit run --hook-stage pre-push  # the whole suite
-```
-
-Every tool's version is pinned once, in the `dev` group of `pyproject.toml`; the hooks
-run it with `uv run`.
-
-`uv.lock` is tracked; commit it whenever dependencies change. See `AGENTS.md` for how
-the checks are wired, the commit rules and the Claude Code hook.
+Setting up a clone, the checks (they run themselves on commit and push), testing and
+the commit rules: [`docs/development.md`](docs/development.md).

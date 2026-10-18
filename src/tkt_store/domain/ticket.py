@@ -267,7 +267,7 @@ class Ticket:
 
     def to_dict(self) -> dict[str, Any]:
         """The ticket as plain data. This IS the on-branch ticket format (docs/format.md):
-        a change here is a format change, under the protocol-version rule in AGENTS.md.
+        a change here is a format change, under the protocol-version rule in docs/format.md.
         Interfaces print it too."""
         return {
             "id": self.id,

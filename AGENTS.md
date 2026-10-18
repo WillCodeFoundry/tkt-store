@@ -1,88 +1,13 @@
 # AGENTS.md
 
-Rules for agents (and humans) working on this repository.
+Where to find what you need to work on this repository. The rules live in these
+documents; read the ones your change touches before making it.
 
-Read `docs/design.md` first. It is the authority on concepts, boundaries and
-invariants. If code and design disagree, one of them is wrong: fix it, or amend
-the design in the same change. Never deviate silently.
-
-## Boundaries (enforced by `tests/unit/test_architecture.py`)
-
-Dependencies point **inward only**: `domain` ← `application` ← `infrastructure`,
-`domain` ← `application` ← `cli`, and `__init__` (the composition root) wires them together.
-
-- `domain/*` is **pure**: no IO, no git, no clock reads, no randomness. It imports
-  only from within `domain`.
-- `application/*` imports `domain` and `application` only. It defines the ports
-  (`Store`, `Clock`, `IdSource`); it must not import `infrastructure`.
-- `infrastructure/*` implements the ports. Only modules under `infrastructure/git/`
-  run `git`; only `infrastructure/clock.py` reads time; only `infrastructure/ids.py`
-  creates random values.
-- `cli` imports `application` (and `domain` types) + the composition root (`__init__`:
-  `open_store`, `new_id_source`); never `infrastructure`.
-- The transaction loop depends on the `Store` port, never on a concrete store.
-- Choosing concrete implementations happens in exactly one place: `tkt_store.open_store`
-  (in `__init__`).
-
-## Testing
-
-- Use dependency injection with fakes (`MemStore`, `FakeClock`, a fixed id source).
-  Do not `monkeypatch` or `mock.patch` internals.
-- Any change to store behaviour must be expressed in `tests/contract/` so both
-  stores keep identical semantics.
-- Race and crash behaviour is tested against real git (`tests/integration/`).
-- Security findings live in `tests/security/` as strict expected failures, marked
-  `@pytest.mark.security_bug(reason)` (a defect) or `security_design(reason)` (needs a
-  decision). A fix removes its marker; a new finding gets its failing test first. The
-  model they test: ADR 0005 and `docs/design.md` §8.
-- Test modules read on their own: constants and small builders are defined where used.
-  The only module tests import from `tests/` is `tests/gitkit.py` (real-git machinery).
-
-## Format changes
-
-Any change to the on-branch format bumps `PROTOCOL_VERSION` in
-`infrastructure/git/wire.py` and updates `docs/format.md` in the same change.
-Exception: before 1.0, any format change made while no store is deployed may keep
-`PROTOCOL_VERSION` when documented in `docs/format.md`.
-
-## Tooling
-
-Use `uv` for everything: `uv sync --group dev` to set up (dev tools are an opt-in
-group; a plain `uv sync` installs none), `uv add` / `uv add --dev` to change
-dependencies, `uv run <tool>` to run tools. Never use `pip` or `pip install`.
-
-`uv.lock` is tracked and CI installs from it exactly (`uv sync --locked`). Commit it
-whenever dependencies change; refresh versions deliberately with `uv lock --upgrade`.
-It pins only the development environment: consumers of the package resolve from
-`pyproject.toml`. A weekly CI job (`latest-deps`) runs the whole suite on every
-supported Python against the newest allowed versions, ignoring the lockfile.
-
-## Checks
-
-Locally, the checks are the hooks in `.pre-commit-config.yaml`, in two stages:
-
-- **pre-commit**: ruff format, ruff check, mypy, and the tests that need no git;
-- **pre-push**: the whole test suite.
-
-| Who | Runs |
+| To | Read |
 |---|---|
-| git, once hooks are installed (`uv run pre-commit install`) | each stage on commit and on push |
-| the Claude Code hook (`.claude/hooks/pre-commit-checks.sh`) | nothing: it blocks a `git commit` or `git push` unless git's hook for that stage is pre-commit's, so the checks always run through git, once |
-| CI (`.github/workflows/ci.yml`) | the same commands, directly with `uv run`: one job per tool (`ruff`, `mypy`, `test`) |
-| you, to check work without committing | `uv run pre-commit run`, and `uv run pre-commit run --hook-stage pre-push` for the whole suite |
-
-To change a check, change it in both `.pre-commit-config.yaml` and `ci.yml`. Every hook
-checks the whole repository and runs whatever changed (`pass_filenames: false`,
-`always_run: true`), and names its stage. Local runs and CI use the same Python
-(`.python-version`, the requires-python floor).
-
-pytest is quiet and strict about markers by default (`addopts = "-q --strict-markers"`
-in `pyproject.toml`); to see individual tests, run pytest itself with `-vv`.
-
-For Claude Code, installing the git hooks is required, not optional: the hook refuses
-every commit and push until they are. It also enforces the commit policy: it blocks a
-commit that carries a `Co-Authored-By` trailer, uses `--no-gpg-sign` or would be
-unsigned, and any commit or push with `--no-verify`.
-
-Commits are signed and carry no co-author trailers. Never use `--no-verify`.
-Every tool's version is pinned once, in the `dev` group of `pyproject.toml`.
+| understand the concepts, boundaries and invariants (the authority: code and design must agree) | [`docs/design.md`](docs/design.md) |
+| set up a clone, run the checks, write tests, commit | [`docs/development.md`](docs/development.md) |
+| change the on-branch format | [`docs/format.md`](docs/format.md) |
+| change the CLI | [`docs/cli.md`](docs/cli.md) |
+| know why something is the way it is | [`docs/decisions/`](docs/decisions/) |
+| use or deploy tkt-store | [`README.md`](README.md) |

@@ -33,7 +33,7 @@ Every record has this shape:
 ```markdown
 # NNNN: Title, stated as the decision
 
-**Status:** proposed | accepted (date) | superseded by NNNN
+**Status:** proposed | accepted | superseded by NNNN
 
 ## Context
 What forces the decision: the problem, the constraints, what is known.

@@ -1,14 +1,14 @@
 # 0001: state-store provides consistent, all-or-nothing shared state without a server
 
-**Status:** accepted (2026-10-18)
+**Status:** accepted
 
 ## Context
 
 Some programs need state that many writers, on different machines, read and change
 concurrently. A writer's change often spans several keys and is only correct if those
-keys are seen as they were at one moment and changed together. Getting that right in
-every caller is hard and easy to get subtly wrong, and running a server just to hold
-the state is a cost these programs want to avoid.
+keys are seen as they were at one moment and changed together. Getting that right is
+hard to do in every caller, and these programs would rather not run a server just to
+hold the state.
 
 ## Decision
 
@@ -30,10 +30,8 @@ retries. The exact contract is in the [README](../README.md#guarantees).
 - **A server-based store** (a database, etcd and the like): it gives the same
   guarantees, but someone has to run it.
 - **Weaker guarantees**, such as atomicity per key or conflict detection per key: two
-  writers could each decide on a view the other had already changed, which is the
-  mistake callers most need protecting from.
-- **Leaving concurrency to each caller:** every caller would have to solve the hardest
-  part again.
+  writers could each act on data the other had already changed.
+- **Leaving concurrency to each caller:** every caller would have to solve it again.
 
 ## Consequences
 

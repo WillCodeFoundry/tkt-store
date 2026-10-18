@@ -1,6 +1,6 @@
-# 0003: A key/value interface of immutable snapshots and compare-and-swap commits
+# 0004: A key/value interface of immutable snapshots and compare-and-swap commits
 
-**Status:** accepted (2026-10-18)
+**Status:** accepted
 
 ## Context
 

@@ -1,6 +1,6 @@
-# 0002: The store is files at the tip of one git branch
+# 0003: The store is files at the tip of one git branch
 
-**Status:** accepted (2026-10-18)
+**Status:** accepted
 
 ## Context
 
@@ -18,8 +18,6 @@ be kept consistent, which is where complexity comes from.
   work out what is true now; commit messages are for people reading `git log`, never
   data.
 - Every change is one commit, published by compare-and-swap on that one branch.
-- The one thing assumed of the remote: it refuses force pushes and deletion of the
-  branch.
 
 ## Alternatives rejected
 
@@ -36,5 +34,3 @@ be kept consistent, which is where complexity comes from.
 
 - Every commit is a push, so it costs a round trip to the remote.
 - The audit trail is git's history, for free.
-- Nothing may write to the branch with plain git: whatever bypasses state-store also
-  bypasses its checks.

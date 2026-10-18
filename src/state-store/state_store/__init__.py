@@ -3,15 +3,17 @@ only if nothing changed since the snapshot (state-store README)."""
 
 from state_store.errors import (
     CommitRefused,
+    CompareAndSwapFailed,
     CorruptState,
     GitFailed,
     KeyCollision,
     NoIdentity,
-    NotAClone,
+    NoSuchBranch,
+    PushElsewhere,
     RemoteFailed,
-    StaleSnapshot,
     StoreError,
     UnknownOutcome,
+    UnusableRepository,
 )
 from state_store.git import GitStateStore
 from state_store.keys import MAX_VALUE_SIZE
@@ -21,17 +23,19 @@ from state_store.snapshot import StateSnapshot, StateStore
 __all__ = [
     "MAX_VALUE_SIZE",
     "CommitRefused",
+    "CompareAndSwapFailed",
     "CorruptState",
     "GitFailed",
     "GitStateStore",
     "KeyCollision",
     "MemoryStateStore",
     "NoIdentity",
-    "NotAClone",
+    "NoSuchBranch",
+    "PushElsewhere",
     "RemoteFailed",
-    "StaleSnapshot",
     "StateSnapshot",
     "StateStore",
     "StoreError",
     "UnknownOutcome",
+    "UnusableRepository",
 ]

@@ -5,7 +5,13 @@ from __future__ import annotations
 
 import pytest
 
-from state_store import MAX_VALUE_SIZE, KeyCollision, StaleSnapshot, StateSnapshot, StateStore
+from state_store import (
+    MAX_VALUE_SIZE,
+    CompareAndSwapFailed,
+    KeyCollision,
+    StateSnapshot,
+    StateStore,
+)
 from state_store_testkit import Writers
 
 pytestmark = pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="skeleton")
@@ -20,22 +26,23 @@ def seeded(writers: Writers, values: dict[str, bytes]) -> tuple[StateStore, Stat
     return store, store.commit(snap, "seed")
 
 
-# --- A store never committed to ------------------------------------------------------
+# --- A new store ----------------------------------------------------------------------
 
 
-def test_a_new_store_is_empty(writers: Writers) -> None:
+def test_a_new_store_is_empty_at_a_first_revision(writers: Writers) -> None:
     snap = writers.new().snapshot()
-    assert snap.revision is None
+    assert isinstance(snap.revision, str)
     assert snap.changes == {}
     assert snap.get("a") is None
     assert snap.keys() == []
     assert snap.keys("inbox") == []
 
 
-def test_the_first_commit_makes_the_first_revision(writers: Writers) -> None:
+def test_the_first_commit_makes_a_new_revision(writers: Writers) -> None:
     store = writers.new()
-    committed = store.commit(store.snapshot().with_value("a", b"1"), "first")
-    assert committed.revision is not None
+    first = store.snapshot()
+    committed = store.commit(first.with_value("a", b"1"), "first")
+    assert committed.revision != first.revision
     assert committed.changes == {}
     assert committed.get("a") == b"1"
 
@@ -237,14 +244,15 @@ def test_committing_nothing_is_not_a_freshness_check(writers: Writers) -> None:
 
 def test_a_new_store_with_nothing_to_commit_stays_new(writers: Writers) -> None:
     store = writers.new()
-    assert store.commit(store.snapshot().without("a"), "nothing").revision is None
-    assert writers.new().snapshot().revision is None
+    first = store.snapshot()
+    assert store.commit(first.without("a"), "nothing").revision == first.revision
+    assert writers.new().snapshot().revision == first.revision
 
 
 def test_emptying_the_store_is_a_commit(writers: Writers) -> None:
     store, snap = seeded(writers, {"a": b"1"})
     emptied = store.commit(snap.without("a"), "empty")
-    assert emptied.revision not in (None, snap.revision)
+    assert emptied.revision != snap.revision
     assert emptied.keys() == []
     assert writers.new().snapshot().revision == emptied.revision
 
@@ -257,7 +265,7 @@ def test_a_commit_on_a_stale_snapshot_is_refused(writers: Writers) -> None:
     first, second = writers.new(), writers.new()
     mine, theirs = first.snapshot(), second.snapshot()
     second.commit(theirs.with_value("a", b"theirs"), "theirs")
-    with pytest.raises(StaleSnapshot):
+    with pytest.raises(CompareAndSwapFailed):
         first.commit(mine.with_value("a", b"mine"), "mine")
     assert writers.new().snapshot().get("a") == b"theirs"
 
@@ -267,7 +275,7 @@ def test_writes_to_different_keys_still_conflict(writers: Writers) -> None:
     first, second = writers.new(), writers.new()
     mine, theirs = first.snapshot(), second.snapshot()
     second.commit(theirs.with_value("b", b"1"), "b")
-    with pytest.raises(StaleSnapshot):
+    with pytest.raises(CompareAndSwapFailed):
         first.commit(mine.with_value("a", b"1"), "a")
 
 
@@ -275,7 +283,7 @@ def test_two_first_commits_conflict(writers: Writers) -> None:
     first, second = writers.new(), writers.new()
     mine, theirs = first.snapshot(), second.snapshot()
     second.commit(theirs.with_value("a", b"theirs"), "theirs")
-    with pytest.raises(StaleSnapshot):
+    with pytest.raises(CompareAndSwapFailed):
         first.commit(mine.with_value("a", b"mine"), "mine")
 
 
@@ -284,7 +292,7 @@ def test_a_snapshot_whose_store_moved_on_is_stale_even_after_its_own_commit(
 ) -> None:
     store, snap = seeded(writers, {"a": b"0"})
     store.commit(snap.with_value("a", b"1"), "first use")
-    with pytest.raises(StaleSnapshot):
+    with pytest.raises(CompareAndSwapFailed):
         store.commit(snap.with_value("a", b"2"), "second use of the same snapshot")
 
 
@@ -293,7 +301,7 @@ def test_starting_again_from_a_new_snapshot_succeeds(writers: Writers) -> None:
     first, second = writers.new(), writers.new()
     mine = first.snapshot()
     second.commit(second.snapshot().with_value("a", b"theirs"), "theirs")
-    with pytest.raises(StaleSnapshot):
+    with pytest.raises(CompareAndSwapFailed):
         first.commit(mine.with_value("b", b"mine"), "mine")
     again = first.snapshot()
     assert again.get("a") == b"theirs"

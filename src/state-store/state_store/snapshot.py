@@ -47,12 +47,12 @@ class Base(Protocol):
         ...
 
     @property
-    def revision(self) -> str | None:
-        """The committed state's id; None before the first commit."""
+    def revision(self) -> str:
+        """The committed state's id."""
         ...
 
-    def root(self) -> str | None:
-        """The root namespace's ref, or None for a store never committed to."""
+    def root(self) -> str:
+        """The root namespace's ref."""
         ...
 
     def listing(self, ref: str) -> tuple[Entry, ...]:
@@ -77,10 +77,10 @@ class CachedBase:
         raise NotImplementedError
 
     @property
-    def revision(self) -> str | None:
+    def revision(self) -> str:
         raise NotImplementedError
 
-    def root(self) -> str | None:
+    def root(self) -> str:
         raise NotImplementedError
 
     def listing(self, ref: str) -> tuple[Entry, ...]:
@@ -105,7 +105,7 @@ class StateStore(Protocol):
         object or a message holding NUL, even when nothing changes. Then a snapshot
         that changes nothing is returned as the snapshot it derives from, without
         contacting the remote (it can still raise `StoreError`). Otherwise
-        `StaleSnapshot` (or `UnknownOutcome`) or `StoreError`."""
+        `CompareAndSwapFailed` (or `UnknownOutcome`) or `StoreError`."""
         ...
 
 
@@ -122,8 +122,8 @@ class StateSnapshot:
         raise NotImplementedError
 
     @property
-    def revision(self) -> str | None:
-        """The revision this snapshot was taken at; None before the store's first commit."""
+    def revision(self) -> str:
+        """The revision this snapshot was taken at."""
         raise NotImplementedError
 
     @property

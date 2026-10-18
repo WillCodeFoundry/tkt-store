@@ -22,7 +22,7 @@ those promises is in [`design.md`](design.md), and why it is built this way is i
 | **key** | A path-like string, e.g. `inbox/item-1` (grammar below). |
 | **value** | Bytes, at most `MAX_VALUE_SIZE` (1 MiB). Never interpreted. |
 | **namespace** | A key prefix: `inbox` holds `inbox/item-1`. `""` is the root. |
-| **revision** | The id of one committed state of the store; `None` before the first commit. |
+| **revision** | The id of one committed state of the store. A new store is at a first revision, empty. |
 | **snapshot** | An immutable view of the store at one revision. A *taken* snapshot comes from the store object; a *derived* snapshot is a taken one plus changes. |
 | **change** | Setting a key to a value, or removing it, in a derived snapshot. |
 | **commit** | Publishing a derived snapshot's changes as the store's next revision, only if the store is still at the revision the snapshot was taken at: a **compare-and-swap**. |
@@ -30,9 +30,9 @@ those promises is in [`design.md`](design.md), and why it is built this way is i
 ## Example
 
 ```python
-from state_store import GitStateStore, StaleSnapshot
+from state_store import CompareAndSwapFailed, GitStateStore, UnknownOutcome
 
-store = GitStateStore("/work/store", remote="origin", branch="state")
+store = GitStateStore("/work/store")  # a clone made once by GitStateStore.clone
 
 while True:
     snap = store.snapshot()
@@ -42,8 +42,8 @@ while True:
     try:
         store.commit(next_snap, "archive item-0")
         break
-    except StaleSnapshot:
-        continue  # someone committed first: decide again on the new state
+    except (CompareAndSwapFailed, UnknownOutcome):
+        continue  # decide again on the new state, which shows whether an unknown commit landed
 ```
 
 A real caller bounds the loop and backs off between attempts.
@@ -56,7 +56,7 @@ class StateStore(Protocol):
     def commit(self, snapshot: StateSnapshot, message: str) -> StateSnapshot: ...
 
 class StateSnapshot:                       # immutable
-    revision: str | None                   # the revision it was taken at
+    revision: str                          # the revision it was taken at
     changes: Mapping[str, bytes | None]    # its changes, as given; None for a removal
     def get(self, key: str) -> bytes | None
     def keys(self, namespace: str = "") -> list[str]
@@ -86,11 +86,14 @@ class StateSnapshot:                       # immutable
 
 ## Store objects
 
-- `GitStateStore(repo, *, remote="origin", branch)`: the store on `branch` of `remote`,
-  through the clone at `repo`. Its requirements are under *Git store*.
+- `GitStateStore.clone(path, *, url, branch)`: clones `branch` of the remote at `url`
+  to `path`, which must not exist, and returns the store on it. Run once per clone;
+  the branch must already exist on the remote.
+- `GitStateStore(path)`: the store through the clone at `path`, which `clone` made.
+  Opening never contacts the remote. Its requirements are under *Git store*.
 - `MemoryStateStore()`: the same semantics in memory, for testing code that uses
-  state-store. One instance stands for one store that many writers share. It never
-  raises `StoreError` or `UnknownOutcome` by itself.
+  state-store. One instance stands for one store that many writers share, starting
+  empty. It never raises `StoreError` or `UnknownOutcome` by itself.
 
 ## Guarantees
 
@@ -116,7 +119,7 @@ For the git store these hold under the preconditions in *Git store*.
 
 ## What it does not do
 
-- **Retry.** A lost race is `StaleSnapshot`; the caller decides again.
+- **Retry.** A lost race is `CompareAndSwapFailed`; the caller decides again.
 - **Detect conflicts per key.** Any two concurrent commits conflict, even on unrelated
   keys, and one of them must start again (what that costs:
   [decision 0001](decisions/0001-provide-consistent-all-or-nothing-shared-state.md)).
@@ -127,11 +130,11 @@ For the git store these hold under the preconditions in *Git store*.
 
 | Error | Meaning | The caller |
 |---|---|---|
-| `StaleSnapshot` | The store changed since the snapshot was taken. Nothing was published. | Takes a new snapshot and decides again. |
-| `UnknownOutcome` (a `StaleSnapshot`) | The commit's outcome could not be read (for example, the connection failed during the commit): it may or may not have landed. | The same; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
+| `CompareAndSwapFailed` | The branch the commit was pushed to was not at the snapshot's revision: another writer committed first. Nothing was published. | Takes a new snapshot and decides again. |
+| `UnknownOutcome` | The commit's outcome could not be read (for example, the connection failed during the commit): it may or may not have landed. | Takes a new snapshot and decides again; the new snapshot shows whether it landed. A caller whose changes are not safe to repeat must check for them before deciding again. |
 | `StoreError` | Anything else; its kinds are below. | Stops; an operator acts. |
 | `KeyCollision` (a `ValueError`) | A write would make a key both a value and a namespace. It can come from data another writer stored, not only from this caller's code. | Treats it as a conflict between writers: stops. |
-| `ValueError` | A caller bug: an invalid key, namespace or branch name, an empty remote name, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
+| `ValueError` | A caller bug: an invalid key, namespace or branch name, an empty URL, a value that is not bytes or is too large, a message with NUL, a snapshot from another store object. | Fixes the code. |
 
 The kinds of `StoreError` (each a subclass), raised by the git store only:
 
@@ -139,10 +142,12 @@ The kinds of `StoreError` (each a subclass), raised by the git store only:
 |---|---|
 | `CorruptState` | The branch holds something the store would never write (guarantee 5). |
 | `CommitRefused` | The remote refused the commit, and the branch did not move (a hook, a protection rule). |
-| `NotAClone` | The path is not a usable clone, or its remote is not configured as required. |
+| `UnusableRepository` | `path` is not a clone the store made, or it was changed by hand since, or the user's git configuration changes its remote; or, when cloning, `path` already exists or the clone could not be put there. |
+| `NoSuchBranch` | The branch does not exist on the remote: when cloning, or when taking a snapshot. |
+| `PushElsewhere` | A snapshot found that this store object's last commit does not match the branch (a published commit missing from its history, or a failed compare-and-swap while the branch had not moved): pushes reach a different repository from fetches. |
 | `NoIdentity` | git has no author identity to commit with. |
 | `GitFailed` | A git command failed. |
-| `RemoteFailed` (a `GitFailed`) | Fetching, or checking whether the branch exists, failed while taking a snapshot. |
+| `RemoteFailed` (a `GitFailed`) | Cloning, fetching, or checking whether the branch exists, failed. |
 
 Every operation but `without` can raise `StoreError`: when git fails, or, for `get`,
 `keys`, `with_value` (which checks collisions against the stored state) and `commit`,
@@ -162,8 +167,7 @@ case-sensitive. A namespace argument is `""` or a valid key.
 A key cannot be both a value and a namespace: with `inbox/item-1` stored,
 `with_value("inbox", …)` is a `KeyCollision`, and so is `with_value("inbox/item-1/x",
 …)`. A namespace exists while it holds at least one value; removing its last value
-removes it. Removing every value leaves an empty store whose revision is not `None`:
-`None` only means the store has never been committed to.
+removes it. Removing every value leaves an empty store, at a new revision.
 
 **Choose namespaces deliberately.** A commit costs time in proportion to the size of
 every namespace on the path of each key it changes (why:
@@ -193,23 +197,31 @@ What applies to `GitStateStore` only.
 
 **Requirements:**
 
-- git 2.15 or later (why: [the design](design.md#6-running-git)).
-- A full, non-bare clone, given as its top-level directory. Shallow, partial and bare
-  clones are refused. The store never uses a working tree, so make the clone with
-  `git clone --no-checkout`: a checkout only takes space, and leaves files that could be
-  taken for the store's.
-- One store (one branch) per clone, and one process at a time per clone.
-- `remote` is the name of a remote configured in the clone, not a URL, with exactly
-  one URL, used for both fetching and pushing (no `pushurl`, no rewriting that makes
-  them differ).
+- git 2.14 or later (why: [the design](design.md#6-running-git)).
+- The branch exists on the remote before the first clone. To create it, push one
+  commit of the empty tree, from any repository with the remote's object format (any
+  new one, for the usual SHA-1):
+  ```
+  tree=$(git hash-object -t tree /dev/null)
+  git push <url> "$(git commit-tree -m 'Create the store' "$tree")":refs/heads/<branch>
+  ```
+- `path` is a clone that `GitStateStore.clone` made; the store refuses anything else
+  ([the design](design.md#7-cloning-and-opening)). One process at a time per clone.
+- `url` is the remote's URL, used for both fetching and pushing. The user's git
+  configuration may rewrite it (`insteadOf`, `pushInsteadOf`), or give the remote
+  named `origin` one push URL (`pushurl`), but fetches and pushes must reach the same
+  repository; a store that finds otherwise at its next snapshot raises
+  `PushElsewhere`. The configuration must not configure `origin` otherwise. A local
+  path given as `url` is absolute: git would resolve a relative one from the caller's
+  working directory.
 - `branch` is a plain branch name (`state`) that git accepts as `refs/heads/<branch>`:
   it does not start with `refs/` or `-`, and is not `@` or `HEAD`.
-- Nobody runs git against the clone by hand while writers are active.
-- Credentials are kept out of the remote's URL (use a credential helper): the operator
-  log (below) can quote the URL, and anything that can read the clone can read it.
+- Nobody runs git in the clone by hand while writers are active.
+- Credentials are kept out of the URL (use a credential helper): the operator log
+  (below) can quote the URL, and anything that can read the clone can read it.
 
 Each commit is a git commit with the caller's message and the writer's git identity as
-its author.
+its author, from the user's git configuration or environment.
 
 git's own output, which errors never carry, goes to a log in the clone's git directory,
 for an operator ([the design](design.md#8-errors-and-the-operator-log)).

@@ -1,9 +1,9 @@
 """Running git: the one place this package starts a process (state-store design §6, §8).
 
-Every command is an argument list, never a shell, run in the clone with hooks off,
-git's automatic maintenance in the foreground, prompts off, lazy fetches off, replace
-objects off, untranslated messages, and the inherited variables that would point git at
-other repository data removed. A failure becomes a `GitFailure` that carries the
+Every command is an argument list, never a shell, run in the store's clone with hooks
+off, git's automatic maintenance in the foreground, prompts off, lazy fetches off,
+replace objects off, untranslated messages, and the inherited variables that would point
+git at other repository data removed. A failure becomes a `GitFailure` that carries the
 command, git's exit code and its output; git's text itself goes only to the operator
 log, never into an exception's message, arguments or repr, and the store raises its own
 errors `from None`. git's text never decides anything.
@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-SNAPSHOT_REMOTE_COMMANDS = frozenset({"fetch", "ls-remote"})
-"""What a snapshot runs against the remote: their failures there are `RemoteFailed`."""
+REMOTE_COMMANDS = frozenset({"clone", "fetch", "ls-remote"})
+"""What cloning and taking a snapshot run against the remote: their failures there are
+`RemoteFailed` (state-store design §3, §7, §8)."""
 
 DROPPED_VARIABLES = frozenset(
     {
@@ -44,7 +45,7 @@ them and win."""
 
 FIXED_VARIABLES = {
     "GIT_TERMINAL_PROMPT": "0",
-    "GIT_NO_LAZY_FETCH": "1",  # git 2.44+; ignoring it is harmless: partial clones are refused
+    "GIT_NO_LAZY_FETCH": "1",  # git 2.44+; ignoring it is harmless: the clone is never partial
     "GIT_NO_REPLACE_OBJECTS": "1",
     "LC_ALL": "C",  # the operator log in one language
 }
@@ -82,13 +83,15 @@ def append_log(log: Path, header: str, text: str) -> bool:
 
 
 class Runner:
-    """Runs git in one clone."""
+    """Runs git in one directory: a clone, or the temporary directory a clone is made in."""
 
-    def __init__(self, repo: Path) -> None:
+    def __init__(self, path: Path, *, log: bool = True) -> None:
+        """Run in `path`, with `GIT_CEILING_DIRECTORIES` set to its parent, so git never
+        searches above it; `log=False` while cloning, which logs nothing."""
         raise NotImplementedError
 
     def __call__(self, *args: str, stdin: bytes | None = None) -> bytes:
-        """The stdout of `git -C <repo> <settings> <args>`, where the settings turn hooks
+        """The stdout of `git -C <path> <settings> <args>`, where the settings turn hooks
         off and keep automatic maintenance in the foreground (`core.hooksPath=/dev/null`,
         `maintenance.autoDetach=false`, `gc.autoDetach=false`); `GitFailure` on a non-zero
         exit, after logging git's text for an operator."""

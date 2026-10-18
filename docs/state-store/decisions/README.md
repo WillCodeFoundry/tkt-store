@@ -11,4 +11,4 @@ How to write one: [`CONTRIBUTING.md`](../../CONTRIBUTING.md#decision-records).
 | [0003: Trust only the caller's machine and the remote's handling of pushes](0003-trust-only-the-callers-machine-and-the-remotes-handling-of-pushes.md) | accepted |
 | [0004: Use immutable snapshots and compare-and-swap commits](0004-use-immutable-snapshots-and-compare-and-swap-commits.md) | accepted |
 | [0005: Fail operations that read corrupt state](0005-fail-operations-that-read-corrupt-state.md) | accepted |
-| [0006: Let the store own its repository](0006-let-the-store-own-its-repository.md) | proposed |
+| [0006: Let the store make its own clone](0006-let-the-store-make-its-own-clone.md) | accepted |

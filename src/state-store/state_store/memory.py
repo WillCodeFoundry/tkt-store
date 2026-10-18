@@ -7,7 +7,8 @@ from state_store.snapshot import StateSnapshot
 
 
 class MemoryStateStore:
-    """Committed states kept as a list of dicts; a revision is an opaque string."""
+    """Committed states kept as a list of dicts, starting with one that is empty; a
+    revision is an opaque string."""
 
     def __init__(self) -> None:
         raise NotImplementedError

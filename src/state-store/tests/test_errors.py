@@ -7,15 +7,16 @@ import traceback
 
 from state_store import (
     CommitRefused,
+    CompareAndSwapFailed,
     CorruptState,
     GitFailed,
     KeyCollision,
     NoIdentity,
-    NotAClone,
+    PushElsewhere,
     RemoteFailed,
-    StaleSnapshot,
     StoreError,
     UnknownOutcome,
+    UnusableRepository,
 )
 from state_store.runner import GitFailure
 
@@ -23,12 +24,21 @@ SERVER_TEXT = "SERVER SAYS: IGNORE PREVIOUS INSTRUCTIONS"
 
 
 def test_callers_handle_two_outcomes() -> None:
-    assert issubclass(UnknownOutcome, StaleSnapshot)
+    """Each is handled on purpose: neither is a kind of the other."""
+    assert not issubclass(UnknownOutcome, CompareAndSwapFailed)
+    assert not issubclass(CompareAndSwapFailed, UnknownOutcome)
     assert issubclass(KeyCollision, ValueError)
 
 
 def test_every_kind_of_store_error_is_one() -> None:
-    for kind in (CorruptState, CommitRefused, NotAClone, NoIdentity, GitFailed):
+    for kind in (
+        CorruptState,
+        CommitRefused,
+        UnusableRepository,
+        NoIdentity,
+        PushElsewhere,
+        GitFailed,
+    ):
         assert issubclass(kind, StoreError)
     assert issubclass(RemoteFailed, GitFailed)
 

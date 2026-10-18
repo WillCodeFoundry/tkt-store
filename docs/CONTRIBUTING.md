@@ -1,10 +1,20 @@
 # Contributing
 
-The rules for working on tkt-store: tooling, checks, tests and commits. To set up a
-clone, follow *Getting started* in the [README](../README.md). What the code must do is
-in [`design.md`](design.md), the authority on concepts, boundaries and invariants: if
-code and design disagree, one of them is wrong, so fix it or amend the design in the
-same change, never silently.
+The rules for working on tkt-store: where each kind of change is specified, tooling,
+checks, tests and commits. To set up a clone, follow *Getting started as a developer*
+in the [README](../README.md).
+
+## Where changes are specified
+
+Read the document for your change before making it. If code and its document disagree,
+one of them is wrong: fix it, or amend the document in the same change, never silently.
+
+| Change | Specified in |
+|---|---|
+| Behaviour, concepts, module boundaries, invariants | [`design.md`](design.md), the authority |
+| The on-branch format | [`format.md`](format.md), with its rule for *Changing the format* |
+| The CLI | [`cli.md`](cli.md) |
+| Why something is the way it is | [`decisions/`](decisions/) |
 
 ## Setup details
 

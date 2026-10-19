@@ -1,5 +1,5 @@
 """Snapshots, and what a store gives them to read from (state-store README, *Interface*;
-state-store design §1, §4).
+state-store design, *Reading*).
 
 `StateSnapshot` is one class for every store. A store supplies a `Base`, a read-only
 view of one committed state in its own terms; `CachedBase` remembers what was read from
@@ -47,12 +47,12 @@ class Base(Protocol):
         ...
 
     @property
-    def revision(self) -> str | None:
-        """The committed state's id; None before the first commit."""
+    def revision(self) -> str:
+        """The committed state's id."""
         ...
 
-    def root(self) -> str | None:
-        """The root namespace's ref, or None for a store never committed to."""
+    def root(self) -> str:
+        """The root namespace's ref."""
         ...
 
     def listing(self, ref: str) -> tuple[Entry, ...]:
@@ -77,10 +77,10 @@ class CachedBase:
         raise NotImplementedError
 
     @property
-    def revision(self) -> str | None:
+    def revision(self) -> str:
         raise NotImplementedError
 
-    def root(self) -> str | None:
+    def root(self) -> str:
         raise NotImplementedError
 
     def listing(self, ref: str) -> tuple[Entry, ...]:
@@ -105,7 +105,7 @@ class StateStore(Protocol):
         object or a message holding NUL, even when nothing changes. Then a snapshot
         that changes nothing is returned as the snapshot it derives from, without
         contacting the remote (it can still raise `StoreError`). Otherwise
-        `StaleSnapshot` (or `UnknownOutcome`) or `StoreError`."""
+        `CompareAndSwapFailed`, `UnknownOutcome` or `StoreError`."""
         ...
 
 
@@ -122,8 +122,8 @@ class StateSnapshot:
         raise NotImplementedError
 
     @property
-    def revision(self) -> str | None:
-        """The revision this snapshot was taken at; None before the store's first commit."""
+    def revision(self) -> str:
+        """The revision this snapshot was taken at."""
         raise NotImplementedError
 
     @property
@@ -141,7 +141,7 @@ class StateSnapshot:
         raise NotImplementedError
 
     def with_value(self, key: str, value: bytes) -> StateSnapshot:
-        """A new snapshot where `key` holds `value`; `KeyCollision` if `key`, or a
+        """A new snapshot where `key` holds `value`; `ValueError` if `key`, or a
         prefix of it, is the other kind of thing."""
         raise NotImplementedError
 

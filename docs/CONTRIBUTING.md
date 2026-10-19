@@ -138,9 +138,10 @@ For state-store (`src/state-store`):
 - Its tests import shared helpers from `tests/state_store_testkit.py` only.
 - Only `state_store/runner.py` starts processes (git); the package uses the standard
   library only.
-- While it is a skeleton, every test of unimplemented behaviour is a strict expected
-  failure (`xfail(raises=NotImplementedError, strict=True)`); implementing a part
-  removes the marker from its tests.
+- Tests come with the code they cover, in the same change. The contract tests, written
+  ahead of the implementation, are strict expected failures
+  (`xfail(raises=NotImplementedError, strict=True)`) until the part they test exists;
+  implementing it removes the marker.
 
 ## Commits
 

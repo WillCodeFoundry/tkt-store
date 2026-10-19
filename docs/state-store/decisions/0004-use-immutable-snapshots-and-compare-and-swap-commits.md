@@ -37,4 +37,4 @@ The interface ([README](../README.md#interface)) is built on these choices:
 ## Consequences
 
 - Every caller writes the same small loop: take a snapshot, decide, commit, and start
-  again on `StaleSnapshot`.
+  again on `CompareAndSwapFailed` or `UnknownOutcome`.

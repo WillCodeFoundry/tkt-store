@@ -13,8 +13,7 @@ A ticket store for coordinating AI agents, kept on a git branch.
 
 ## Prerequisites
 
-- [git](https://git-scm.com/) 2.32 or later, for the tests (state-store's own minimum is
-  in [its requirements](docs/state-store/README.md#git-store)).
+- [git](https://git-scm.com/) 2.32 or later, for the tests.
 - [uv](https://docs.astral.sh/uv/), which manages the environment, the dependencies, the
   tools and the Python version ([how](docs/CONTRIBUTING.md#tooling)).
 
